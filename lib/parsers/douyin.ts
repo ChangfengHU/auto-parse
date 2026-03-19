@@ -67,3 +67,47 @@ export async function parseDouyin(input: string): Promise<ParseResult> {
 
   return { platform: 'douyin', videoId: videoId || Date.now().toString(), videoUrl: cdnUrl, title, watermark: true };
 }
+
+// 快速模式：不用 Playwright，直接走 playwm（带水印，约 3s）
+export async function parseDouyinFast(input: string): Promise<ParseResult> {
+  const urlMatch = input.match(/https?:\/\/v\.douyin\.com\/[A-Za-z0-9_\-]+\/?/);
+  if (!urlMatch) throw new Error('未找到有效的抖音分享链接');
+  const shortUrl = urlMatch[0];
+
+  const step1 = await axios.get(shortUrl, {
+    maxRedirects: 0,
+    validateStatus: (s) => s >= 200 && s < 400,
+    headers: { 'User-Agent': UA_MOBILE },
+    timeout: 10000,
+  });
+  const iesdouyinUrl: string = step1.headers['location'];
+  if (!iesdouyinUrl) throw new Error('短链解析失败');
+
+  const videoIdMatch = iesdouyinUrl.match(/\/video\/(\d+)/);
+  const videoId = videoIdMatch?.[1] ?? Date.now().toString();
+
+  const step2 = await axios.get(iesdouyinUrl, {
+    headers: { 'User-Agent': UA_MOBILE, Referer: 'https://www.douyin.com/' },
+    timeout: 15000,
+  });
+  const html: string = step2.data;
+
+  const vidMatch = html.match(/video_id=(v[a-z0-9]+)/);
+  if (!vidMatch) throw new Error('页面中未找到视频地址');
+  const internalVideoId = vidMatch[1];
+
+  const playwmUrl = `https://aweme.snssdk.com/aweme/v1/playwm/?video_id=${internalVideoId}&ratio=720p&line=0`;
+  const step3 = await axios.get(playwmUrl, {
+    maxRedirects: 0,
+    validateStatus: (s) => s >= 200 && s < 400,
+    headers: { 'User-Agent': UA_MOBILE, Referer: 'https://www.douyin.com/' },
+    timeout: 10000,
+  });
+  const cdnUrl: string = step3.headers['location'];
+  if (!cdnUrl) throw new Error('无法获取视频 CDN 地址');
+
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/);
+  const title = titleMatch?.[1]?.replace(/ - 抖音$/, '').trim();
+
+  return { platform: 'douyin', videoId, videoUrl: cdnUrl, title, watermark: true };
+}
