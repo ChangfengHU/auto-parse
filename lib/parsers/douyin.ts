@@ -1,10 +1,8 @@
 import axios from 'axios';
+import { parseDouyinWithPlaywright } from './douyin-playwright';
 
 const UA_MOBILE =
   'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
-
-const UA_PC =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 export interface ParseResult {
   platform: 'douyin';
@@ -33,39 +31,13 @@ export async function parseDouyin(input: string): Promise<ParseResult> {
   const videoIdMatch = iesdouyinUrl.match(/\/video\/(\d+)/);
   const videoId = videoIdMatch?.[1] ?? '';
 
-  // 尝试用 Cookie 调用 Web API 获取无水印地址
-  const cookie = process.env.DOUYIN_COOKIE;
-  if (cookie && videoId) {
+  // 优先：用 Playwright 打开页面，注入 Cookie，拦截真实视频地址（无水印）
+  if (videoId && process.env.DOUYIN_COOKIE) {
     try {
-      const apiUrl = `https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=${videoId}&aid=6383&cookie_enabled=true&platform=PC&downlink=10`;
-      const apiResp = await axios.get(apiUrl, {
-        headers: {
-          'User-Agent': UA_PC,
-          Referer: 'https://www.douyin.com/',
-          Cookie: cookie,
-        },
-        timeout: 15000,
-      });
-
-      const detail = apiResp.data?.aweme_detail;
-      if (detail) {
-        const title: string = detail.desc ?? '';
-        // download_addr 为无水印，play_addr 为有水印，优先取无水印
-        const downloadUrls: string[] = detail.video?.download_addr?.url_list ?? [];
-        const playUrls: string[] = detail.video?.play_addr?.url_list ?? [];
-        const videoUrl = downloadUrls[0] || playUrls[0];
-        if (videoUrl) {
-          return {
-            platform: 'douyin',
-            videoId,
-            videoUrl,
-            title,
-            watermark: !downloadUrls[0],
-          };
-        }
-      }
-    } catch {
-      // API 失败，降级走 playwm
+      const { videoUrl, title, watermark } = await parseDouyinWithPlaywright(videoId);
+      return { platform: 'douyin', videoId, videoUrl, title, watermark };
+    } catch (e) {
+      console.warn('[douyin] Playwright 失败，降级走 playwm:', e instanceof Error ? e.message : e);
     }
   }
 
