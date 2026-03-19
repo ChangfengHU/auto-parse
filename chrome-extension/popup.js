@@ -61,7 +61,7 @@ async function checkLoginStatus() {
 // 检查服务器状态
 async function checkServerStatus() {
   try {
-    const res = await fetch(`${SERVER}/api/cookie/status`, { method: 'GET' });
+    const res = await fetch(`${SERVER}/api/cookie`, { method: 'GET' });
     const data = await res.json();
     const el = document.getElementById('serverStatus');
     if (data.valid) {
