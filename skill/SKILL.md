@@ -1,5 +1,5 @@
 ---
-name: vyibc-视频解析
+name: vyibc-auto-parse
 description: 解析抖音、小红书视频链接，自动去水印并上传到 OSS，返回永久可访问地址。当用户粘贴抖音或小红书分享链接、要求下载视频、去水印、存到OSS时触发。
 ---
 
