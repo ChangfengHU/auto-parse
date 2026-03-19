@@ -1,6 +1,19 @@
 import { chromium } from 'playwright';
+import fs from 'fs';
+import path from 'path';
 
-const DOUYIN_COOKIE = process.env.DOUYIN_COOKIE || '';
+const COOKIE_FILE = path.join(process.cwd(), '.douyin-cookie.json');
+
+// 动态读取 Cookie：优先用插件写入的文件，降级用 env（热重载，无需重启）
+function getDouyinCookie(): string {
+  try {
+    if (fs.existsSync(COOKIE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf-8'));
+      if (data.cookie) return data.cookie;
+    }
+  } catch { /* ignore */ }
+  return process.env.DOUYIN_COOKIE || '';
+}
 
 function parseCookies(cookieStr: string) {
   return cookieStr.split(';').map(c => {
@@ -27,8 +40,9 @@ export async function parseDouyinWithPlaywright(videoId: string): Promise<{
       locale: 'zh-CN',
     });
 
-    if (DOUYIN_COOKIE) {
-      await context.addCookies(parseCookies(DOUYIN_COOKIE));
+    const cookie = getDouyinCookie();
+    if (cookie) {
+      await context.addCookies(parseCookies(cookie));
     }
 
     const page = await context.newPage();
