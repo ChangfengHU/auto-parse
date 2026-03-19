@@ -7,58 +7,85 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      width: 300px;
+      width: 340px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       background: #0f0f0f;
       color: #e5e5e5;
     }
+
     .header {
-      padding: 16px;
+      padding: 14px 16px;
       border-bottom: 1px solid #1f1f1f;
       display: flex;
       align-items: center;
       gap: 10px;
     }
     .logo {
-      width: 32px; height: 32px;
+      width: 30px; height: 30px;
       background: linear-gradient(135deg, #ec4899, #8b5cf6);
       border-radius: 8px;
       display: flex; align-items: center; justify-content: center;
-      font-size: 16px;
+      font-size: 14px; flex-shrink: 0;
     }
-    .title { font-size: 15px; font-weight: 600; }
-    .subtitle { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .title { font-size: 14px; font-weight: 600; }
+    .subtitle { font-size: 11px; color: #6b7280; margin-top: 1px; }
 
-    .body { padding: 16px; }
+    .body { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 
-    .status-card {
+    /* ── Cookie 文本框区域 ── */
+    .cookie-section {
       background: #1a1a1a;
       border: 1px solid #2a2a2a;
       border-radius: 10px;
       padding: 12px;
-      margin-bottom: 14px;
     }
-    .status-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+    .section-label {
+      font-size: 11px;
+      color: #6b7280;
+      margin-bottom: 8px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+    textarea {
+      width: 100%;
+      background: #111;
+      border: 1px solid #2a2a2a;
+      border-radius: 7px;
+      color: #d1d5db;
+      font-size: 11px;
+      font-family: 'SF Mono', Menlo, monospace;
+      line-height: 1.5;
+      padding: 8px 10px;
+      resize: none;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    textarea:focus { border-color: #8b5cf6; }
+    textarea::placeholder { color: #4b5563; }
+
+    .read-btn {
+      margin-top: 8px;
+      width: 100%;
+      padding: 7px;
+      background: #1f1f2e;
+      border: 1px solid #3730a3;
+      border-radius: 6px;
+      color: #a5b4fc;
       font-size: 12px;
-      margin-bottom: 6px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex; align-items: center; justify-content: center; gap: 5px;
     }
-    .status-row:last-child { margin-bottom: 0; }
-    .status-label { color: #6b7280; }
-    .status-value { color: #e5e5e5; font-weight: 500; }
-    .badge {
-      display: inline-flex; align-items: center; gap: 4px;
-      padding: 2px 8px; border-radius: 99px; font-size: 11px;
+    .read-btn:hover { background: #2e2b4a; border-color: #6366f1; }
+    .read-btn:active { transform: scale(0.98); }
+
+    /* ── 操作按钮区域 ── */
+    .action-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
     }
-    .badge-green { background: #052e16; color: #4ade80; border: 1px solid #166534; }
-    .badge-red { background: #2d0a0a; color: #f87171; border: 1px solid #7f1d1d; }
-    .badge-gray { background: #1f1f1f; color: #9ca3af; border: 1px solid #374151; }
-    .dot { width: 6px; height: 6px; border-radius: 50%; }
-    .dot-green { background: #4ade80; }
-    .dot-red { background: #f87171; }
-    .dot-gray { background: #9ca3af; }
 
     .btn {
       width: 100%;
@@ -68,6 +95,14 @@
       cursor: pointer; transition: all 0.2s;
       display: flex; align-items: center; justify-content: center; gap: 6px;
     }
+    .btn-douyin {
+      background: #111827;
+      border: 1px solid #374151;
+      color: #e5e7eb;
+    }
+    .btn-douyin:hover { background: #1f2937; border-color: #4b5563; }
+    .btn-douyin:disabled { opacity: 0.4; cursor: not-allowed; }
+
     .btn-primary {
       background: linear-gradient(135deg, #ec4899, #8b5cf6);
       color: #fff;
@@ -75,20 +110,44 @@
     .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-    .tip {
-      margin-top: 10px;
-      font-size: 11px; color: #4b5563;
-      text-align: center; line-height: 1.6;
+    /* ── 状态卡片 ── */
+    .status-card {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 10px 12px;
     }
-    .tip a { color: #8b5cf6; text-decoration: none; }
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      padding: 3px 0;
+    }
+    .status-row + .status-row { border-top: 1px solid #222; }
+    .status-label { color: #6b7280; }
+    .status-value { color: #e5e5e5; font-weight: 500; }
 
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 7px; border-radius: 99px; font-size: 10px;
+    }
+    .badge-green { background: #052e16; color: #4ade80; border: 1px solid #166534; }
+    .badge-red   { background: #2d0a0a; color: #f87171; border: 1px solid #7f1d1d; }
+    .badge-gray  { background: #1f1f1f; color: #9ca3af; border: 1px solid #374151; }
+    .dot { width: 5px; height: 5px; border-radius: 50%; }
+    .dot-green { background: #4ade80; }
+    .dot-red   { background: #f87171; }
+    .dot-gray  { background: #9ca3af; }
+
+    /* ── Toast ── */
     .toast {
-      position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+      position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
       background: #1f2937; border: 1px solid #374151;
       color: #e5e5e5; font-size: 12px;
       padding: 6px 14px; border-radius: 99px;
-      opacity: 0; transition: opacity 0.3s;
-      white-space: nowrap;
+      opacity: 0; transition: opacity 0.25s;
+      white-space: nowrap; z-index: 999;
     }
     .toast.show { opacity: 1; }
   </style>
@@ -98,11 +157,39 @@
     <div class="logo">▶</div>
     <div>
       <div class="title">vyibc-auto-parse</div>
-      <div class="subtitle">抖音 Cookie 同步工具</div>
+      <div class="subtitle">抖音 Cookie 管理</div>
     </div>
   </div>
 
   <div class="body">
+
+    <!-- Cookie 信息文本框 -->
+    <div class="cookie-section">
+      <div class="section-label">抖音登录信息（Cookie）</div>
+      <textarea
+        id="cookieBox"
+        rows="4"
+        placeholder="点击下方按钮自动读取，或手动粘贴 Cookie 字符串..."
+      ></textarea>
+      <button class="read-btn" id="readBtn">
+        <span id="readIcon">📋</span>
+        <span id="readText">一键读取抖音登录信息</span>
+      </button>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div class="action-section">
+      <button class="btn btn-douyin" id="loginBtn">
+        <span>🔑</span>
+        <span id="loginText">同步登录抖音</span>
+      </button>
+      <button class="btn btn-primary" id="syncBtn">
+        <span id="syncIcon">⇅</span>
+        <span id="syncText">同步到解析平台</span>
+      </button>
+    </div>
+
+    <!-- 状态 -->
     <div class="status-card">
       <div class="status-row">
         <span class="status-label">抖音登录状态</span>
@@ -122,16 +209,6 @@
       </div>
     </div>
 
-    <button class="btn btn-primary" id="syncBtn">
-      <span id="btnIcon">⇅</span>
-      <span id="btnText">同步 Cookie 到服务器</span>
-    </button>
-
-    <div class="tip">
-      请先在浏览器登录
-      <a href="https://www.douyin.com" target="_blank">抖音网页版</a>
-      再点击同步
-    </div>
   </div>
 
   <div class="toast" id="toast"></div>
