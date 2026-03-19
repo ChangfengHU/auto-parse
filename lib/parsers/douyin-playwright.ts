@@ -33,44 +33,43 @@ export async function parseDouyinWithPlaywright(videoId: string): Promise<{
 
     const page = await context.newPage();
 
-    // 用 Promise 提前返回，一旦拿到 detail API 结果立刻 resolve
     const result = await new Promise<{ videoUrl: string; title: string; watermark: boolean }>(
       async (resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('Playwright 超时（30s）')), 30000);
 
         page.on('response', async resp => {
-          const url = resp.url();
-          if (!url.includes('/aweme/v1/web/aweme/detail/')) return;
+          if (!resp.url().includes('/aweme/v1/web/aweme/detail/')) return;
           try {
             const json = await resp.json();
             const detail = json?.aweme_detail;
             if (!detail?.video) return;
 
             const title: string = detail.desc ?? '';
-            // download_addr = 无水印，play_addr = 有水印
+
+            // play_addr = 播放流，无嵌入水印（download_addr 才有水印）
+            // 优先 play_addr_h264 > play_addr > download_addr
+            const h264Urls: string[] = detail.video?.play_addr_h264?.url_list ?? [];
+            const playUrls: string[] = detail.video?.play_addr?.url_list ?? [];
             const dlUrls: string[] = detail.video?.download_addr?.url_list ?? [];
-            const plUrls: string[] = detail.video?.play_addr?.url_list ?? [];
-            const videoUrl = dlUrls[0] || plUrls[0];
+
+            const videoUrl = h264Urls[0] || playUrls[0] || dlUrls[0];
 
             if (videoUrl) {
               clearTimeout(timer);
-              resolve({ videoUrl, title, watermark: !dlUrls[0] });
+              // play_addr / play_addr_h264 均无水印；download_addr 有水印
+              const watermark = !h264Urls[0] && !playUrls[0];
+              resolve({ videoUrl, title, watermark });
             }
-          } catch { /* ignore parse errors */ }
+          } catch { /* ignore */ }
         });
 
-        // 用 load（不用 networkidle，抖音页面永远不会 idle）
         try {
           await page.goto(`https://www.douyin.com/video/${videoId}`, {
             waitUntil: 'load',
             timeout: 25000,
           });
-        } catch (e) {
-          // load 超时也没关系，response 事件可能已经触发了
-          console.warn('[playwright] goto timeout, checking if we already got the result...');
-        }
+        } catch { /* load timeout ok */ }
 
-        // 额外等 5s，给 API 响应一点时间
         await page.waitForTimeout(5000).catch(() => {});
         reject(new Error('Playwright 未捕获到视频地址'));
       }
