@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface Result {
   platform: string;
@@ -12,6 +12,64 @@ interface Result {
 }
 
 const STEPS = ['解析短链', '提取视频地址', '下载视频', '上传 OSS'];
+
+interface CookieStatus {
+  valid: boolean;
+  updatedAt: number | null;
+}
+
+function formatTime(ts: number | null) {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function CookieStatusBar() {
+  const [status, setStatus] = useState<CookieStatus | null>(null);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/cookie')
+      .then(r => r.json())
+      .then((d: CookieStatus) => setStatus(d))
+      .catch(() => setStatus(null))
+      .finally(() => setChecking(false));
+  }, []);
+
+  if (checking) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-gray-600">
+        <span className="w-1.5 h-1.5 rounded-full bg-gray-600 animate-pulse" />
+        检测 Cookie 状态…
+      </div>
+    );
+  }
+
+  if (!status) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-gray-600">
+        <span className="w-1.5 h-1.5 rounded-full bg-gray-600" />
+        无法连接服务
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${
+        status.valid
+          ? 'bg-green-950 border-green-800 text-green-400'
+          : 'bg-red-950 border-red-900 text-red-400'
+      }`}>
+        <span className={`w-1.5 h-1.5 rounded-full ${status.valid ? 'bg-green-400' : 'bg-red-400'}`} />
+        {status.valid ? '抖音 Cookie 有效' : 'Cookie 已过期'}
+      </span>
+      {status.updatedAt && (
+        <span className="text-gray-600">上次同步 {formatTime(status.updatedAt)}</span>
+      )}
+    </div>
+  );
+}
 
 export default function Home() {
   const [input, setInput] = useState('');
@@ -70,6 +128,9 @@ export default function Home() {
         <div className="mb-10 text-center">
           <h1 className="text-3xl font-bold tracking-tight">视频解析工具</h1>
           <p className="mt-2 text-gray-400 text-sm">粘贴分享文本，自动提取视频地址并上传至 OSS</p>
+          <div className="mt-4 flex justify-center">
+            <CookieStatusBar />
+          </div>
         </div>
 
         {/* Platform Tabs */}
