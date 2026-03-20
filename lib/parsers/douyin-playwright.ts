@@ -49,7 +49,7 @@ export async function parseDouyinWithPlaywright(videoId: string): Promise<{
 
     const result = await new Promise<{ videoUrl: string; title: string; watermark: boolean }>(
       async (resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Playwright 超时（30s）')), 30000);
+        const timer = setTimeout(() => reject(new Error('Playwright 超时（60s）')), 60000);
 
         page.on('response', async resp => {
           if (!resp.url().includes('/aweme/v1/web/aweme/detail/')) return;
@@ -80,7 +80,7 @@ export async function parseDouyinWithPlaywright(videoId: string): Promise<{
         try {
           await page.goto(`https://www.douyin.com/video/${videoId}`, {
             waitUntil: 'load',
-            timeout: 25000,
+            timeout: 50000,
           });
         } catch { /* load timeout ok */ }
 

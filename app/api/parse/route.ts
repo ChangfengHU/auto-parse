@@ -3,7 +3,7 @@ import { parseDouyin, parseDouyinFast } from '@/lib/parsers/douyin';
 import { parseXiaohongshu } from '@/lib/parsers/xiaohongshu';
 import { uploadVideoFromUrl, uploadVideoFromFile } from '@/lib/oss';
 
-export const maxDuration = 300;
+export const maxDuration = 600;
 
 export async function POST(req: NextRequest) {
   try {

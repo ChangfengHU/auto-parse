@@ -1,0 +1,45 @@
+import { NextRequest } from 'next/server';
+import { publishToDouyin } from '@/lib/publishers/douyin-publish';
+
+// POST /api/publish — SSE 流式推送进度
+// Body: { videoUrl: string, title: string, tags?: string[] }
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const { videoUrl, title, tags } = body as { videoUrl?: string; title?: string; tags?: string[] };
+
+  if (!videoUrl || !title) {
+    return new Response(
+      JSON.stringify({ success: false, error: '缺少 videoUrl 或 title 参数' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } }
+    );
+  }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (type: 'log' | 'qrcode' | 'done' | 'error', payload: string) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type, payload })}\n\n`));
+      };
+
+      try {
+        const result = await publishToDouyin(
+          { videoUrl, title, tags },
+          (type, payload) => send(type, payload),
+        );
+        send(result.success ? 'done' : 'error', result.message);
+      } catch (e: unknown) {
+        send('error', e instanceof Error ? e.message : String(e));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}
