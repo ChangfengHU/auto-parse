@@ -1,16 +1,20 @@
 {
   "manifest_version": 3,
   "name": "vyibc-auto-parse",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "一键同步抖音登录状态到 parse.vyibc.com，保持无水印解析能力",
   "permissions": [
     "cookies",
-    "storage"
+    "storage",
+    "alarms"
   ],
   "host_permissions": [
     "https://*.douyin.com/*",
     "https://parse.vyibc.com/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {

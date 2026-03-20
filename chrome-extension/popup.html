@@ -40,11 +40,8 @@
       padding: 12px;
     }
     .section-label {
-      font-size: 11px;
-      color: #6b7280;
-      margin-bottom: 8px;
-      font-weight: 500;
-      letter-spacing: 0.02em;
+      font-size: 11px; color: #6b7280;
+      margin-bottom: 8px; font-weight: 500;
     }
     textarea {
       width: 100%;
@@ -63,33 +60,43 @@
     textarea:focus { border-color: #8b5cf6; }
     textarea::placeholder { color: #4b5563; }
 
-    .read-btn {
+    /* 读取 + 复制 两个按钮一行 */
+    .cookie-btns {
       margin-top: 8px;
-      width: 100%;
+      display: flex;
+      gap: 6px;
+    }
+    .read-btn {
+      flex: 1;
       padding: 7px;
       background: #1f1f2e;
       border: 1px solid #3730a3;
       border-radius: 6px;
       color: #a5b4fc;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
+      font-size: 12px; font-weight: 500;
+      cursor: pointer; transition: all 0.2s;
       display: flex; align-items: center; justify-content: center; gap: 5px;
     }
     .read-btn:hover { background: #2e2b4a; border-color: #6366f1; }
-    .read-btn:active { transform: scale(0.98); }
+    .read-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .copy-btn {
+      padding: 7px 12px;
+      background: #1a1f1a;
+      border: 1px solid #2d4a2d;
+      border-radius: 6px;
+      color: #86efac;
+      font-size: 12px; font-weight: 500;
+      cursor: pointer; transition: all 0.2s;
+      white-space: nowrap;
+    }
+    .copy-btn:hover { background: #1f2e1f; border-color: #4ade80; }
 
     /* ── 操作按钮区域 ── */
-    .action-section {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
+    .action-section { display: flex; flex-direction: column; gap: 8px; }
 
     .btn {
-      width: 100%;
-      padding: 10px;
+      width: 100%; padding: 10px;
       border: none; border-radius: 8px;
       font-size: 13px; font-weight: 600;
       cursor: pointer; transition: all 0.2s;
@@ -110,6 +117,40 @@
     .btn-primary:hover { opacity: 0.9; transform: translateY(-1px); }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
+    /* ── 保活开关行 ── */
+    .keepalive-row {
+      background: #1a1a1a;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .keepalive-left { display: flex; flex-direction: column; gap: 2px; }
+    .keepalive-label { font-size: 12px; font-weight: 500; color: #d1d5db; }
+    .keepalive-desc { font-size: 10px; color: #6b7280; }
+
+    /* Toggle switch */
+    .toggle { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #374151; border-radius: 20px;
+      transition: 0.2s;
+    }
+    .slider:before {
+      content: '';
+      position: absolute;
+      width: 14px; height: 14px;
+      left: 3px; bottom: 3px;
+      background: white; border-radius: 50%;
+      transition: 0.2s;
+    }
+    .toggle input:checked + .slider { background: #8b5cf6; }
+    .toggle input:checked + .slider:before { transform: translateX(16px); }
+
     /* ── 状态卡片 ── */
     .status-card {
       background: #1a1a1a;
@@ -122,23 +163,27 @@
       justify-content: space-between;
       align-items: center;
       font-size: 11px;
-      padding: 3px 0;
+      padding: 4px 0;
     }
     .status-row + .status-row { border-top: 1px solid #222; }
     .status-label { color: #6b7280; }
     .status-value { color: #e5e5e5; font-weight: 500; }
+    .text-green { color: #4ade80 !important; }
+    .text-gray  { color: #6b7280 !important; }
 
     .badge {
       display: inline-flex; align-items: center; gap: 4px;
       padding: 2px 7px; border-radius: 99px; font-size: 10px;
     }
-    .badge-green { background: #052e16; color: #4ade80; border: 1px solid #166534; }
-    .badge-red   { background: #2d0a0a; color: #f87171; border: 1px solid #7f1d1d; }
-    .badge-gray  { background: #1f1f1f; color: #9ca3af; border: 1px solid #374151; }
+    .badge-green  { background: #052e16;  color: #4ade80; border: 1px solid #166534; }
+    .badge-yellow { background: #2d2000;  color: #fbbf24; border: 1px solid #7c5f00; }
+    .badge-red    { background: #2d0a0a;  color: #f87171; border: 1px solid #7f1d1d; }
+    .badge-gray   { background: #1f1f1f;  color: #9ca3af; border: 1px solid #374151; }
     .dot { width: 5px; height: 5px; border-radius: 50%; }
-    .dot-green { background: #4ade80; }
-    .dot-red   { background: #f87171; }
-    .dot-gray  { background: #9ca3af; }
+    .dot-green  { background: #4ade80; }
+    .dot-yellow { background: #fbbf24; }
+    .dot-red    { background: #f87171; }
+    .dot-gray   { background: #9ca3af; }
 
     /* ── Toast ── */
     .toast {
@@ -169,12 +214,15 @@
       <textarea
         id="cookieBox"
         rows="4"
-        placeholder="点击下方按钮自动读取，或手动粘贴 Cookie 字符串..."
+        placeholder="点击「一键读取」自动填入，或手动粘贴 Cookie 字符串..."
       ></textarea>
-      <button class="read-btn" id="readBtn">
-        <span id="readIcon">📋</span>
-        <span id="readText">一键读取抖音登录信息</span>
-      </button>
+      <div class="cookie-btns">
+        <button class="read-btn" id="readBtn">
+          <span id="readIcon">📋</span>
+          <span id="readText">一键读取抖音登录信息</span>
+        </button>
+        <button class="copy-btn" id="copyBtn">复制</button>
+      </div>
     </div>
 
     <!-- 操作按钮 -->
@@ -187,6 +235,18 @@
         <span id="syncIcon">⇅</span>
         <span id="syncText">同步到解析平台</span>
       </button>
+    </div>
+
+    <!-- 保活开关 -->
+    <div class="keepalive-row">
+      <div class="keepalive-left">
+        <div class="keepalive-label">自动保活</div>
+        <div class="keepalive-desc">每分钟 ping 抖音接口，防止 Session 过期 &nbsp;·&nbsp; <span id="keepAliveStatus" class="text-gray">已关闭</span></div>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="keepAliveToggle">
+        <span class="slider"></span>
+      </label>
     </div>
 
     <!-- 状态 -->
