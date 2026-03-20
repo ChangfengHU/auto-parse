@@ -94,6 +94,7 @@ Content-Type: application/json
 {
   "videoUrl": "https://articel.oss-cn-hangzhou.aliyuncs.com/douyin/xxx.mp4",
   "title": "视频标题（最多30字）",
+  "description": "正文内容，可以很长，支持换行和表情符号",
   "tags": ["话题1", "话题2"]
 }
 ```
@@ -102,7 +103,8 @@ Content-Type: application/json
 |------|------|------|------|
 | `videoUrl` | string | ✅ | OSS 视频地址或任意公开 MP4 直链 |
 | `title` | string | ✅ | 发布标题，超过30字自动截断 |
-| `tags` | string[] | ❌ | 话题标签（不含#），最多3个 |
+| `description` | string | ❌ | 正文内容，填入描述编辑器，支持换行和表情 |
+| `tags` | string[] | ❌ | 话题标签（不含#），最多3个，追加在正文末尾 |
 
 ### 响应（SSE 事件流）
 

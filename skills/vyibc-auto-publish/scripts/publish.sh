@@ -1,14 +1,16 @@
 #!/bin/bash
 # 一键发布视频到抖音脚本
-# 用法：bash publish.sh "<ossUrl>" "<title>" ["tag1,tag2,tag3"]
+# 用法：bash publish.sh "<ossUrl>" "<title>" ["<description>"] ["tag1,tag2,tag3"]
 #
 # 示例：
 #   bash publish.sh "https://articel.oss-cn-hangzhou.aliyuncs.com/douyin/xxx.mp4" "视频标题"
-#   bash publish.sh "https://...xxx.mp4" "视频标题" "测试,AI,创作"
+#   bash publish.sh "https://...xxx.mp4" "视频标题" "正文内容，可以很长" "测试,AI,创作"
+#   bash publish.sh "https://...xxx.mp4" "视频标题" "" "测试,AI"
 
 OSS_URL="${1}"
 TITLE="${2}"
-TAGS="${3}"
+DESCRIPTION="${3}"
+TAGS="${4}"
 
 if [ -z "$OSS_URL" ]; then
   echo '[ERROR] 请提供 OSS 视频地址' && exit 1
@@ -29,13 +31,16 @@ else
 fi
 
 BODY=$(python3 -c "
-import json
-print(json.dumps({
-  'videoUrl': '${OSS_URL}',
-  'title': '${TITLE}',
+import json, sys
+d = {
+  'videoUrl': sys.argv[1],
+  'title': sys.argv[2],
   'tags': ${TAGS_JSON}
-}))
-")
+}
+if sys.argv[3]:
+  d['description'] = sys.argv[3]
+print(json.dumps(d))
+" "${OSS_URL}" "${TITLE}" "${DESCRIPTION}")
 
 # 调用 SSE 接口，实时输出进度
 curl -s -N -X POST "https://parse.vyibc.com/api/publish" \

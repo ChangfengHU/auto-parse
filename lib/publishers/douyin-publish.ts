@@ -44,9 +44,10 @@ async function downloadToTemp(url: string): Promise<string> {
 }
 
 export interface PublishOptions {
-  videoUrl: string;   // OSS 地址
+  videoUrl: string;       // OSS 地址
   title: string;
-  tags?: string[];    // 话题标签，不含 #
+  description?: string;   // 正文内容（可含话题标签）
+  tags?: string[];        // 额外话题标签，不含 #
 }
 
 export interface PublishResult {
@@ -340,19 +341,28 @@ export async function publishToDouyin(
     }
     log(`✅ Checkpoint 2：标题已填写 → "${await titleInput.inputValue().catch(() => filledTitle)}"`);
 
-    // 话题标签
-    if (options.tags && options.tags.length > 0) {
+    // 正文（description）+ 话题标签
+    const hasDesc = !!(options.description && options.description.trim());
+    const hasTags = !!(options.tags && options.tags.length > 0);
+    if (hasDesc || hasTags) {
       const descEditor = page.locator('div.zone-container[contenteditable="true"]').first();
       if (await descEditor.isVisible().catch(() => false)) {
         await descEditor.click();
-        for (const tag of options.tags.slice(0, 3)) {
-          await descEditor.type(` #${tag}`, { delay: 50 });
-          await page.waitForTimeout(600);
-          const dropdown = page.locator('.semi-select-option, [class*="topicOption"]').first();
-          if (await dropdown.isVisible().catch(() => false)) await dropdown.click();
-          else await descEditor.press('Escape');
+        if (hasDesc) {
+          await page.keyboard.type(options.description!.trim(), { delay: 20 });
+          await page.waitForTimeout(300);
+          log(`✅ 正文已填写：${options.description!.trim().slice(0, 20)}${options.description!.trim().length > 20 ? '...' : ''}`);
         }
-        log(`✅ 话题标签已输入：${options.tags.slice(0, 3).map(t => '#' + t).join(' ')}`);
+        if (hasTags) {
+          for (const tag of options.tags!.slice(0, 3)) {
+            await descEditor.type(` #${tag}`, { delay: 50 });
+            await page.waitForTimeout(600);
+            const dropdown = page.locator('.semi-select-option, [class*="topicOption"]').first();
+            if (await dropdown.isVisible().catch(() => false)) await dropdown.click();
+            else await descEditor.press('Escape');
+          }
+          log(`✅ 话题标签已输入：${options.tags!.slice(0, 3).map(t => '#' + t).join(' ')}`);
+        }
       }
     }
 

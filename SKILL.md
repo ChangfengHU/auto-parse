@@ -62,6 +62,7 @@ Content-Type: application/json
 {
   "videoUrl": "OSS视频地址或公开MP4直链",
   "title": "发布标题（最多30字，自动截断）",
+  "description": "正文内容（可选，完整文案，可含换行和表情）",
   "tags": ["话题1", "话题2"]
 }
 ```

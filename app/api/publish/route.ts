@@ -5,7 +5,7 @@ import { publishToDouyin } from '@/lib/publishers/douyin-publish';
 // Body: { videoUrl: string, title: string, tags?: string[] }
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  const { videoUrl, title, tags } = body as { videoUrl?: string; title?: string; tags?: string[] };
+  const { videoUrl, title, description, tags } = body as { videoUrl?: string; title?: string; description?: string; tags?: string[] };
 
   if (!videoUrl || !title) {
     return new Response(
@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
       try {
         const result = await publishToDouyin(
-          { videoUrl, title, tags },
+          { videoUrl, title, description, tags },
           (type, payload) => send(type, payload),
         );
         send(result.success ? 'done' : 'error', result.message);
