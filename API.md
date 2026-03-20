@@ -1,4 +1,4 @@
-# 视频解析 API 文档
+# 视频解析 & 发布 API 文档
 
 > 服务地址：**https://parse.vyibc.com**
 
@@ -11,6 +11,8 @@
 | `POST /api/parse` + `watermark:false` | 抖音无水印解析 + OSS上传 | ~25s |
 | `POST /api/parse` + `watermark:true`  | 抖音有水印解析 + OSS上传 | ~3s  |
 | `POST /api/parse` (小红书链接)         | 小红书视频解析 + OSS上传 | ~5s  |
+| `POST /api/parse` (TikTok链接)        | TikTok无水印解析 + OSS上传 | ~15s |
+| `POST /api/publish` (SSE)             | 一键发布视频到抖音账号 | ~2-3min |
 
 ---
 
@@ -59,9 +61,9 @@ Content-Type: application/json
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `success` | boolean | 是否成功 |
-| `platform` | string | 平台：`douyin` / `xiaohongshu` |
+| `platform` | string | 平台：`douyin` / `xiaohongshu` / `tiktok` |
 | `videoId` | string | 平台内的视频唯一 ID |
-| `title` | string | 视频标题/文案 |
+| `title` | string | 视频完整文案（含话题标签）。注：抖音/TikTok 无独立 title 字段，`desc` 即全部内容 |
 | `videoUrl` | string | 原始 CDN 地址（有效期短，建议用 ossUrl） |
 | `ossUrl` | string | OSS 永久地址（公开可访问） |
 | `watermark` | boolean | `false`=无水印，`true`=有水印 |
@@ -71,6 +73,102 @@ Content-Type: application/json
 ```json
 {
   "error": "错误描述"
+}
+```
+
+---
+
+## POST /api/publish（SSE 流式）
+
+将 OSS 视频一键发布到你的抖音账号。使用 Playwright 无头浏览器自动完成全流程。
+
+> ⚠️ 该接口为 **Server-Sent Events** 流式响应，需用流式读取方式调用。
+
+### 请求
+
+```
+Content-Type: application/json
+```
+
+```json
+{
+  "videoUrl": "https://articel.oss-cn-hangzhou.aliyuncs.com/douyin/xxx.mp4",
+  "title": "视频标题（最多30字）",
+  "tags": ["话题1", "话题2"]
+}
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `videoUrl` | string | ✅ | OSS 视频地址或任意公开 MP4 直链 |
+| `title` | string | ✅ | 发布标题，超过30字自动截断 |
+| `tags` | string[] | ❌ | 话题标签（不含#），最多3个 |
+
+### 响应（SSE 事件流）
+
+每个事件为 `data: {...}\n\n` 格式：
+
+```
+data: {"type":"log","payload":"⏳ 开始下载视频到本地..."}
+data: {"type":"log","payload":"✅ 视频下载完成"}
+data: {"type":"log","payload":"🚀 启动浏览器（无头模式）..."}
+data: {"type":"log","payload":"⚠️ 检测到未登录，正在获取扫码登录二维码..."}
+data: {"type":"qrcode","payload":"data:image/png;base64,..."}
+data: {"type":"log","payload":"📱 请用抖音 App 扫描上方二维码（约 3 分钟有效）"}
+data: {"type":"log","payload":"✅ 扫码登录成功！保存 Cookie..."}
+data: {"type":"log","payload":"📤 开始上传视频..."}
+data: {"type":"log","payload":"✅ Checkpoint 1：视频上传成功"}
+data: {"type":"log","payload":"✅ Checkpoint 2：标题已填写 → \"xxx\""}
+data: {"type":"log","payload":"✅ Checkpoint 3：封面已自动生成"}
+data: {"type":"log","payload":"检测中 [████████░░░░░░░░░░░░] 40%  (9s)"}
+data: {"type":"log","payload":"检测通过 ✅"}
+data: {"type":"log","payload":"🎉 发布成功！视频已提交抖音审核"}
+data: {"type":"done","payload":"发布成功！视频已提交抖音审核"}
+```
+
+| 事件 type | 说明 |
+|-----------|------|
+| `log` | 进度日志，实时展示给用户 |
+| `qrcode` | base64 图片，Cookie 过期时显示扫码登录 |
+| `done` | 发布成功，流结束 |
+| `error` | 发布失败，payload 为错误信息 |
+
+### 登录机制
+
+- **有效 Cookie**：全自动静默完成，无需干预
+- **Cookie 过期**：推送 `qrcode` 事件，用户扫码后自动继续，新 Cookie 自动保存
+- **并发保护**：文件锁防止同时运行多个发布任务（PID 检测，热重载安全）
+
+### JavaScript 调用示例
+
+```javascript
+const res = await fetch('https://parse.vyibc.com/api/publish', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    videoUrl: 'https://articel.oss-cn-hangzhou.aliyuncs.com/douyin/xxx.mp4',
+    title: '视频标题',
+    tags: ['测试', 'AI']
+  })
+});
+
+const reader = res.body.getReader();
+const decoder = new TextDecoder();
+let buf = '';
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  buf += decoder.decode(value, { stream: true });
+  const lines = buf.split('\n');
+  buf = lines.pop() ?? '';
+  for (const line of lines) {
+    if (!line.startsWith('data: ')) continue;
+    const { type, payload } = JSON.parse(line.slice(6));
+    if (type === 'log') console.log(payload);
+    if (type === 'qrcode') showQRCode(payload); // 展示二维码图片
+    if (type === 'done') console.log('✅ 发布成功');
+    if (type === 'error') console.error('❌', payload);
+  }
 }
 ```
 
