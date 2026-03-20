@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# doouyin — 视频解析 & 一键发布平台
 
-## Getting Started
+抖音/小红书/TikTok 视频去水印解析 + OSS 永久存储 + 一键发布到抖音账号。
 
-First, run the development server:
+---
+
+## Claude Code Skills
+
+本项目提供两个 Claude Code Skill，在 Claude Code 中一键完成视频解析和发布。
+
+### vyibc-auto-parse · 视频解析
+
+解析抖音、小红书视频链接，自动去水印并上传到 OSS，返回永久可访问地址。
+
+**安装：**
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+bash <(curl -fsSL https://skills.vyibc.com/install-vyibc-auto-parse.sh)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**触发：** 粘贴抖音/小红书分享链接，或说"解析视频"、"去水印"、"存OSS"
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+**示例：**
+```
+帮我解析这个抖音 https://v.douyin.com/m7Tw65kygH8/
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+### vyibc-auto-publish · 一键发布到抖音
 
-To learn more about Next.js, take a look at the following resources:
+将 OSS 视频通过 Playwright 无头浏览器自动发布到你的抖音账号，支持填写标题、正文、话题标签。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**安装：**
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+bash <(curl -fsSL https://skills.vyibc.com/install-vyibc-auto-publish.sh)
+```
 
-## Deploy on Vercel
+**触发：** 说"发布到抖音"、"上传到我的抖音"，或有 ossUrl 时明确要求发布
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+**示例：**
+```
+把这个视频发布到我的抖音，标题"治愈系短片"，正文"心怎么变都是偏向你"，话题：情感,治愈
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+**发布流程（自动完成，约 2-3 分钟）：**
+1. 下载视频到本地临时文件
+2. 无头浏览器打开抖音创作者中心
+3. Cookie 失效时推送二维码，扫码后自动继续
+4. 上传视频、填写标题/正文/话题
+5. 等待内容检测通过，点击发布
+
+---
+
+## API 文档
+
+详见 [API.md](./API.md)
+
+---
+
+## 本地开发
+
+```bash
+npm install
+npm run dev
+```
+
+打开 [http://localhost:3000](http://localhost:3000) 查看。
