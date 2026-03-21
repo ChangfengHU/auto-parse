@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseDouyin, parseDouyinFast } from '@/lib/parsers/douyin';
 import { parseXiaohongshu } from '@/lib/parsers/xiaohongshu';
 import { uploadVideoFromUrl, uploadVideoFromFile } from '@/lib/oss';
+import { addMaterial } from '@/lib/materials';
 
 export const maxDuration = 600;
 
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    const result = {
       success: true,
       platform: parsed.platform,
       videoId: parsed.videoId,
@@ -63,7 +64,18 @@ export async function POST(req: NextRequest) {
       videoUrl: parsed.videoUrl,
       ossUrl,
       watermark: (parsed as { watermark?: boolean }).watermark ?? watermark,
+    };
+
+    // 解析成功后自动写入素材库
+    addMaterial({
+      platform: result.platform,
+      title: result.title,
+      videoUrl: result.videoUrl,
+      ossUrl: result.ossUrl,
+      watermark: result.watermark,
     });
+
+    return NextResponse.json(result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : '未知错误';
     console.error('[parse error]', err);

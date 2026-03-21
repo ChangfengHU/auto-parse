@@ -1,8 +1,9 @@
-import { chromium, Page } from 'playwright';
+import { chromium, Page, Locator } from 'playwright';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { markPublished } from '@/lib/materials';
 
 // ─────────────────────────────────────────────────────────────
 //  任务追踪器：每次发布任务创建独立目录，记录截图 + 日志 + 结果
@@ -57,15 +58,44 @@ class TaskTracker {
     fs.appendFileSync(this.logFile, line);
   }
 
-  /** 截图并记录到 checkpoint */
-  async screenshot(page: Page, name: string): Promise<string | null> {
+  /**
+   * 截图并记录到 checkpoint
+   * @param locator 如果传入，则进行区域截图（元素周围 padding 30px），否则截全页
+   */
+  async screenshot(page: Page, name: string, locator?: Locator): Promise<string | null> {
     this.screenshotIndex++;
     const filename = `${String(this.screenshotIndex).padStart(2, '0')}-${name}.png`;
     const filepath = path.join(this.screenshotDir, filename);
     const relativePath = `screenshots/${filename}`;
     try {
+      if (locator) {
+        const visible = await locator.isVisible().catch(() => false);
+        if (visible) {
+          const box = await locator.boundingBox().catch(() => null);
+          if (box) {
+            const pad = 30;
+            await page.screenshot({
+              path: filepath,
+              clip: {
+                x: Math.max(0, box.x - pad),
+                y: Math.max(0, box.y - pad),
+                width: Math.min(1280, box.width + pad * 2),
+                height: Math.min(800, box.height + pad * 2),
+              },
+              timeout: 5000,
+            });
+            this.log(`[SCREENSHOT:REGION] ${relativePath} (${Math.round(box.width)}x${Math.round(box.height)})`);
+            return relativePath;
+          }
+          // 元素可见但没有 boundingBox，直接截元素
+          await locator.screenshot({ path: filepath, timeout: 5000 });
+          this.log(`[SCREENSHOT:ELEMENT] ${relativePath}`);
+          return relativePath;
+        }
+      }
+      // 全页回退
       await page.screenshot({ path: filepath, fullPage: false, timeout: 5000 });
-      this.log(`[SCREENSHOT] ${relativePath}`);
+      this.log(`[SCREENSHOT:PAGE] ${relativePath}`);
       return relativePath;
     } catch {
       return null;
@@ -302,8 +332,9 @@ export async function publishToDouyin(
       .then(() => true).catch(() => false);
     const needLogin = !inputVisible;
 
-    // 截图：登录检测时的页面状态
-    const loginCheckShot = await tracker.screenshot(page, 'login-check');
+    // 截图：聚焦上传区域
+    const uploadAreaLocator = page.locator('[class*="upload"],[class*="Upload"]').first();
+    const loginCheckShot = await tracker.screenshot(page, 'login-check', uploadAreaLocator);
     tracker.addCheckpoint('login-check', needLogin ? 'warn' : 'ok',
       needLogin ? '未检测到上传框，需要登录' : '已登录，上传框可见', loginCheckShot);
 
@@ -382,7 +413,8 @@ export async function publishToDouyin(
     }
 
     log('📄 上传页就绪');
-    const uploadPageShot = await tracker.screenshot(page, 'upload-page-ready');
+    const uploadZone = page.locator('input[accept*="video/mp4"]').locator('xpath=../..');
+    const uploadPageShot = await tracker.screenshot(page, 'upload-page-ready', uploadZone);
     tracker.addCheckpoint('upload-page', 'ok', '上传页就绪', uploadPageShot);
 
     const videoTab = page.getByText('发布视频', { exact: true }).first();
@@ -490,7 +522,8 @@ export async function publishToDouyin(
       }
     }
 
-    const cp2Shot = await tracker.screenshot(page, 'cp2-title-filled');
+    const titleAreaLocator = titleInput.locator('xpath=../../..');
+    const cp2Shot = await tracker.screenshot(page, 'cp2-title-filled', titleAreaLocator);
     tracker.addCheckpoint('cp2-title', 'ok', `标题已填写 → "${filledTitle}"`, cp2Shot);
     log(`✅ Checkpoint 2：标题已填写 → "${filledTitle}"`);
 
@@ -520,7 +553,8 @@ export async function publishToDouyin(
       cp3Msg = '封面已自动生成';
       log('✅ Checkpoint 3：' + cp3Msg);
     }
-    const cp3Shot = await tracker.screenshot(page, 'cp3-cover');
+    const coverZone = page.locator('[class*="cover"],[class*="Cover"]').first();
+    const cp3Shot = await tracker.screenshot(page, 'cp3-cover', coverZone);
     tracker.addCheckpoint('cp3-cover', coverFound ? 'ok' : 'skip', cp3Msg, cp3Shot);
 
     // ── Checkpoint 4：内容检测 ────────────────────────────────
@@ -644,6 +678,9 @@ export async function publishToDouyin(
     const successMsg = '发布成功！视频已提交抖音审核';
     log(`🎉 ${successMsg}`);
     tracker.finish(true, successMsg);
+
+    // 在素材库中标记该视频已发布
+    try { markPublished(options.videoUrl, tracker.taskId); } catch { /* ignore */ }
 
     return { success: true, message: successMsg, taskId: tracker.taskId, historyDir: tracker.dir };
 
