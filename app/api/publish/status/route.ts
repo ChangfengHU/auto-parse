@@ -62,8 +62,14 @@ export async function GET(req: NextRequest) {
       .sort()
       .reverse();
     if (qrFiles.length > 0) {
-      const qrBuf = fs.readFileSync(path.join(screenshotDir, qrFiles[0]));
+      const latestQrFile = qrFiles[0];
+      const qrBuf = fs.readFileSync(path.join(screenshotDir, latestQrFile));
+      // base64（供前端直接展示）
       task.latestQrCode = `data:image/png;base64,${qrBuf.toString('base64')}`;
+      // URL（供 OpenClaw 下载文件）
+      task.latestQrUrl  = `/api/publish/screenshot/${taskId}/screenshots/${latestQrFile}`;
+      // 便于 OpenClaw 判断是否需要扫码
+      task.needsQrScan  = task.status === 'running';
     }
   }
 
