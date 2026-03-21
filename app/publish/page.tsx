@@ -244,6 +244,9 @@ function PublishPageInner() {
   const taskIdRef = useRef(initTaskId);
   const updateTaskId = useCallback((id: string) => { taskIdRef.current = id; setTaskId(id); }, []);
 
+  const [isMinimized,  setIsMinimized]  = useState(false);  // 返回表单但不停止任务
+  const abortRef = useRef<AbortController | null>(null);    // 停止发布
+
   const [expandedStage,   setExpandedStage]   = useState<string | null>(null);
   const [screenshotModal, setScreenshotModal] = useState<{ url: string; label: string; isQr?: boolean } | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -355,14 +358,24 @@ function PublishPageInner() {
     } catch { setLoginStatus('unknown'); }
   }
 
+  function handleStop() {
+    abortRef.current?.abort();
+    setPublishState('error'); setResultMsg('用户已手动停止发布');
+    setIsMinimized(false);
+    setStages(prev => prev.map(s => s.status === 'running' ? { ...s, status: 'error' } : s));
+  }
+
   async function handlePublish() {
     if (!ossUrl.trim() || !title.trim()) return;
-    setPublishState('publishing'); setStages(initStages()); setLogs([]); setQrCode(null); setResultMsg(''); updateTaskId('');
+    setPublishState('publishing'); setIsMinimized(false); setStages(initStages()); setLogs([]); setQrCode(null); setResultMsg(''); updateTaskId('');
     const tagList = tags.split(/[,，\s]+/).map(t => t.trim()).filter(Boolean);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     try {
       const res = await fetch('/api/publish', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ videoUrl: ossUrl, title, description, tags: tagList }),
+        signal: ctrl.signal,
       });
       if (!res.body) throw new Error('不支持流式响应');
       const reader = res.body.getReader(); const decoder = new TextDecoder(); let buf = '';
@@ -394,7 +407,10 @@ function PublishPageInner() {
           } catch { /* ignore */ }
         }
       }
-    } catch (e) { setPublishState('error'); setResultMsg(e instanceof Error ? e.message : '网络错误'); }
+    } catch (e) {
+      if ((e as { name?: string }).name === 'AbortError') return; // 用户主动停止，不覆盖状态
+      setPublishState('error'); setResultMsg(e instanceof Error ? e.message : '网络错误');
+    }
   }
 
   function selectMaterial(url: string, t: string) { setOssUrl(url); setTitle(t); setShowDrawer(false); }
@@ -402,7 +418,7 @@ function PublishPageInner() {
 
   const isPublishing = publishState === 'publishing';
   const hasResult    = publishState === 'done' || publishState === 'error';
-  const isMonitor    = isPublishing || hasResult; // 监控布局
+  const isMonitor    = (isPublishing || hasResult) && !isMinimized; // 监控布局（最小化时回到表单）
 
   const loginStatusLabel: Record<LoginStatus, string> = {
     unknown: '未检测', checking: '检测中...', logged_in: '✓ 已登录', not_logged_in: '⚠ 未登录', scanning: '扫码中...',
@@ -492,12 +508,34 @@ function PublishPageInner() {
           </span>
           <p className="text-sm font-medium text-white truncate flex-1 min-w-0">{title}</p>
           {taskId && <span className="text-xs text-gray-600 font-mono flex-shrink-0 hidden sm:block">ID: {taskId}</span>}
-          <button
-            onClick={() => { setPublishState('idle'); setStages([]); setLogs([]); updateTaskId(''); setQrCode(null); }}
-            className="text-xs text-pink-400 hover:text-pink-300 border border-pink-900 hover:border-pink-600 px-3 py-1 rounded-lg transition-colors flex-shrink-0"
-          >
-            {hasResult ? '重新发布' : '返回'}
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* 发布中：停止 + 返回（最小化） */}
+            {isPublishing && (
+              <>
+                <button
+                  onClick={handleStop}
+                  className="text-xs text-red-400 hover:text-red-300 border border-red-900 hover:border-red-600 px-3 py-1 rounded-lg transition-colors"
+                >
+                  停止
+                </button>
+                <button
+                  onClick={() => setIsMinimized(true)}
+                  className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1 rounded-lg transition-colors"
+                >
+                  返回
+                </button>
+              </>
+            )}
+            {/* 完成/失败：重新发布 */}
+            {hasResult && (
+              <button
+                onClick={() => { setPublishState('idle'); setStages([]); setLogs([]); updateTaskId(''); setQrCode(null); setIsMinimized(false); }}
+                className="text-xs text-pink-400 hover:text-pink-300 border border-pink-900 hover:border-pink-600 px-3 py-1 rounded-lg transition-colors"
+              >
+                重新发布
+              </button>
+            )}
+          </div>
         </div>
 
         {/* QR 码（扫码需要时显示在顶栏下方，不遮挡主内容） */}
@@ -573,10 +611,56 @@ function PublishPageInner() {
   }
 
   // ══════════════════════════════════════════════════════════
-  //  表单布局（idle）
+  //  表单布局（idle / 最小化）
   // ══════════════════════════════════════════════════════════
   return (
     <div className="max-w-2xl mx-auto px-4 py-10">
+
+      {/* 后台任务进行中 / 已完成 提示条 */}
+      {isMinimized && (
+        <div className={`mb-6 rounded-xl border px-4 py-3 flex items-center justify-between gap-3 ${
+          isPublishing
+            ? 'bg-pink-950 border-pink-800'
+            : publishState === 'done'
+            ? 'bg-green-950 border-green-800'
+            : 'bg-red-950 border-red-800'
+        }`}>
+          <div className="flex items-center gap-3 min-w-0">
+            {isPublishing && <span className="w-2 h-2 rounded-full bg-pink-400 animate-pulse flex-shrink-0" />}
+            <div className="min-w-0">
+              <p className={`text-sm font-medium truncate ${
+                isPublishing ? 'text-pink-300' : publishState === 'done' ? 'text-green-300' : 'text-red-300'
+              }`}>
+                {isPublishing ? '发布任务进行中...' : publishState === 'done' ? '✓ 发布成功' : '✕ 发布失败'}
+              </p>
+              {title && <p className="text-xs text-gray-500 truncate mt-0.5">{title}</p>}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {isPublishing && (
+              <button
+                onClick={handleStop}
+                className="text-xs text-red-400 hover:text-red-300 border border-red-800 hover:border-red-600 px-2.5 py-1 rounded-lg transition-colors"
+              >
+                停止
+              </button>
+            )}
+            <button
+              onClick={() => setIsMinimized(false)}
+              className={`text-xs px-3 py-1 rounded-lg border transition-colors ${
+                isPublishing
+                  ? 'text-pink-400 hover:text-pink-300 border-pink-800 hover:border-pink-600'
+                  : publishState === 'done'
+                  ? 'text-green-400 hover:text-green-300 border-green-800 hover:border-green-600'
+                  : 'text-red-400 hover:text-red-300 border-red-800 hover:border-red-600'
+              }`}
+            >
+              查看进度
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="mb-8">
         <h1 className="text-2xl font-bold">视频发布</h1>
         <p className="mt-1 text-gray-400 text-sm">将视频发布到抖音账号，实时追踪每个发布阶段</p>
@@ -655,9 +739,9 @@ function PublishPageInner() {
         </div>
 
         {/* 发布按钮 */}
-        <button onClick={handlePublish} disabled={!ossUrl.trim() || !title.trim()}
+        <button onClick={handlePublish} disabled={!ossUrl.trim() || !title.trim() || isPublishing}
           className="w-full py-3 bg-pink-600 hover:bg-pink-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed rounded-xl text-sm font-medium transition-colors">
-          开始发布
+          {isPublishing ? '发布中...' : '开始发布'}
         </button>
       </div>
 
