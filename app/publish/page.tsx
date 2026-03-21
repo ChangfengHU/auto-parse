@@ -3,6 +3,152 @@
 import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
+// ── 素材库抽屉 ────────────────────────────────────────────────
+const PER_PAGE = 8;
+
+function MaterialsDrawer({
+  open, materials, onSelect, onClose,
+}: {
+  open: boolean;
+  materials: Array<{ id: string; platform: string; title: string; ossUrl: string; parsedAt: number }>;
+  onSelect: (ossUrl: string, title: string) => void;
+  onClose: () => void;
+}) {
+  const [search, setSearch]   = useState('');
+  const [page,   setPage]     = useState(0);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  // 搜索重置分页
+  useEffect(() => setPage(0), [search]);
+  // 关闭时重置搜索
+  useEffect(() => { if (!open) { setSearch(''); setPage(0); setPreview(null); } }, [open]);
+
+  const filtered   = materials.filter(m => !search || m.title.toLowerCase().includes(search.toLowerCase()));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PER_PAGE));
+  const paged      = filtered.slice(page * PER_PAGE, (page + 1) * PER_PAGE);
+
+  return (
+    <>
+      {/* 背景遮罩 */}
+      <div
+        className={`fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 ${open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={onClose}
+      />
+
+      {/* 抽屉主体 */}
+      <div
+        className={`fixed right-0 top-0 h-full z-50 bg-gray-900 border-l border-gray-800 shadow-2xl flex flex-col transition-transform duration-300 ${open ? 'translate-x-0' : 'translate-x-full'}`}
+        style={{ width: 400 }}
+      >
+        {/* 标题栏 */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 flex-shrink-0">
+          <span className="text-sm font-semibold text-white">素材库</span>
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <span>{filtered.length} 个素材</span>
+            <button onClick={onClose} className="ml-2 w-7 h-7 flex items-center justify-center text-gray-500 hover:text-white hover:bg-gray-800 rounded-lg text-xl transition-colors">×</button>
+          </div>
+        </div>
+
+        {/* 搜索框 */}
+        <div className="px-4 py-3 border-b border-gray-800 flex-shrink-0">
+          <div className="relative">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">🔍</span>
+            <input
+              type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="搜索标题..."
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-8 pr-3 py-2 text-sm text-gray-200 outline-none focus:border-pink-600 transition-colors"
+            />
+            {search && (
+              <button onClick={() => setSearch('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs">✕</button>
+            )}
+          </div>
+        </div>
+
+        {/* 视频预览（悬停时展开） */}
+        {preview && (
+          <div className="px-4 pt-3 flex-shrink-0">
+            <div className="relative bg-black rounded-xl overflow-hidden aspect-video">
+              <video key={preview} src={preview} autoPlay muted loop playsInline
+                className="w-full h-full object-contain" />
+              <button onClick={() => setPreview(null)}
+                className="absolute top-2 right-2 w-6 h-6 bg-black/60 rounded-full text-white text-xs flex items-center justify-center hover:bg-black">✕</button>
+            </div>
+          </div>
+        )}
+
+        {/* 素材网格 */}
+        <div className="flex-1 overflow-y-auto p-4 min-h-0">
+          {paged.length === 0 ? (
+            <div className="text-center text-gray-600 text-sm mt-16">
+              {search ? `未找到含"${search}"的素材` : '素材库为空，先去解析视频'}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              {paged.map(m => (
+                <div key={m.id} className="group bg-gray-800 rounded-xl overflow-hidden border border-gray-700 hover:border-pink-500 transition-all duration-200 cursor-pointer"
+                  onClick={() => { onSelect(m.ossUrl, m.title); onClose(); }}
+                >
+                  {/* 视频缩略图 */}
+                  <div className="aspect-video bg-gray-900 relative overflow-hidden">
+                    <video
+                      src={m.ossUrl + '#t=1'}
+                      preload="metadata"
+                      muted playsInline
+                      className="w-full h-full object-cover"
+                      onMouseEnter={e => { (e.currentTarget as HTMLVideoElement).play(); setPreview(m.ossUrl); }}
+                      onMouseLeave={e => { const v = e.currentTarget as HTMLVideoElement; v.pause(); v.currentTime = 1; }}
+                    />
+                    {/* 平台徽章 */}
+                    <span className="absolute top-1.5 left-1.5 text-xs bg-black/70 text-white px-1.5 py-0.5 rounded-md leading-tight">
+                      {m.platform === 'douyin' ? '抖音' : m.platform === 'xiaohongshu' ? '小红书' : m.platform}
+                    </span>
+                    {/* 播放提示 */}
+                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                      <span className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center text-white text-sm">▶</span>
+                    </div>
+                  </div>
+                  {/* 标题 + 日期 */}
+                  <div className="px-2.5 py-2">
+                    <p className="text-xs text-gray-100 line-clamp-2 leading-tight font-medium">{m.title || '（无标题）'}</p>
+                    <p className="text-xs text-gray-600 mt-1">{new Date(m.parsedAt).toLocaleDateString('zh-CN')}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 分页 */}
+        {totalPages > 1 && (
+          <div className="px-4 py-3 border-t border-gray-800 flex-shrink-0 flex items-center justify-between">
+            <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+              className="text-xs text-gray-400 hover:text-white disabled:text-gray-700 disabled:cursor-not-allowed px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:bg-transparent rounded-lg transition-colors">
+              ← 上一页
+            </button>
+            <div className="flex items-center gap-1.5">
+              {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+                const p = totalPages <= 7 ? i : i === 0 ? 0 : i === 6 ? totalPages - 1 : page - 2 + i;
+                const isActive = p === page;
+                return (
+                  <button key={i} onClick={() => setPage(Math.max(0, Math.min(totalPages - 1, p)))}
+                    className={`w-6 h-6 rounded text-xs transition-colors ${isActive ? 'bg-pink-600 text-white' : 'text-gray-500 hover:text-white hover:bg-gray-800'}`}>
+                    {Math.max(0, Math.min(totalPages - 1, p)) + 1}
+                  </button>
+                );
+              })}
+            </div>
+            <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1}
+              className="text-xs text-gray-400 hover:text-white disabled:text-gray-700 disabled:cursor-not-allowed px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:bg-transparent rounded-lg transition-colors">
+              下一页 →
+            </button>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 // ── 发布阶段定义 ─────────────────────────────────────────────
 const STAGE_KEYS = [
   'download', 'login-check', 'upload-page', 'video-inject',
@@ -83,7 +229,7 @@ function PublishPageInner() {
   const [description,  setDescription]  = useState('');
   const [tags,         setTags]         = useState('');
   const [materials,    setMaterials]    = useState<Material[]>([]);
-  const [showMaterials,setShowMaterials]= useState(false);
+  const [showDrawer,   setShowDrawer]   = useState(false);
 
   const [loginStatus,  setLoginStatus]  = useState<LoginStatus>('unknown');
   const [loginQr,      setLoginQr]      = useState<string | null>(null);
@@ -251,7 +397,7 @@ function PublishPageInner() {
     } catch (e) { setPublishState('error'); setResultMsg(e instanceof Error ? e.message : '网络错误'); }
   }
 
-  function selectMaterial(m: Material) { setOssUrl(m.ossUrl); setTitle(m.title); setShowMaterials(false); }
+  function selectMaterial(url: string, t: string) { setOssUrl(url); setTitle(t); setShowDrawer(false); }
   function toggleStage(key: string) { setExpandedStage(prev => prev === key ? null : key); }
 
   const isPublishing = publishState === 'publishing';
@@ -411,6 +557,17 @@ function PublishPageInner() {
             </div>
           </div>
         </div>
+
+        {screenshotModal && (
+          <ScreenshotModal url={screenshotModal.url} label={screenshotModal.label}
+            isQr={screenshotModal.isQr} onClose={() => setScreenshotModal(null)} />
+        )}
+        <MaterialsDrawer
+          open={showDrawer}
+          materials={materials}
+          onSelect={selectMaterial}
+          onClose={() => setShowDrawer(false)}
+        />
       </div>
     );
   }
@@ -464,22 +621,12 @@ function PublishPageInner() {
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs text-gray-400 font-medium">视频地址 (OSS URL)</label>
-            <button onClick={() => setShowMaterials(v => !v)} className="text-xs text-pink-400 hover:text-pink-300 transition-colors">从素材库选择</button>
+            <button onClick={() => setShowDrawer(true)}
+              className="text-xs text-pink-400 hover:text-pink-300 transition-colors flex items-center gap-1">
+              从素材库选择
+              {materials.length > 0 && <span className="bg-pink-900 text-pink-300 rounded-full px-1.5 py-0.5 text-xs leading-none">{materials.length}</span>}
+            </button>
           </div>
-          {showMaterials && (
-            <div className="mb-3 bg-gray-800 border border-gray-700 rounded-lg max-h-48 overflow-y-auto">
-              {materials.length === 0
-                ? <p className="text-xs text-gray-500 p-3">素材库为空</p>
-                : materials.map(m => (
-                  <button key={m.id} onClick={() => selectMaterial(m)}
-                    className="w-full text-left px-3 py-2.5 hover:bg-gray-700 border-b border-gray-700 last:border-0 transition-colors">
-                    <p className="text-xs text-white truncate">{m.title || '（无标题）'}</p>
-                    <p className="text-xs text-gray-500 truncate mt-0.5">{m.ossUrl}</p>
-                  </button>
-                ))
-              }
-            </div>
-          )}
           <input type="text" value={ossUrl} onChange={e => setOssUrl(e.target.value)}
             placeholder="https://articel.oss-cn-hangzhou.aliyuncs.com/..."
             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 outline-none focus:border-pink-600 transition-colors" />
@@ -518,6 +665,12 @@ function PublishPageInner() {
         <ScreenshotModal url={screenshotModal.url} label={screenshotModal.label}
           isQr={screenshotModal.isQr} onClose={() => setScreenshotModal(null)} />
       )}
+      <MaterialsDrawer
+        open={showDrawer}
+        materials={materials}
+        onSelect={selectMaterial}
+        onClose={() => setShowDrawer(false)}
+      />
     </div>
   );
 }
