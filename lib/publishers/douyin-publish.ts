@@ -6,17 +6,23 @@ import os from 'os';
 
 const COOKIE_FILE = path.join(process.cwd(), '.douyin-cookie.json');
 
-function getDouyinCookie(): string {
+// 加载 cookie：优先读完整对象数组（含 secure/sameSite/expires），
+// 兼容旧格式 name=val;... 字符串，也支持 DOUYIN_COOKIE 环境变量
+function loadCookies(): Parameters<import('playwright').BrowserContext['addCookies']>[0] {
   try {
     if (fs.existsSync(COOKIE_FILE)) {
       const data = JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf-8'));
-      if (data.cookie) return data.cookie;
+      // 新格式：完整 Playwright cookie 对象数组
+      if (Array.isArray(data.cookies) && data.cookies.length > 0) return data.cookies;
+      // 旧格式：name=val; name=val 字符串
+      if (data.cookie) return parseCookieStr(data.cookie);
     }
   } catch { /* ignore */ }
-  return process.env.DOUYIN_COOKIE || '';
+  const envCookie = process.env.DOUYIN_COOKIE || '';
+  return envCookie ? parseCookieStr(envCookie) : [];
 }
 
-function parseCookies(cookieStr: string) {
+function parseCookieStr(cookieStr: string) {
   return cookieStr.split(';').map(c => {
     const idx = c.indexOf('=');
     return {
@@ -24,6 +30,8 @@ function parseCookies(cookieStr: string) {
       value: c.slice(idx + 1).trim(),
       domain: '.douyin.com',
       path: '/',
+      secure: true,
+      sameSite: 'None' as const,
     };
   }).filter(c => c.name && c.value);
 }
@@ -162,8 +170,8 @@ export async function publishToDouyin(
         p.name === 'notifications' ? Promise.resolve({ state: Notification.permission } as PermissionStatus) : oq(p);
     });
 
-    const cookie = getDouyinCookie();
-    if (cookie) await context.addCookies(parseCookies(cookie));
+    const cookies = loadCookies();
+    if (cookies.length > 0) await context.addCookies(cookies);
 
     const page = await context.newPage();
     page.on('dialog', d => d.accept());
@@ -184,10 +192,13 @@ export async function publishToDouyin(
       await page.waitForTimeout(3000);
     });
 
-    // ── 登录检测：只依赖上传 input 是否可见（最可靠）────────
-    // 注意：即使已登录，页面导航栏也可能存在"扫码登录"文字，不能用 pageText 判断
+    // ── 登录检测：等待上传 input 出现（最多 12s），超时才判断为未登录 ──
+    // 不能在 domcontentloaded 后立刻检查——React 页面渲染需要额外时间
+    // 也不能用 pageText 包含"扫码登录"——导航栏上即使已登录也有该文字
     const uploadInput = page.locator('input[accept*="video/mp4"]').first();
-    const inputVisible = await uploadInput.isVisible().catch(() => false);
+    const inputVisible = await uploadInput.waitFor({ state: 'visible', timeout: 12_000 })
+      .then(() => true)
+      .catch(() => false);
     const needLogin = !inputVisible;
 
     if (needLogin) {
@@ -254,12 +265,10 @@ export async function publishToDouyin(
 
       log('✅ 扫码登录成功！保存 Cookie...');
       const newCookies = await context.cookies();
-      const newCookieStr = newCookies
-        .filter(c => c.domain.includes('douyin.com'))
-        .map(c => `${c.name}=${c.value}`)
-        .join('; ');
-      if (newCookieStr) {
-        fs.writeFileSync(COOKIE_FILE, JSON.stringify({ cookie: newCookieStr, updatedAt: Date.now() }));
+      const douyinCookies = newCookies.filter(c => c.domain.includes('douyin.com'));
+      if (douyinCookies.length > 0) {
+        // 保存完整 cookie 对象（含 secure/sameSite/expires），下次加载完整恢复会话
+        fs.writeFileSync(COOKIE_FILE, JSON.stringify({ cookies: douyinCookies, updatedAt: Date.now() }, null, 2));
         log('✅ Cookie 已保存，下次无需扫码');
       }
 
@@ -424,6 +433,8 @@ export async function publishToDouyin(
       detectionPassed = true;
     }
 
+    let maxPct = 0; // 记录曾经出现的最高百分比
+
     for (let i = 0; i < 90 && !detectionPassed; i++) {
       const info = await page.evaluate(() => {
         const text = document.body.innerText;
@@ -434,10 +445,23 @@ export async function publishToDouyin(
           const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
           return { done: false, pct: n, msg: `检测中 [${bar}] ${pct}%` };
         }
-        // 只有明确出现"检测通过"/"检测完成"才算 done，不能用"不含检测中"来判断
-        if (text.includes('检测通过') || text.includes('检测完成')) return { done: true, pct: 100, msg: '检测通过 ✅' };
-        return { done: false, pct: 0, msg: '检测中，等待进度...' };
+        // 明确出现完成关键词（多平台写法兼容）
+        const doneKeywords = ['检测通过', '检测完成', '审核通过', '已检测', '内容安全'];
+        if (doneKeywords.some(k => text.includes(k))) return { done: true, pct: 100, msg: '检测通过 ✅' };
+        // 如果没有百分比但还有"检测中"，属于过渡态
+        if (text.includes('检测中')) return { done: false, pct: -1, msg: '检测中，等待进度...' };
+        // 既没有百分比也没有"检测中"——说明检测区域已消失，完成
+        return { done: false, pct: -2, msg: '检测区域已消失，等待确认...' };
       }).catch(() => ({ done: false, pct: 0, msg: '等待页面响应...' }));
+
+      if (info.pct > 0) maxPct = Math.max(maxPct, info.pct);
+
+      // 曾经达到 ≥95%，现在百分比消失 → 检测实际已完成，页面只是在更新 UI
+      if (maxPct >= 95 && info.pct <= 0) {
+        log(`✅ 检测完成（${maxPct}% → UI已更新）`);
+        detectionPassed = true;
+        break;
+      }
 
       const elapsed = ((Date.now() - detectStart) / 1000).toFixed(0);
       const line = `${info.msg}  (${elapsed}s)`;
