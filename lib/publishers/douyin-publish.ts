@@ -579,6 +579,7 @@ export async function publishToDouyin(
     }
 
     let maxPct = 0;
+    let disappearedCount = 0; // 连续"检测区已消失"的次数
     for (let i = 0; i < 90 && !detectionPassed; i++) {
       const info = await page.evaluate(() => {
         const text = document.body.innerText;
@@ -595,12 +596,27 @@ export async function publishToDouyin(
         return { done: false, pct: -2, msg: '检测区域已消失，等待确认...' };
       }).catch(() => ({ done: false, pct: 0, msg: '等待页面响应...' }));
 
-      if (info.pct > 0) maxPct = Math.max(maxPct, info.pct);
+      if (info.pct > 0) {
+        maxPct = Math.max(maxPct, info.pct);
+        disappearedCount = 0; // 重置：还有进度数字，说明没消失
+      } else if (info.pct === -2) {
+        disappearedCount++;
+      }
 
+      // 条件 1：高峰值后 UI 更新（原逻辑）
       if (maxPct >= 95 && info.pct <= 0) {
         const cp4Shot = await tracker.screenshot(page, 'cp4-detection-done');
         tracker.addCheckpoint('cp4-detection', 'ok', `检测完成（峰值 ${maxPct}%）`, cp4Shot);
         log(`✅ 检测完成（${maxPct}% → UI已更新）`);
+        detectionPassed = true;
+        break;
+      }
+
+      // 条件 2：检测区消失 10s+ 且有过进度 → 视为通过（修复卡在50%问题）
+      if (disappearedCount >= 5 && maxPct >= 40) {
+        const cp4Shot = await tracker.screenshot(page, 'cp4-detection-done');
+        tracker.addCheckpoint('cp4-detection', 'ok', `检测完成（峰值 ${maxPct}%，检测区已消失）`, cp4Shot);
+        log(`✅ 检测完成（${maxPct}% → 检测区消失，视为通过）`);
         detectionPassed = true;
         break;
       }
