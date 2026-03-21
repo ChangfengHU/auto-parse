@@ -6,7 +6,7 @@
 
 ## Claude Code Skills
 
-本项目提供两个 Claude Code Skill，在 Claude Code 中一键完成视频解析和发布。
+本项目提供三个 Claude Code Skill，在 Claude Code / OpenClaw 等 AI 工具中一键完成视频解析、发布和状态查询。
 
 ### vyibc-auto-parse · 视频解析
 
@@ -50,6 +50,32 @@ bash <(curl -fsSL https://skills.vyibc.com/install-vyibc-auto-publish.sh)
 3. Cookie 失效时推送二维码，扫码后自动继续
 4. 上传视频、填写标题/正文/话题
 5. 等待内容检测通过，点击发布
+
+---
+
+### vyibc-publish-status · 查询发布状态
+
+查询抖音发布任务的进度、阶段截图和扫码二维码，配合 vyibc-auto-publish 使用。
+
+**安装：**
+
+```bash
+bash <(curl -fsSL https://skills.vyibc.com/install-vyibc-publish-status.sh)
+```
+
+**触发：** 说"发布进度怎么样"、"查一下发布状态"、"发布成功了吗"，或提供任务 ID
+
+**示例：**
+```
+发布成功了吗？
+查一下任务 2026-03-22T10-00-00-abc12 的进度
+```
+
+**支持功能：**
+- 列出最近20条发布任务
+- 查询指定任务的各阶段完成情况
+- Cookie 过期时自动展示扫码二维码
+- 下载各阶段截图查看发布过程。
 
 ---
 

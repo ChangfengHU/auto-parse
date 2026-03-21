@@ -5,85 +5,74 @@ description: 查询抖音发布任务的进度和状态。当用户说"发布进
 
 ## 使用方式
 
-通过 HTTP 接口查询发布任务状态：
+调用 `scripts/status.sh` 脚本查询任务状态：
 
+```bash
+# 列出最近20条发布任务
+bash scripts/status.sh
+
+# 查询指定任务详情
+bash scripts/status.sh <taskId>
+
+# 查询 + 下载扫码二维码
+bash scripts/status.sh <taskId> --qr
+
+# 查询 + 下载所有阶段截图
+bash scripts/status.sh <taskId> --screenshots
 ```
-GET http://localhost:1007/api/publish/status              → 列出最近20条任务
-GET http://localhost:1007/api/publish/status?taskId=xxx  → 查询指定任务详情
-```
+
+> 服务地址默认 `https://parse.vyibc.com`，可通过环境变量 `VYIBC_BASE_URL` 覆盖。
 
 ## 触发规则
 
 以下情况触发本 Skill：
-- 用户提到 taskId（如 "2026-03-22T17-56-17-abc"）
+- 用户提到 taskId（如 `2026-03-22T17-56-17-abc`）
 - 用户问"发布进度"、"发布状态"、"发布成功了吗"
 - 用户说"查一下上次发布"、"看看日志"
-- 发布脚本已在运行，用户想查看进度截图或扫二维码
+- 发布后需要查看截图或扫码
 
 ## 执行步骤
 
 ### 查询单个任务（有 taskId）
 
-1. 调用状态接口：
+1. 运行脚本：
    ```bash
-   curl -s "http://localhost:1007/api/publish/status?taskId=<taskId>"
+   bash scripts/status.sh <taskId>
    ```
 
-2. 解析返回的 JSON，关键字段：
-   - `taskId`：任务ID
-   - `status`：`running` / `success` / `failed`
-   - `needsQrScan`：**true 时表示当前正在等待扫码登录**
-   - `latestQrCode`：最新二维码的 base64（`data:image/png;base64,...`）
-   - `latestQrUrl`：最新二维码的图片 URL（可直接下载）
-   - `checkpoints[]`：各检查点信息：
-     - `name`：阶段名
-     - `status`：`ok` / `warn` / `error` / `skip`
-     - `message`：描述
-     - `screenshotUrl`：截图URL（如 `/api/publish/screenshot/{taskId}/screenshots/01-login-check.png`）
-   - `logs[]`：日志行数组
+2. 脚本输出任务摘要、阶段进度、最近日志
 
-3. 展示任务摘要（阶段完成情况，用 ✅ / 🔄 / ❌ / ⏳ 表示）
+3. **如果输出中出现 `[QRCODE_FILE] /tmp/...`**，立即用 Read 工具读取该文件展示给用户
 
-4. **如果 `needsQrScan === true`，立即展示二维码**（见下方"扫码登录"章节）
-
-5. **展示各阶段截图**：对有 `screenshotUrl` 的 checkpoint：
+4. **如果用户想看截图**，追加 `--screenshots` 参数：
    ```bash
-   curl -s "http://localhost:1007<screenshotUrl>" -o /tmp/stage-<name>.png
+   bash scripts/status.sh <taskId> --screenshots
    ```
-   然后用 Read 工具读取图片展示给用户
+   输出中会有 `[SCREENSHOT] <name>:<path>`，用 Read 工具读取各图片文件展示
 
-### 扫码登录（needsQrScan = true）
+### 扫码登录（needsQrScan）
 
-当返回数据中 `needsQrScan === true` 时，必须立即让用户扫码：
-
-**方法一（推荐）：下载图片文件后展示**
+当脚本提示需要扫码时，运行：
 ```bash
-curl -s "http://localhost:1007<latestQrUrl>" -o /tmp/douyin-qr.png
+bash scripts/status.sh <taskId> --qr
 ```
-然后用 Read 工具读取 `/tmp/douyin-qr.png`，Claude Code 会自动内嵌显示图片
-
-**方法二：用 base64 数据写文件**
-```bash
-# 提取 base64 内容（去掉 data:image/png;base64, 前缀）
-echo "<base64内容>" | base64 -d > /tmp/douyin-qr.png
-```
-然后用 Read 工具读取 `/tmp/douyin-qr.png`
-
-提示用户：
+脚本输出 `[QRCODE_FILE] /tmp/douyin-qr-xxx.png`，用 Read 工具读取文件展示二维码，提示用户：
 - "Cookie 已过期，请用抖音 App 扫描上方二维码"
-- "二维码约 3 分钟有效，扫码后系统自动继续发布"
-- "可以每隔 30 秒查询状态，确认登录后 `needsQrScan` 会变为 false"
+- "二维码约 3 分钟有效，扫码后可再次查询确认"
 
-### 查询任务列表（无 taskId）
+### 列出所有任务（无 taskId）
 
-1. 调用：
-   ```bash
-   curl -s "http://localhost:1007/api/publish/status"
-   ```
+```bash
+bash scripts/status.sh
+```
+列出最近20个任务，让用户选择查看哪个。
 
-2. 返回最近20个任务数组，每项包含 `taskId`、`status`、`startTime`、`title`
+## 脚本特殊输出行
 
-3. 以列表展示，让用户选择要查看的任务
+| 输出格式 | 含义 | 处理方式 |
+|----------|------|----------|
+| `[QRCODE_FILE] /tmp/xxx.png` | 二维码图片路径 | 用 Read 工具读取文件展示 |
+| `[SCREENSHOT] <name>:<path>` | 阶段截图路径 | 用 Read 工具读取文件展示 |
 
 ## 阶段说明
 
@@ -91,10 +80,10 @@ echo "<base64内容>" | base64 -d > /tmp/douyin-qr.png
 |--------|------|
 | `download` | 视频下载到本地 |
 | `login-check` | 检测是否已登录抖音 |
-| `login` | 扫码登录（Cookie 过期时才有） |
+| `login` | 扫码登录（Cookie 过期时） |
 | `upload-page` | 进入视频上传页面 |
 | `video-inject` | 视频文件已注入上传框 |
-| `cp1-upload` | 视频上传成功，URL 已跳转到表单页 |
+| `cp1-upload` | 视频上传成功 |
 | `cp2-title` | 标题和描述已填写 |
 | `cp3-cover` | 封面已自动生成 |
 | `cp4-detection` | 内容安全检测通过 |
@@ -113,30 +102,8 @@ echo "<base64内容>" | base64 -d > /tmp/douyin-qr.png
 ## 错误处理
 
 | 情况 | 处理方式 |
-|------|---------|
+|------|---------| 
 | 404 任务不存在 | 提示 taskId 不存在，让用户确认 |
-| 接口连接失败 | 提示服务未启动，告知用户先启动 `npm run dev` |
+| 接口连接失败 | 提示服务未启动，确认 VYIBC_BASE_URL 是否正确 |
 | status = failed | 显示错误日志，帮助用户定位问题 |
-| needsQrScan = true | 立即展示 latestQrUrl 的二维码图片 |
-
-## 返回示例
-
-```json
-{
-  "taskId": "2026-03-22T17-56-17-abc123",
-  "status": "running",
-  "needsQrScan": true,
-  "latestQrCode": "data:image/png;base64,iVBORw0KGgo...",
-  "latestQrUrl": "/api/publish/screenshot/2026-03-22T17-56-17-abc123/screenshots/qrcode-1748921234567.png",
-  "checkpoints": [
-    {
-      "name": "login-check",
-      "status": "warn",
-      "message": "未检测到上传框，需要登录",
-      "timestamp": "2026-03-22T17:56:18.000Z",
-      "screenshotUrl": "/api/publish/screenshot/2026-03-22T17-56-17-abc123/screenshots/01-login-check.png"
-    }
-  ],
-  "logs": ["[TASK START] 2026-03-22T17-56-17-abc123", "🔍 检测登录状态...", "⚠️ 未登录，获取二维码..."]
-}
-```
+| needsQrScan = true | 运行 `--qr` 参数展示二维码 |

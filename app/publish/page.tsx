@@ -387,7 +387,9 @@ function PublishPageInner() {
           if (!line.startsWith('data: ')) continue;
           try {
             const { type, payload } = JSON.parse(line.slice(6)) as { type: string; payload: string };
-            if (type === 'log') {
+            if (type === 'taskId') {
+              updateTaskId(payload); // 独立 taskId 事件，直接赋值，无需正则
+            } else if (type === 'log') {
               setLogs(prev => [...prev, payload]);
               setStages(prev => applyLog(payload, prev));
               const m = payload.match(/任务ID[：:]\s*(\S+)/); if (m) updateTaskId(m[1]);

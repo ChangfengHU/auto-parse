@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
-      const send = (type: 'log' | 'qrcode' | 'done' | 'error', payload: string) => {
+      const send = (type: 'log' | 'qrcode' | 'done' | 'error' | 'taskId', payload: string) => {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type, payload })}\n\n`));
         } catch { /* 客户端已断开，静默忽略，后台任务继续运行 */ }
@@ -28,7 +28,11 @@ export async function POST(req: NextRequest) {
           { videoUrl, title, description, tags },
           (type, payload) => send(type, payload),
         );
-        // done/error 事件里带上 taskId，方便前端展示历史追踪链接
+        // 1. 发送独立的 taskId 事件（结构化，便于脚本/CLI 直接解析）
+        if (result.taskId) {
+          send('taskId', result.taskId);
+        }
+        // 2. done/error 文本里也保留 [taskId: xxx]，兼容旧前端正则解析
         const payload = result.taskId
           ? `${result.message} [taskId: ${result.taskId}]`
           : result.message;

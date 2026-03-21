@@ -671,12 +671,27 @@ export async function publishToDouyin(
     const managePageShot = await tracker.screenshot(page, 'manage-page');
     tracker.addCheckpoint('redirect-manage', 'ok', '已跳转到作品管理页', managePageShot);
 
-    // ── 等待后台上传完成（toast 消失）────────────────────────
+    // ── 等待后台上传完成（两阶段）─────────────────────────────
     const uploadStart2 = Date.now();
     let lastUploadPct = '';
+
+    // Phase 1：等管理页完成初始渲染（刚跳转时 DOM 几乎为空，toast 尚未出现）
+    // 最多等 15s，直到 toast 出现 或 loading 文字消失，才进入 Phase 2
+    log('⏳ 等待管理页渲染...');
+    await page.waitForFunction(() => {
+      const t = document.body.innerText || '';
+      // toast 已经出现，或者 loading 已结束（页面加载完但没有上传进度，说明极快完成）
+      return t.includes('请勿关闭页面') || t.includes('作品上传中') ||
+             t.includes('作品发布中')   || t.includes('已发布') ||
+             (!t.includes('加载中') && t.length > 500);
+    }, {}, { timeout: 15_000 }).catch(() => {
+      // 15s 后页面还没渲染完，继续等 Phase 2，顶多多等几秒
+    });
+
+    // Phase 2：持续监控进度，等 toast 完全消失才算完成
     const uploadMonitor = setInterval(() => {
       page.evaluate(() => document.body.innerText).then(txt => {
-        const pctMatch = txt.match(/(\d+)%/);
+        const pctMatch = txt.match(/(\d+)\s*%/);
         const pct = pctMatch ? pctMatch[1] + '%' : '';
         if (pct && pct !== lastUploadPct) {
           lastUploadPct = pct;
@@ -684,11 +699,15 @@ export async function publishToDouyin(
           log(`📡 视频后台上传中... ${pct}  (${elapsed2}s)`);
         }
       }).catch(() => { /* 页面已关闭或流已断开，静默忽略 */ });
-    }, 5000);
+    }, 3000);
 
     await page.waitForFunction(() => {
       const text = document.body.innerText || '';
-      return !text.includes('作品上传中') && !text.includes('上传中，请勿关闭');
+      // 只要还有任意一个"上传/发布中"的 toast 文字就继续等
+      return !text.includes('作品上传中') &&
+             !text.includes('作品发布中') &&
+             !text.includes('请勿关闭页面') &&
+             !text.includes('上传中，请勿关闭');
     }, {}, { timeout: 600_000 }).catch(() => {});
 
     clearInterval(uploadMonitor);
