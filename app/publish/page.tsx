@@ -82,15 +82,35 @@ function StageIcon({ status }: { status: StageStatus }) {
 }
 
 // ── 全屏截图弹窗 ─────────────────────────────────────────────
-function ScreenshotModal({ url, label, onClose }: { url: string; label: string; onClose: () => void }) {
+function ScreenshotModal({ url, label, onClose, isQr }: {
+  url: string; label: string; onClose: () => void; isQr?: boolean;
+}) {
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-gray-900 border border-gray-700 rounded-xl max-w-3xl w-full p-4" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-medium text-white">{label} — 截图</span>
-          <button onClick={onClose} className="text-gray-500 hover:text-white text-xl leading-none">×</button>
-        </div>
-        <img src={url} alt={label} className="w-full rounded-lg border border-gray-700 object-contain max-h-[70vh]" />
+    <div className="fixed inset-0 z-50 bg-black/90 flex flex-col" onClick={onClose}>
+      {/* 标题栏 */}
+      <div className="flex items-center justify-between px-5 py-3 flex-shrink-0" onClick={e => e.stopPropagation()}>
+        <span className="text-sm font-medium text-white">{label}</span>
+        <button onClick={onClose} className="text-gray-400 hover:text-white text-2xl leading-none w-8 h-8 flex items-center justify-center">×</button>
+      </div>
+
+      {/* 图片区 — 可滚动，点击关闭 */}
+      <div className="flex-1 overflow-auto flex items-center justify-center p-4" onClick={onClose}>
+        {isQr ? (
+          /* 二维码：尽量大，保持清晰 */
+          <div className="bg-white rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+            <img src={url} alt={label}
+              style={{ width: 'min(80vw, 80vh)', height: 'min(80vw, 80vh)' }}
+              className="object-contain block"
+            />
+            <p className="text-center text-gray-500 text-xs mt-3">用抖音 App 扫描上方二维码 · 点击背景关闭</p>
+          </div>
+        ) : (
+          /* 普通截图：自然尺寸，可滚动查看 */
+          <img src={url} alt={label} onClick={e => e.stopPropagation()}
+            className="max-w-none rounded-lg shadow-2xl"
+            style={{ maxWidth: '95vw', maxHeight: '90vh', objectFit: 'contain' }}
+          />
+        )}
       </div>
     </div>
   );
@@ -134,7 +154,7 @@ function PublishPageInner() {
 
   // UI
   const [expandedStage,   setExpandedStage]   = useState<string | null>(null);
-  const [screenshotModal, setScreenshotModal] = useState<{ url: string; label: string } | null>(null);
+  const [screenshotModal, setScreenshotModal] = useState<{ url: string; label: string; isQr?: boolean } | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   // ── 初始化加载 ──────────────────────────────────────────────
@@ -551,10 +571,26 @@ function PublishPageInner() {
 
           {/* 发布流程中的二维码 */}
           {qrCode && (
-            <div className="bg-yellow-950 border border-yellow-700 rounded-xl p-4 flex flex-col items-center gap-3">
-              <p className="text-xs text-yellow-400 font-medium">Cookie 已过期，请用抖音 App 扫码登录</p>
-              <img src={qrCode} alt="扫码登录" className="w-44 h-44 object-contain rounded-lg bg-white p-2" />
-              <p className="text-xs text-yellow-600">扫码后自动继续，约 3 分钟有效</p>
+            <div className="bg-yellow-950 border border-yellow-700 rounded-xl p-5 flex flex-col items-center gap-3">
+              <p className="text-sm text-yellow-400 font-medium">Cookie 已过期，请用抖音 App 扫码登录</p>
+              {/* 可直接扫描的二维码（尽量大） */}
+              <button
+                onClick={() => setScreenshotModal({ url: qrCode, label: '抖音扫码登录', isQr: true })}
+                className="bg-white rounded-xl p-3 hover:shadow-yellow-500/30 hover:shadow-lg transition-shadow"
+                title="点击全屏放大"
+              >
+                <img src={qrCode} alt="扫码登录"
+                  style={{ width: 'min(56vw, 220px)', height: 'min(56vw, 220px)' }}
+                  className="object-contain block"
+                />
+              </button>
+              <p className="text-xs text-yellow-600">扫码后自动继续 · 约 3 分钟有效</p>
+              <button
+                onClick={() => setScreenshotModal({ url: qrCode, label: '抖音扫码登录', isQr: true })}
+                className="text-xs text-yellow-500 hover:text-yellow-300 underline"
+              >
+                全屏放大（扫不到时点这里）
+              </button>
             </div>
           )}
 
@@ -627,27 +663,50 @@ function PublishPageInner() {
                       </button>
 
                       {/* 展开内容 */}
-                      {isExpanded && isActive && (
-                        <div className="mx-3 mb-1">
-                          {hasShot ? (
-                            <button
-                              onClick={() => setScreenshotModal({ url: stage.screenshotUrl!, label: stage.label })}
-                              className="block w-full group"
-                            >
-                              <img
-                                src={stage.screenshotUrl}
-                                alt={stage.label}
-                                className="w-full rounded-lg border border-gray-700 group-hover:border-pink-600 object-contain max-h-44 transition-colors"
-                              />
-                              <p className="text-xs text-gray-600 text-center mt-1">点击放大</p>
-                            </button>
-                          ) : (
-                            <div className="py-3 text-center text-xs text-gray-600 border border-dashed border-gray-700 rounded-lg">
-                              {stage.status === 'running' ? '⏳ 截图生成中...' : '暂无截图'}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      {isExpanded && isActive && (() => {
+                        // login-check 且需要扫码时，优先展示干净的 QR code（可直接扫描）
+                        const isLoginQr = stage.key === 'login-check' && stage.status === 'warn' && !!qrCode;
+                        return (
+                          <div className="mx-3 mb-1">
+                            {isLoginQr ? (
+                              <div className="flex flex-col items-center gap-2 py-2">
+                                <p className="text-xs text-yellow-400">扫码登录（可直接扫）</p>
+                                <button
+                                  onClick={() => setScreenshotModal({ url: qrCode!, label: '抖音扫码登录', isQr: true })}
+                                  className="bg-white rounded-lg p-2 hover:shadow-md transition-shadow"
+                                  title="点击全屏放大"
+                                >
+                                  <img src={qrCode!} alt="QR Code"
+                                    className="w-36 h-36 object-contain block"
+                                  />
+                                </button>
+                                <button
+                                  onClick={() => setScreenshotModal({ url: qrCode!, label: '抖音扫码登录', isQr: true })}
+                                  className="text-xs text-yellow-600 hover:text-yellow-400 underline"
+                                >
+                                  全屏放大
+                                </button>
+                              </div>
+                            ) : hasShot ? (
+                              <button
+                                onClick={() => setScreenshotModal({ url: stage.screenshotUrl!, label: stage.label })}
+                                className="block w-full group"
+                              >
+                                <img
+                                  src={stage.screenshotUrl}
+                                  alt={stage.label}
+                                  className="w-full rounded-lg border border-gray-700 group-hover:border-pink-600 object-contain max-h-44 transition-colors"
+                                />
+                                <p className="text-xs text-gray-600 text-center mt-1">点击放大</p>
+                              </button>
+                            ) : (
+                              <div className="py-3 text-center text-xs text-gray-600 border border-dashed border-gray-700 rounded-lg">
+                                {stage.status === 'running' ? '⏳ 截图生成中...' : '暂无截图'}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })}
@@ -662,6 +721,7 @@ function PublishPageInner() {
         <ScreenshotModal
           url={screenshotModal.url}
           label={screenshotModal.label}
+          isQr={screenshotModal.isQr}
           onClose={() => setScreenshotModal(null)}
         />
       )}
