@@ -18,7 +18,9 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       const send = (type: 'log' | 'qrcode' | 'done' | 'error', payload: string) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type, payload })}\n\n`));
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type, payload })}\n\n`));
+        } catch { /* 客户端已断开，静默忽略，后台任务继续运行 */ }
       };
 
       try {
@@ -34,7 +36,7 @@ export async function POST(req: NextRequest) {
       } catch (e: unknown) {
         send('error', e instanceof Error ? e.message : String(e));
       } finally {
-        controller.close();
+        try { controller.close(); } catch { /* 已关闭则忽略 */ }
       }
     },
   });

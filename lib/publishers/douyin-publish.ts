@@ -231,6 +231,8 @@ export async function publishToDouyin(
   const tracker = new TaskTracker(options);
   const log = (msg: string) => { console.log(msg); emit('log', msg); tracker.log(`[EMIT] ${msg}`); };
 
+  log(`🆔 任务ID：${tracker.taskId}`);
+
   if (!acquireLock()) {
     const msg = '当前有发布任务正在进行中，请等待完成后再试（防止并发触发风控）';
     tracker.finish(false, msg);
@@ -613,15 +615,16 @@ export async function publishToDouyin(
     // ── 等待后台上传完成（toast 消失）────────────────────────
     const uploadStart2 = Date.now();
     let lastUploadPct = '';
-    const uploadMonitor = setInterval(async () => {
-      const txt = await page.evaluate(() => document.body.innerText).catch(() => '');
-      const pctMatch = txt.match(/(\d+)%/);
-      const pct = pctMatch ? pctMatch[1] + '%' : '';
-      if (pct && pct !== lastUploadPct) {
-        lastUploadPct = pct;
-        const elapsed2 = ((Date.now() - uploadStart2) / 1000).toFixed(0);
-        log(`📡 视频后台上传中... ${pct}  (${elapsed2}s)`);
-      }
+    const uploadMonitor = setInterval(() => {
+      page.evaluate(() => document.body.innerText).then(txt => {
+        const pctMatch = txt.match(/(\d+)%/);
+        const pct = pctMatch ? pctMatch[1] + '%' : '';
+        if (pct && pct !== lastUploadPct) {
+          lastUploadPct = pct;
+          const elapsed2 = ((Date.now() - uploadStart2) / 1000).toFixed(0);
+          log(`📡 视频后台上传中... ${pct}  (${elapsed2}s)`);
+        }
+      }).catch(() => { /* 页面已关闭或流已断开，静默忽略 */ });
     }, 5000);
 
     await page.waitForFunction(() => {
