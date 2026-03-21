@@ -67,8 +67,10 @@ class TaskTracker {
     const filename = `${String(this.screenshotIndex).padStart(2, '0')}-${name}.png`;
     const filepath = path.join(this.screenshotDir, filename);
     const relativePath = `screenshots/${filename}`;
-    try {
-      if (locator) {
+
+    // ── 第一步：尝试区域/元素截图（单独 try，失败不影响全页回退）
+    if (locator) {
+      try {
         const visible = await locator.isVisible().catch(() => false);
         if (visible) {
           const box = await locator.boundingBox().catch(() => null);
@@ -87,17 +89,24 @@ class TaskTracker {
             this.log(`[SCREENSHOT:REGION] ${relativePath} (${Math.round(box.width)}x${Math.round(box.height)})`);
             return relativePath;
           }
-          // 元素可见但没有 boundingBox，直接截元素
+          // 有元素但没 boundingBox → 直接截元素
           await locator.screenshot({ path: filepath, timeout: 5000 });
           this.log(`[SCREENSHOT:ELEMENT] ${relativePath}`);
           return relativePath;
         }
+      } catch (e) {
+        // 区域截图失败，fallthrough 到全页
+        this.log(`[SCREENSHOT:REGION_FAIL] ${name} → ${e instanceof Error ? e.message : String(e)}`);
       }
-      // 全页回退
+    }
+
+    // ── 第二步：全页截图（兜底，独立 try/catch）
+    try {
       await page.screenshot({ path: filepath, fullPage: false, timeout: 5000 });
       this.log(`[SCREENSHOT:PAGE] ${relativePath}`);
       return relativePath;
-    } catch {
+    } catch (e) {
+      this.log(`[SCREENSHOT:FAIL] ${name} → ${e instanceof Error ? e.message : String(e)}`);
       return null;
     }
   }

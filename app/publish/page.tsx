@@ -155,6 +155,7 @@ function PublishPageInner() {
   // UI
   const [expandedStage,   setExpandedStage]   = useState<string | null>(null);
   const [screenshotModal, setScreenshotModal] = useState<{ url: string; label: string; isQr?: boolean } | null>(null);
+  const [logsExpanded,    setLogsExpanded]    = useState(true);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   // ── 初始化加载 ──────────────────────────────────────────────
@@ -374,6 +375,8 @@ function PublishPageInner() {
               // 从日志中提取 taskId（格式：🆔 任务ID：2026-03-22T17-56-17-abc）
               const tidMatch = payload.match(/任务ID[：:]\s*(\S+)/);
               if (tidMatch) updateTaskId(tidMatch[1]);
+              // 扫码成功后自动清除二维码
+              if (payload.includes('扫码登录成功')) setQrCode(null);
             } else if (type === 'qrcode') {
               setQrCode(payload);
             } else if (type === 'done') {
@@ -466,16 +469,29 @@ function PublishPageInner() {
 
             {/* 扫码二维码（预登录流程） */}
             {loginQr && (
-              <div className="mt-4 flex flex-col items-center gap-3 pt-3 border-t border-gray-800">
+              <div className="mt-4 flex flex-col items-center gap-3 pt-3 border-t border-gray-800 relative">
                 <p className="text-xs text-yellow-400 font-medium">请用抖音 App 扫描下方二维码</p>
-                <img src={loginQr} alt="扫码登录" className="w-48 h-48 object-contain rounded-lg bg-white p-2" />
-                <p className="text-xs text-yellow-600">扫码后自动保存 Cookie，约 3 分钟有效</p>
                 <button
-                  onClick={() => { setLoginQr(null); setLoginStatus('unknown'); }}
-                  className="text-xs text-gray-600 hover:text-gray-400"
+                  onClick={() => setScreenshotModal({ url: loginQr, label: '抖音扫码登录', isQr: true })}
+                  className="bg-white rounded-xl p-2 hover:shadow-lg transition-shadow"
+                  title="点击全屏放大"
                 >
-                  取消
+                  <img src={loginQr} alt="扫码登录"
+                    style={{ width: 'min(50vw, 200px)', height: 'min(50vw, 200px)' }}
+                    className="object-contain block"
+                  />
                 </button>
+                <p className="text-xs text-yellow-600">扫码后自动保存 Cookie，约 3 分钟有效</p>
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => setScreenshotModal({ url: loginQr, label: '抖音扫码登录', isQr: true })}
+                    className="text-xs text-yellow-500 hover:text-yellow-300 underline"
+                  >全屏放大</button>
+                  <button
+                    onClick={() => { setLoginQr(null); setLoginStatus('unknown'); }}
+                    className="text-xs text-gray-600 hover:text-gray-400"
+                  >取消</button>
+                </div>
               </div>
             )}
           </div>
@@ -571,9 +587,15 @@ function PublishPageInner() {
 
           {/* 发布流程中的二维码 */}
           {qrCode && (
-            <div className="bg-yellow-950 border border-yellow-700 rounded-xl p-5 flex flex-col items-center gap-3">
+            <div className="bg-yellow-950 border border-yellow-700 rounded-xl p-5 flex flex-col items-center gap-3 relative">
+              {/* 关闭按钮 */}
+              <button
+                onClick={() => setQrCode(null)}
+                className="absolute top-3 right-3 w-6 h-6 flex items-center justify-center text-yellow-700 hover:text-yellow-400 hover:bg-yellow-900 rounded transition-colors text-lg leading-none"
+                title="关闭（已扫码或不需要）"
+              >×</button>
               <p className="text-sm text-yellow-400 font-medium">Cookie 已过期，请用抖音 App 扫码登录</p>
-              {/* 可直接扫描的二维码（尽量大） */}
+              {/* 可直接扫描的二维码 */}
               <button
                 onClick={() => setScreenshotModal({ url: qrCode, label: '抖音扫码登录', isQr: true })}
                 className="bg-white rounded-xl p-3 hover:shadow-yellow-500/30 hover:shadow-lg transition-shadow"
@@ -594,17 +616,31 @@ function PublishPageInner() {
             </div>
           )}
 
-          {/* 实时日志 */}
+          {/* 实时日志（可折叠） */}
           {(isPublishing || hasResult) && logs.length > 0 && (
             <div className="bg-gray-950 border border-gray-800 rounded-xl overflow-hidden">
-              <div className="px-3 py-2 border-b border-gray-800 flex items-center justify-between">
-                <span className="text-xs text-gray-500">实时日志</span>
-                {taskId && <span className="text-xs text-gray-600 font-mono">ID: {taskId}</span>}
-              </div>
-              <div className="h-40 overflow-y-auto p-3 font-mono text-xs text-green-400 space-y-0.5">
-                {logs.map((l, i) => <div key={i}>{l}</div>)}
-                <div ref={logsEndRef} />
-              </div>
+              <button
+                onClick={() => setLogsExpanded(v => !v)}
+                className="w-full px-3 py-2 border-b border-gray-800 flex items-center justify-between hover:bg-gray-900 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">实时日志</span>
+                  <span className="text-xs text-gray-700">({logs.length} 行)</span>
+                  {isPublishing && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                  )}
+                </div>
+                <div className="flex items-center gap-3">
+                  {taskId && <span className="text-xs text-gray-600 font-mono">ID: {taskId}</span>}
+                  <span className="text-gray-600 text-xs">{logsExpanded ? '▴' : '▾'}</span>
+                </div>
+              </button>
+              {logsExpanded && (
+                <div className="h-40 overflow-y-auto p-3 font-mono text-xs text-green-400 space-y-0.5">
+                  {logs.map((l, i) => <div key={i}>{l}</div>)}
+                  <div ref={logsEndRef} />
+                </div>
+              )}
             </div>
           )}
         </div>
