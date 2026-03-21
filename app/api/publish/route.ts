@@ -26,7 +26,11 @@ export async function POST(req: NextRequest) {
           { videoUrl, title, description, tags },
           (type, payload) => send(type, payload),
         );
-        send(result.success ? 'done' : 'error', result.message);
+        // done/error 事件里带上 taskId，方便前端展示历史追踪链接
+        const payload = result.taskId
+          ? `${result.message} [taskId: ${result.taskId}]`
+          : result.message;
+        send(result.success ? 'done' : 'error', payload);
       } catch (e: unknown) {
         send('error', e instanceof Error ? e.message : String(e));
       } finally {
