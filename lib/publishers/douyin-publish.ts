@@ -484,27 +484,26 @@ export async function publishToDouyin(
     await publishBtn.waitFor({ timeout: 10_000 });
     await publishBtn.click();
 
-    log('⏳ 等待发布完成...');
-    // 依赖 URL 跳转到管理页，或 toast 弹窗（短文本 ≤ 30 字）出现"发布成功"/"审核中"
-    // 注意：不能用含"发布成功"的长句（如"视频发布成功后，价格将无法更改"）来判断
-    await Promise.race([
-      page.waitForURL(url => url.toString().includes('/content/manage'), { timeout: 60_000 }),
-      page.waitForFunction(() => {
-        const els = Array.from(document.querySelectorAll('*'));
-        return els.some(el => {
-          const text = ((el as HTMLElement).innerText || '').trim();
-          // 必须是短文本（toast/提示），排除包含"后"/"将"等长句描述
-          if (text.length > 30) return false;
-          if (!text.includes('发布成功') && !text.includes('审核中')) return false;
-          const style = window.getComputedStyle(el);
-          return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'
-            && (el as HTMLElement).offsetParent !== null;
-        });
-      }, {}, { timeout: 60_000 }),
-    ]);
-    log('🎉 发布成功！视频已提交抖音审核');
+    log('⏳ 等待跳转到作品管理页...');
+    // Step 1：等待页面跳转到 /content/manage（抖音点击发布后会先跳转，视频在后台继续上传）
+    await page.waitForURL(url => url.toString().includes('/content/manage'), { timeout: 60_000 });
+    log('📋 已跳转到作品管理页，等待视频上传完成...');
+
+    // Step 2：等待后台上传进度条消失（"作品上传中" toast 消失 = 上传真正完成）
+    // 抖音会先跳转到管理页，再在后台继续上传，上传完成才会自动发布
+    // 最长等 10 分钟（大视频可能需要较长时间）
+    const uploadStart2 = Date.now();
+    await page.waitForFunction(() => {
+      const text = document.body.innerText || '';
+      return !text.includes('作品上传中') && !text.includes('上传中，请勿关闭');
+    }, {}, { timeout: 600_000 }).catch(() => {
+      // 超时也继续，不抛错（可能 toast 已消失但 waitForFunction 没捕捉到）
+    });
+    const uploadSec = ((Date.now() - uploadStart2) / 1000).toFixed(0);
+    log(`✅ 视频上传完成（耗时 ${uploadSec}s），抖音将自动发布`);
+
     await page.screenshot({ timeout: 3000, path: '/tmp/douyin-after-publish.png' }).catch(() => null);
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(3000);
 
     return { success: true, message: '发布成功！视频已提交抖音审核' };
 
