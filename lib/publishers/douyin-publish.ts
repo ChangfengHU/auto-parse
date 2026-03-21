@@ -184,22 +184,18 @@ export async function publishToDouyin(
       await page.waitForTimeout(3000);
     });
 
-    // ── 登录检测：用上传 input 是否可见作为最可靠依据 ────────
+    // ── 登录检测：只依赖上传 input 是否可见（最可靠）────────
+    // 注意：即使已登录，页面导航栏也可能存在"扫码登录"文字，不能用 pageText 判断
     const uploadInput = page.locator('input[accept*="video/mp4"]').first();
     const inputVisible = await uploadInput.isVisible().catch(() => false);
-    const pageText = await page.evaluate(() => document.body.innerText).catch(() => '');
-    const needLogin = !inputVisible ||
-      pageText.includes('扫码登录') ||
-      pageText.includes('手机号登录');
+    const needLogin = !inputVisible;
 
     if (needLogin) {
       log('⚠️ 检测到未登录，正在获取抖音扫码登录二维码...');
 
-      // 导航到登录页（networkidle 确保 QR 图片完全加载）
-      if (!pageText.includes('扫码登录')) {
-        await page.goto('https://creator.douyin.com', { waitUntil: 'networkidle', timeout: 30_000 }).catch(() => {});
-        await page.waitForTimeout(2000);
-      }
+      // 始终导航到首页，确保 QR 码页面结构一致（networkidle 确保 QR 图片完全加载）
+      await page.goto('https://creator.douyin.com', { waitUntil: 'networkidle', timeout: 30_000 }).catch(() => {});
+      await page.waitForTimeout(2000);
 
       const sendQrCode = async () => {
         // 等待 QR img 元素出现（class 含 qrcode_img）
@@ -219,6 +215,12 @@ export async function publishToDouyin(
           if (await qrPanel.isVisible().catch(() => false)) {
             buf = await qrPanel.screenshot().catch(() => null);
           }
+        }
+
+        // 再备用：整页截图（确保用户至少能看到页面状态）
+        if (!buf) {
+          buf = await page.screenshot({ fullPage: false }).catch(() => null);
+          if (buf) log('⚠️ 未找到二维码元素，已截取整页，请查看图片中的二维码');
         }
 
         if (buf) {
@@ -287,13 +289,24 @@ export async function publishToDouyin(
       await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => {});
       await page.waitForTimeout(3000);
     });
-    log('📤 视频已注入，等待服务器处理...');
+    log('📤 视频已注入，等待跳转到发布表单页（最多 2 分钟）...');
 
-    // ── Checkpoint 1：等待跳转到发布表单页，确认上传成功 ────
-    await page.waitForURL(
-      url => url.toString().includes('/content/post/video'),
-      { timeout: 120_000 }
-    );
+    // ── Checkpoint 1：轮询等待跳转，每 5s 输出一次进度 ────────
+    const uploadStart = Date.now();
+    await (async () => {
+      for (let i = 0; i < 24; i++) {
+        const url = page.url();
+        if (url.includes('/content/post/video')) return;
+        const elapsed = ((Date.now() - uploadStart) / 1000).toFixed(0);
+        log(`⏳ 上传中... (${elapsed}s)`);
+        await page.waitForTimeout(5000);
+      }
+      // 超时后再等一次，触发原生 timeout 错误
+      await page.waitForURL(
+        url => url.toString().includes('/content/post/video'),
+        { timeout: 10_000 }
+      );
+    })();
     const videoPreviewLoaded = await Promise.race([
       page.waitForSelector('video', { timeout: 20_000 }).then(() => true),
       page.waitForSelector('[class*="player"],[class*="preview"],[class*="cover"]', { timeout: 20_000 }).then(() => true),
@@ -397,7 +410,21 @@ export async function publishToDouyin(
     let lastDetectMsg = '';
     let detectionPassed = false;
 
-    for (let i = 0; i < 90; i++) {
+    // 先等待"检测中"出现（最多等 15s），如果始终未出现说明该视频无需检测
+    let detectionRequired = false;
+    for (let w = 0; w < 30; w++) {
+      const t = await page.evaluate(() => document.body.innerText).catch(() => '');
+      if (t.includes('检测中')) { detectionRequired = true; break; }
+      if (t.includes('检测通过') || t.includes('检测完成')) { detectionRequired = true; break; }
+      await page.waitForTimeout(500);
+    }
+
+    if (!detectionRequired) {
+      log('✅ Checkpoint 4：无需内容检测，可直接发布');
+      detectionPassed = true;
+    }
+
+    for (let i = 0; i < 90 && !detectionPassed; i++) {
       const info = await page.evaluate(() => {
         const text = document.body.innerText;
         const pct = text.match(/检测中\s*(\d+)\s*%/)?.[1];
@@ -407,8 +434,8 @@ export async function publishToDouyin(
           const bar = '█'.repeat(filled) + '░'.repeat(20 - filled);
           return { done: false, pct: n, msg: `检测中 [${bar}] ${pct}%` };
         }
+        // 只有明确出现"检测通过"/"检测完成"才算 done，不能用"不含检测中"来判断
         if (text.includes('检测通过') || text.includes('检测完成')) return { done: true, pct: 100, msg: '检测通过 ✅' };
-        if (!text.includes('检测中')) return { done: true, pct: 100, msg: '检测完成 ✅' };
         return { done: false, pct: 0, msg: '检测中，等待进度...' };
       }).catch(() => ({ done: false, pct: 0, msg: '等待页面响应...' }));
 
@@ -434,14 +461,16 @@ export async function publishToDouyin(
     await publishBtn.click();
 
     log('⏳ 等待发布完成...');
-    // 不用 text= 选择器（会匹配隐藏元素），改用 waitForFunction 检查可见文字
+    // 依赖 URL 跳转到管理页，或 toast 弹窗（短文本 ≤ 30 字）出现"发布成功"/"审核中"
+    // 注意：不能用含"发布成功"的长句（如"视频发布成功后，价格将无法更改"）来判断
     await Promise.race([
       page.waitForURL(url => url.toString().includes('/content/manage'), { timeout: 60_000 }),
       page.waitForFunction(() => {
-        // 只匹配可见的包含"发布成功"或"审核中"的元素
         const els = Array.from(document.querySelectorAll('*'));
         return els.some(el => {
-          const text = (el as HTMLElement).innerText || '';
+          const text = ((el as HTMLElement).innerText || '').trim();
+          // 必须是短文本（toast/提示），排除包含"后"/"将"等长句描述
+          if (text.length > 30) return false;
           if (!text.includes('发布成功') && !text.includes('审核中')) return false;
           const style = window.getComputedStyle(el);
           return style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0'

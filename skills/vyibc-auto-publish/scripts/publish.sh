@@ -42,6 +42,8 @@ if sys.argv[3]:
 print(json.dumps(d))
 " "${OSS_URL}" "${TITLE}" "${DESCRIPTION}")
 
+QR_FILE="/tmp/douyin-qr-$(date +%s).png"
+
 # 调用 SSE 接口，实时输出进度
 curl -s -N -X POST "https://parse.vyibc.com/api/publish" \
   -H "Content-Type: application/json" \
@@ -53,10 +55,29 @@ curl -s -N -X POST "https://parse.vyibc.com/api/publish" \
       payload=$(echo "$json" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('payload',''))" 2>/dev/null)
 
       case "$type" in
-        log)    echo "$payload" ;;
-        qrcode) echo "[QRCODE] 请在网页端扫码登录（打开 http://localhost:1007 查看二维码）" ;;
-        done)   echo "[DONE] $payload" ;;
-        error)  echo "[ERROR] $payload"; exit 1 ;;
+        log)
+          echo "$payload"
+          ;;
+        qrcode)
+          # 把 base64 图片解码存到本地，让 Claude Code 直接读取展示
+          echo "$payload" | python3 -c "
+import sys, base64
+data = sys.stdin.read().strip()
+if data.startswith('data:image'):
+    data = data.split(',', 1)[1]
+with open('${QR_FILE}', 'wb') as f:
+    f.write(base64.b64decode(data))
+" 2>/dev/null
+          echo "[QRCODE_FILE] ${QR_FILE}"
+          echo "请用抖音 App 扫描上方二维码登录（约3分钟有效）"
+          ;;
+        done)
+          echo "[DONE] $payload"
+          ;;
+        error)
+          echo "[ERROR] $payload"
+          exit 1
+          ;;
       esac
     fi
   done
