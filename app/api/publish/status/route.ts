@@ -46,32 +46,43 @@ export async function GET(req: NextRequest) {
 
   // 把截图路径转为可访问的 URL
   if (Array.isArray(task.checkpoints)) {
-    task.checkpoints = task.checkpoints.map((cp: { screenshot?: string; [k: string]: unknown }) => {
+    task.checkpoints = task.checkpoints.map((cp: { screenshot?: string; screenshotUrl?: string; [k: string]: unknown }) => {
       if (cp.screenshot) {
-        cp.screenshotUrl = `/api/publish/screenshot/${taskId}/${cp.screenshot}`;
+        // 如果已经是完整的 URL (OSS)，直接赋值给 screenshotUrl
+        if (cp.screenshot.startsWith('http')) {
+          cp.screenshotUrl = cp.screenshot;
+        } else {
+          // 否则生成本地 API 地址（兼容旧任务）
+          cp.screenshotUrl = `/api/publish/screenshot/${taskId}/${cp.screenshot}`;
+        }
       }
       return cp;
     });
   }
 
-  // 找最新的 QR 码截图（如果有）
-  const screenshotDir = path.join(taskDir, 'screenshots');
-  if (fs.existsSync(screenshotDir)) {
-    const qrFiles = fs.readdirSync(screenshotDir)
-      .filter(f => f.startsWith('qrcode-') && f.endsWith('.png'))
-      .sort()
-      .reverse();
-    if (qrFiles.length > 0) {
-      const latestQrFile = qrFiles[0];
-      const qrBuf = fs.readFileSync(path.join(screenshotDir, latestQrFile));
-      // base64（供前端直接展示）
-      task.latestQrCode = `data:image/png;base64,${qrBuf.toString('base64')}`;
-      // URL（供 OpenClaw 下载文件）
-      task.latestQrUrl  = `/api/publish/screenshot/${taskId}/screenshots/${latestQrFile}`;
-      // 便于 OpenClaw 判断是否需要扫码
-      task.needsQrScan  = task.status === 'running';
+  // 找最新的 QR 码（状态接口优先使用 metadata 里的 OSS URL）
+  if (task.latestQrUrl) {
+    // 如果已经有 OSS URL，就不再生成 base64，减少体积
+    if (!task.latestQrCode) {
+      task.latestQrCode = task.latestQrUrl; 
+    }
+  } else {
+    // 兼容逻辑：找本地最新的 QR 码截图（如果有）
+    const screenshotDir = path.join(taskDir, 'screenshots');
+    if (fs.existsSync(screenshotDir)) {
+      const qrFiles = fs.readdirSync(screenshotDir)
+        .filter(f => f.startsWith('qrcode-') && f.endsWith('.png'))
+        .sort()
+        .reverse();
+      if (qrFiles.length > 0) {
+        const latestQrFile = qrFiles[0];
+        const qrBuf = fs.readFileSync(path.join(screenshotDir, latestQrFile));
+        task.latestQrCode = `data:image/png;base64,${qrBuf.toString('base64')}`;
+        task.latestQrUrl  = `/api/publish/screenshot/${taskId}/screenshots/${latestQrFile}`;
+      }
     }
   }
+
 
   return NextResponse.json(task);
 }

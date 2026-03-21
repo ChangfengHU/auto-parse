@@ -139,14 +139,21 @@ if url:
   fi
 
   QR_FILE="/tmp/douyin-qr-$(date +%s).png"
-  curl -s "${BASE_URL}${QR_URL}" -o "$QR_FILE"
+  
+  if [[ "$QR_URL" == http* ]]; then
+    FULL_URL="$QR_URL"
+  else
+    FULL_URL="${BASE_URL}${QR_URL}"
+  fi
 
-  if [ -f "$QR_FILE" ]; then
+  curl -s "$FULL_URL" -o "$QR_FILE"
+
+  if [ -f "$QR_FILE" ] && [ -s "$QR_FILE" ]; then
     echo "[QRCODE_FILE] ${QR_FILE}"
     echo "✅ 二维码已保存：${QR_FILE}"
-    echo "📱 请用抖音 App 扫描上方二维码（约3分钟有效）"
+    echo "📱 请用抖音 App 扫描上面的二维码（约3分钟有效）"
   else
-    echo "❌ 二维码下载失败"
+    echo "❌ 二维码下载失败：URL $FULL_URL"
     exit 1
   fi
 fi
@@ -171,12 +178,12 @@ for cp in checkpoints:
         continue
     has_screenshot = True
     out_file = f'/tmp/stage-{name}.png'
-    full_url = base_url + url
+    full_url = url if url.startswith('http') else base_url + url
     r = subprocess.run(['curl', '-s', full_url, '-o', out_file], capture_output=True)
     if os.path.exists(out_file) and os.path.getsize(out_file) > 0:
         print(f'[SCREENSHOT] {name}:{out_file}')
     else:
-        print(f'⚠️  {name} 截图下载失败')
+        print(f'⚠️  {name} 截图下载失败: {full_url}')
 
 if not has_screenshot:
     print('暂无截图（任务还在运行中，或尚未到截图阶段）')

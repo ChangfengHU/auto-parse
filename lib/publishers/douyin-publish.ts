@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { markPublished } from '@/lib/materials';
+import { uploadFromFile, uploadBuffer } from '@/lib/oss';
 
 // ─────────────────────────────────────────────────────────────
 //  任务追踪器：每次发布任务创建独立目录，记录截图 + 日志 + 结果
@@ -15,7 +16,7 @@ interface Checkpoint {
   status: 'ok' | 'warn' | 'error' | 'skip';
   message: string;
   timestamp: string;
-  screenshot?: string; // 相对路径
+  screenshot?: string; // OSS URL
 }
 
 class TaskTracker {
@@ -42,6 +43,7 @@ class TaskTracker {
     fs.writeFileSync(path.join(this.dir, 'task.json'), JSON.stringify({
       taskId: this.taskId,
       startTime: now.toISOString(),
+      title: options.title,
       input: { videoUrl: options.videoUrl, title: options.title, description: options.description, tags: options.tags },
       status: 'running',
       checkpoints: [],
@@ -52,6 +54,7 @@ class TaskTracker {
     this.log(`[INPUT] url=${options.videoUrl} title="${options.title}"`);
   }
 
+
   /** 追加一行日志（带时间戳） */
   log(msg: string) {
     const line = `[${new Date().toISOString()}] ${msg}\n`;
@@ -59,57 +62,62 @@ class TaskTracker {
   }
 
   /**
-   * 截图并记录到 checkpoint
-   * @param locator 如果传入，则进行区域截图（元素周围 padding 30px），否则截全页
+   * 截图并上传到 OSS
+   * @param locator 如果传入，则进行区域截图，否则截全页
    */
-  async screenshot(page: Page, name: string, locator?: Locator): Promise<string | null> {
+  async screenshot(page: Page, name: string, locator?: Locator, emit?: (type: 'log', payload: string) => void): Promise<string | null> {
     this.screenshotIndex++;
     const filename = `${String(this.screenshotIndex).padStart(2, '0')}-${name}.png`;
     const filepath = path.join(this.screenshotDir, filename);
-    const relativePath = `screenshots/${filename}`;
+    const ossKey = `publish-history/${this.taskId}/screenshots/${filename}`;
 
-    // ── 第一步：尝试区域/元素截图（单独 try，失败不影响全页回退）
-    if (locator) {
-      try {
-        const visible = await locator.isVisible().catch(() => false);
-        if (visible) {
-          const box = await locator.boundingBox().catch(() => null);
-          if (box) {
-            const pad = 30;
-            await page.screenshot({
-              path: filepath,
-              clip: {
-                x: Math.max(0, box.x - pad),
-                y: Math.max(0, box.y - pad),
-                width: Math.min(1280, box.width + pad * 2),
-                height: Math.min(800, box.height + pad * 2),
-              },
-              timeout: 5000,
-            });
-            this.log(`[SCREENSHOT:REGION] ${relativePath} (${Math.round(box.width)}x${Math.round(box.height)})`);
-            return relativePath;
-          }
-          // 有元素但没 boundingBox → 直接截元素
-          await locator.screenshot({ path: filepath, timeout: 5000 });
-          this.log(`[SCREENSHOT:ELEMENT] ${relativePath}`);
-          return relativePath;
-        }
-      } catch (e) {
-        // 区域截图失败，fallthrough 到全页
-        this.log(`[SCREENSHOT:REGION_FAIL] ${name} → ${e instanceof Error ? e.message : String(e)}`);
+    const takeAndUpload = async (method: 'region' | 'element' | 'page') => {
+      if (method === 'region' && locator) {
+        const box = await locator.boundingBox();
+        if (box) {
+          const pad = 30;
+          await page.screenshot({
+            path: filepath,
+            clip: {
+              x: Math.max(0, box.x - pad),
+              y: Math.max(0, box.y - pad),
+              width: Math.min(1280, box.width + pad * 2),
+              height: Math.min(800, box.height + pad * 2),
+            },
+            timeout: 5000,
+          });
+        } else return null;
+      } else if (method === 'element' && locator) {
+        await locator.screenshot({ path: filepath, timeout: 5000 });
+      } else {
+        await page.screenshot({ path: filepath, fullPage: false, timeout: 5000 });
       }
-    }
 
-    // ── 第二步：全页截图（兜底，独立 try/catch）
+      if (fs.existsSync(filepath)) {
+        const url = await uploadFromFile(filepath, ossKey, 'image/png');
+        const logLine = `[SCREENSHOT] ${name}:${url}`;
+        this.log(`[SCREENSHOT:${method.toUpperCase()}] ${url}`);
+        if (emit) emit('log', logLine);
+        return url;
+      }
+      return null;
+    };
+
+
+    // 尝试截图流程
     try {
-      await page.screenshot({ path: filepath, fullPage: false, timeout: 5000 });
-      this.log(`[SCREENSHOT:PAGE] ${relativePath}`);
-      return relativePath;
+      if (locator && await locator.isVisible().catch(() => false)) {
+        let url = await takeAndUpload('region').catch(() => null);
+        if (!url) url = await takeAndUpload('element').catch(() => null);
+        if (url) return url;
+      }
+      return await takeAndUpload('page');
     } catch (e) {
       this.log(`[SCREENSHOT:FAIL] ${name} → ${e instanceof Error ? e.message : String(e)}`);
       return null;
     }
   }
+
 
   /** 记录 checkpoint */
   addCheckpoint(name: string, status: Checkpoint['status'], message: string, screenshotPath?: string | null) {
@@ -125,6 +133,18 @@ class TaskTracker {
     this._flush();
   }
 
+  /** 更新任务元数据（如 needsQrScan, latestQrUrl 等） */
+  updateMetadata(updates: Record<string, any>) {
+    try {
+      const metadataPath = path.join(this.dir, 'task.json');
+      const existing = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+      fs.writeFileSync(metadataPath, JSON.stringify({
+        ...existing,
+        ...updates
+      }, null, 2));
+    } catch { /* ignore */ }
+  }
+
   /** 任务结束，写入最终结果 */
   finish(success: boolean, message: string) {
     const endTime = new Date();
@@ -135,18 +155,21 @@ class TaskTracker {
 
   private _flush(status?: string, resultMsg?: string, endTime?: string, durationSec?: string) {
     try {
-      const existing = JSON.parse(fs.readFileSync(path.join(this.dir, 'task.json'), 'utf-8'));
-      fs.writeFileSync(path.join(this.dir, 'task.json'), JSON.stringify({
+      const metadataPath = path.join(this.dir, 'task.json');
+      const existing = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+      fs.writeFileSync(metadataPath, JSON.stringify({
         ...existing,
         status: status ?? existing.status,
         checkpoints: this.checkpoints,
         result: resultMsg ? { success: status === 'success', message: resultMsg } : existing.result,
         endTime: endTime ?? existing.endTime,
         durationSec: durationSec ?? existing.durationSec,
+        needsQrScan: status === 'success' ? false : existing.needsQrScan, // 完成后清除状态
       }, null, 2));
     } catch { /* ignore */ }
   }
 }
+
 
 // ─────────────────────────────────────────────────────────────
 //  Cookie 管理
@@ -269,10 +292,14 @@ export async function publishToDouyin(
 ): Promise<PublishResult> {
   const tracker = new TaskTracker(options);
   const log = (msg: string) => { console.log(msg); emit('log', msg); tracker.log(`[EMIT] ${msg}`); };
+  const screenshot = async (page: Page, name: string, locator?: Locator) => {
+    return await tracker.screenshot(page, name, locator, (type, payload) => emit(type as EmitType, payload));
+  };
 
   log(`🆔 任务ID：${tracker.taskId}`);
 
   if (!acquireLock()) {
+
     const msg = '当前有发布任务正在进行中，请等待完成后再试（防止并发触发风控）';
     tracker.finish(false, msg);
     return { success: false, message: msg, taskId: tracker.taskId };
@@ -343,7 +370,7 @@ export async function publishToDouyin(
 
     // 截图：聚焦上传区域
     const uploadAreaLocator = page.locator('[class*="upload"],[class*="Upload"]').first();
-    const loginCheckShot = await tracker.screenshot(page, 'login-check', uploadAreaLocator);
+    const loginCheckShot = await screenshot(page, 'login-check', uploadAreaLocator);
     tracker.addCheckpoint('login-check', needLogin ? 'warn' : 'ok',
       needLogin ? '未检测到上传框，需要登录' : '已登录，上传框可见', loginCheckShot);
 
@@ -372,16 +399,29 @@ export async function publishToDouyin(
         }
 
         if (buf) {
-          // 保存二维码到任务历史
+          // 上传到 OSS
+          const ossKey = `publish-history/${tracker.taskId}/screenshots/qrcode-${Date.now()}.png`;
+          const qrUrl = await uploadBuffer(buf, ossKey, 'image/png');
+          
+          // 同时保存本地备份（可选）
           const qrPath = path.join(tracker.screenshotDir, `qrcode-${Date.now()}.png`);
           fs.writeFileSync(qrPath, buf);
-          tracker.log(`[QRCODE] 已保存到 ${qrPath}`);
-          emit('qrcode', `data:image/png;base64,${buf.toString('base64')}`);
-          log('📱 请用抖音 App 扫描上方二维码（约 3 分钟有效）');
+          
+          tracker.log(`[QRCODE] OSS: ${qrUrl}`);
+          
+          // 发送给前端/Shell
+          emit('qrcode', qrUrl); // 改为发送 URL 而不是 base64
+          
+          // 更新任务元数据以便状态接口查询
+          tracker.updateMetadata({ needsQrScan: true, latestQrUrl: qrUrl });
+
+          log(`📱 请用抖音 App 扫描二维码登录：${qrUrl}`);
+          log('📱 二维码约 3 分钟有效');
         } else {
-          log('⚠️ 无法截取二维码，请手动访问 creator.douyin.com 扫码登录');
+          log('⚠️ 无法截取二维码，请手动同步 Cookie');
         }
       };
+
 
       await sendQrCode();
 
@@ -405,7 +445,7 @@ export async function publishToDouyin(
       }
 
       log('✅ 扫码登录成功！保存 Cookie...');
-      const loginShot = await tracker.screenshot(page, 'login-success');
+      const loginShot = await screenshot(page, 'login-success');
       tracker.addCheckpoint('login', 'ok', '扫码登录成功', loginShot);
 
       const newCookies = await context.cookies();
@@ -423,7 +463,7 @@ export async function publishToDouyin(
 
     log('📄 上传页就绪');
     const uploadZone = page.locator('input[accept*="video/mp4"]').locator('xpath=../..');
-    const uploadPageShot = await tracker.screenshot(page, 'upload-page-ready', uploadZone);
+    const uploadPageShot = await screenshot(page, 'upload-page-ready', uploadZone);
     tracker.addCheckpoint('upload-page', 'ok', '上传页就绪', uploadPageShot);
 
     const videoTab = page.getByText('发布视频', { exact: true }).first();
@@ -444,7 +484,7 @@ export async function publishToDouyin(
       await page.waitForTimeout(3000);
     });
 
-    const injectShot = await tracker.screenshot(page, 'video-injected');
+    const injectShot = await screenshot(page, 'video-injected');
     tracker.addCheckpoint('video-inject', 'ok', '视频文件已注入上传框', injectShot);
     log('📤 视频已注入，等待跳转到发布表单页（最多 2 分钟）...');
 
@@ -467,13 +507,13 @@ export async function publishToDouyin(
 
     const uploadPageText = await page.evaluate(() => document.body.innerText).catch(() => '');
     if (uploadPageText.includes('上传失败') || uploadPageText.includes('网络错误')) {
-      const cp1Shot = await tracker.screenshot(page, 'cp1-upload-failed');
+      const cp1Shot = await screenshot(page, 'cp1-upload-failed');
       tracker.addCheckpoint('cp1-upload', 'error', '上传失败：页面出现错误提示', cp1Shot);
       throw new Error('视频上传失败，页面出现错误提示');
     }
 
     const cp1Msg = videoPreviewLoaded ? '视频上传成功，预览已加载' : '视频上传成功（无预览元素）';
-    const cp1Shot = await tracker.screenshot(page, 'cp1-uploaded');
+    const cp1Shot = await screenshot(page, 'cp1-uploaded');
     tracker.addCheckpoint('cp1-upload', 'ok', cp1Msg, cp1Shot);
     log(`✅ Checkpoint 1：${cp1Msg}`);
 
@@ -532,7 +572,7 @@ export async function publishToDouyin(
     }
 
     const titleAreaLocator = titleInput.locator('xpath=../../..');
-    const cp2Shot = await tracker.screenshot(page, 'cp2-title-filled', titleAreaLocator);
+    const cp2Shot = await screenshot(page, 'cp2-title-filled', titleAreaLocator);
     tracker.addCheckpoint('cp2-title', 'ok', `标题已填写 → "${filledTitle}"`, cp2Shot);
     log(`✅ Checkpoint 2：标题已填写 → "${filledTitle}"`);
 
@@ -563,7 +603,7 @@ export async function publishToDouyin(
       log('✅ Checkpoint 3：' + cp3Msg);
     }
     const coverZone = page.locator('[class*="cover"],[class*="Cover"]').first();
-    const cp3Shot = await tracker.screenshot(page, 'cp3-cover', coverZone);
+    const cp3Shot = await screenshot(page, 'cp3-cover', coverZone);
     tracker.addCheckpoint('cp3-cover', coverFound ? 'ok' : 'skip', cp3Msg, cp3Shot);
 
     // ── Checkpoint 4：内容检测 ────────────────────────────────
@@ -581,7 +621,7 @@ export async function publishToDouyin(
     }
 
     if (!detectionRequired) {
-      const cp4Shot = await tracker.screenshot(page, 'cp4-no-detection');
+      const cp4Shot = await screenshot(page, 'cp4-no-detection');
       tracker.addCheckpoint('cp4-detection', 'skip', '无需内容检测，可直接发布', cp4Shot);
       log('✅ Checkpoint 4：无需内容检测，可直接发布');
       detectionPassed = true;
@@ -614,7 +654,7 @@ export async function publishToDouyin(
 
       // 条件 1：高峰值后 UI 更新（原逻辑）
       if (maxPct >= 95 && info.pct <= 0) {
-        const cp4Shot = await tracker.screenshot(page, 'cp4-detection-done');
+        const cp4Shot = await screenshot(page, 'cp4-detection-done');
         tracker.addCheckpoint('cp4-detection', 'ok', `检测完成（峰值 ${maxPct}%）`, cp4Shot);
         log(`✅ 检测完成（${maxPct}% → UI已更新）`);
         detectionPassed = true;
@@ -623,7 +663,7 @@ export async function publishToDouyin(
 
       // 条件 2：检测区消失 10s+ 且有过进度 → 视为通过（修复卡在50%问题）
       if (disappearedCount >= 5 && maxPct >= 40) {
-        const cp4Shot = await tracker.screenshot(page, 'cp4-detection-done');
+        const cp4Shot = await screenshot(page, 'cp4-detection-done');
         tracker.addCheckpoint('cp4-detection', 'ok', `检测完成（峰值 ${maxPct}%，检测区已消失）`, cp4Shot);
         log(`✅ 检测完成（${maxPct}% → 检测区消失，视为通过）`);
         detectionPassed = true;
@@ -635,7 +675,7 @@ export async function publishToDouyin(
       if (line !== lastDetectMsg) { log(line); lastDetectMsg = line; }
 
       if (info.done) {
-        const cp4Shot = await tracker.screenshot(page, 'cp4-detection-done');
+        const cp4Shot = await screenshot(page, 'cp4-detection-done');
         tracker.addCheckpoint('cp4-detection', 'ok', `检测通过（${elapsed}s）`, cp4Shot);
         detectionPassed = true;
         break;
@@ -644,14 +684,14 @@ export async function publishToDouyin(
     }
 
     if (!detectionPassed) {
-      const cp4Shot = await tracker.screenshot(page, 'cp4-detection-timeout');
+      const cp4Shot = await screenshot(page, 'cp4-detection-timeout');
       tracker.addCheckpoint('cp4-detection', 'warn', '检测超时（3分钟），强行继续发布', cp4Shot);
       log('⚠️ 检测超时（3分钟），尝试继续发布...');
     }
 
     const finalBodyText = await page.evaluate(() => document.body.innerText);
     if (finalBodyText.includes('无法发布') || finalBodyText.includes('内容违规') || finalBodyText.includes('审核不通过')) {
-      const errShot = await tracker.screenshot(page, 'content-violation');
+      const errShot = await screenshot(page, 'content-violation');
       tracker.addCheckpoint('violation-check', 'error', '内容违规，无法发布', errShot);
       throw new Error('视频检测未通过，内容可能违规');
     }
@@ -660,7 +700,7 @@ export async function publishToDouyin(
     log('🚀 检测通过，点击发布按钮...');
     const publishBtn = page.getByRole('button', { name: '发布' }).last();
     await publishBtn.waitFor({ timeout: 10_000 });
-    const beforePublishShot = await tracker.screenshot(page, 'before-publish-click');
+    const beforePublishShot = await screenshot(page, 'before-publish-click');
     tracker.addCheckpoint('pre-publish', 'ok', '找到发布按钮，准备点击', beforePublishShot);
     await publishBtn.click();
 
@@ -668,7 +708,7 @@ export async function publishToDouyin(
     log('⏳ 等待跳转到作品管理页...');
     await page.waitForURL(url => url.toString().includes('/content/manage'), { timeout: 60_000 });
     log('📋 已跳转到作品管理页，等待视频上传完成...');
-    const managePageShot = await tracker.screenshot(page, 'manage-page');
+    const managePageShot = await screenshot(page, 'manage-page');
     tracker.addCheckpoint('redirect-manage', 'ok', '已跳转到作品管理页', managePageShot);
 
     // ── 等待后台上传完成（两阶段）─────────────────────────────
@@ -714,7 +754,7 @@ export async function publishToDouyin(
     const uploadSec = ((Date.now() - uploadStart2) / 1000).toFixed(0);
     log(`✅ 视频上传完成（耗时 ${uploadSec}s），抖音将自动发布`);
 
-    const finalShot = await tracker.screenshot(page, 'publish-complete');
+    const finalShot = await screenshot(page, 'publish-complete');
     tracker.addCheckpoint('upload-complete', 'ok', `后台上传完成，耗时 ${uploadSec}s`, finalShot);
 
     await page.waitForTimeout(3000);
@@ -733,7 +773,7 @@ export async function publishToDouyin(
     try {
       const pages = browser.contexts()[0]?.pages();
       if (pages?.length) {
-        const errShot = await tracker.screenshot(pages[0], 'error-final');
+        const errShot = await screenshot(pages[0], 'error-final');
         tracker.addCheckpoint('error', 'error', msg, errShot);
       }
     } catch { /* ignore */ }

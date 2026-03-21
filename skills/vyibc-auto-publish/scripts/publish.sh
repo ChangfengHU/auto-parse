@@ -59,8 +59,12 @@ curl -s -N -X POST "https://parse.vyibc.com/api/publish" \
           echo "$payload"
           ;;
         qrcode)
-          # 把 base64 图片解码存到本地，让 Claude Code 直接读取展示
-          echo "$payload" | python3 -c "
+          if [[ "$payload" == http* ]]; then
+            # 收到的是 OSS URL
+            curl -s "$payload" -o "${QR_FILE}"
+          else
+            # 收到的是 base64 数据（兼容旧版）
+            echo "$payload" | python3 -c "
 import sys, base64
 data = sys.stdin.read().strip()
 if data.startswith('data:image'):
@@ -68,9 +72,11 @@ if data.startswith('data:image'):
 with open('${QR_FILE}', 'wb') as f:
     f.write(base64.b64decode(data))
 " 2>/dev/null
+          fi
           echo "[QRCODE_FILE] ${QR_FILE}"
-          echo "请用抖音 App 扫描上方二维码登录（约3分钟有效）"
+          echo "请用抖音 App 扫描内容中的二维码登录（约3分钟有效）"
           ;;
+
         done)
           echo "[DONE] $payload"
           ;;

@@ -35,30 +35,41 @@ export async function uploadVideoFromUrl(videoUrl: string, key: string): Promise
       'x-oss-object-acl': 'public-read',
       'Content-Disposition': `attachment; filename="${filename}"`,
     },
-  });
+  } as any);
 
-  return result.url;
+  return (result as any).url;
 }
 
-// 从本地文件上传（ffmpeg 合并后用这个）
-export async function uploadVideoFromFile(filePath: string, key: string): Promise<string> {
+// 从本地 file 上传
+export async function uploadFromFile(filePath: string, key: string, contentType: string = 'video/mp4'): Promise<string> {
   const client = createClient();
+  const filename = key.split('/').pop() ?? 'file';
 
-  const stream = fs.createReadStream(filePath);
-  const stat = fs.statSync(filePath);
-
-  const filename = key.split('/').pop() ?? 'video.mp4';
-  const result = await client.put(key, stream, {
+  const result = await client.put(key, filePath, {
     headers: {
-      'Content-Type': 'video/mp4',
-      'Content-Length': String(stat.size),
+      'Content-Type': contentType,
       'x-oss-object-acl': 'public-read',
-      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Disposition': `inline; filename="${filename}"`,
     },
   });
 
-  // 上传后删除临时文件
-  try { fs.unlinkSync(filePath); } catch { /* ignore */ }
-
-  return result.url;
+  return (result as any).url;
 }
+
+// 从 Buffer 上传（二维码、动态截图等）
+export async function uploadBuffer(buf: Buffer, key: string, contentType: string = 'image/png'): Promise<string> {
+  const client = createClient();
+  const filename = key.split('/').pop() ?? 'image.png';
+
+  const result = await client.put(key, buf, {
+    headers: {
+      'Content-Type': contentType,
+      'x-oss-object-acl': 'public-read',
+      'Content-Disposition': `inline; filename="${filename}"`,
+    },
+  });
+
+  return (result as any).url;
+}
+
+
