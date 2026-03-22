@@ -1,11 +1,23 @@
 import { NextRequest } from 'next/server';
+import fs from 'fs';
+import path from 'path';
 import { publishToDouyin } from '@/lib/publishers/douyin-publish';
+
+const COOKIE_FILE = path.join(process.cwd(), '.douyin-cookie.json');
+
+/** Cookie 文件在 2 小时内更新过，视为有效，可跳过登录检测 */
+function isCookieFresh(): boolean {
+  try {
+    const stat = fs.statSync(COOKIE_FILE);
+    return Date.now() - stat.mtimeMs < 2 * 3600 * 1000;
+  } catch { return false; }
+}
 
 // POST /api/publish — SSE 流式推送进度
 // Body: { videoUrl: string, title: string, tags?: string[] }
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  const { videoUrl, title, description, tags } = body as { videoUrl?: string; title?: string; description?: string; tags?: string[] };
+  const { videoUrl, title, description, tags, cookieStr, clientId } = body as { videoUrl?: string; title?: string; description?: string; tags?: string[]; cookieStr?: string; clientId?: string };
 
   if (!videoUrl || !title) {
     return new Response(
@@ -24,8 +36,39 @@ export async function POST(req: NextRequest) {
       };
 
       try {
+        // 如果提供了 clientId，从 Supabase 拉取 cookie（更安全，cookie 不经过前端）
+        let resolvedCookieStr = cookieStr;
+        if (clientId && !resolvedCookieStr) {
+          try {
+            const SUPABASE_URL = process.env.SUPABASE_URL || 'https://okkgchwzppghiyfgmrlj.supabase.co';
+            const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ra2djaHd6cHBnaGl5ZmdtcmxqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0OTY1NDA1MCwiZXhwIjoyMDY1MjMwMDUwfQ.tyKEsDr9lq2WtowiN0lBwKU2sxkKdRk6phBswiK88rE';
+            const r = await fetch(`${SUPABASE_URL}/rest/v1/douyin_sessions?client_id=eq.${encodeURIComponent(clientId)}&select=cookie_str&limit=1`, {
+              headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+            });
+            if (r.ok) {
+              const rows = await r.json() as Array<{ cookie_str: string }>;
+              if (rows[0]?.cookie_str) { resolvedCookieStr = rows[0].cookie_str; send('log', `🔑 已通过凭证 ${clientId} 获取登录信息`); }
+            }
+          } catch { /* ignore, fall back to local cookie */ }
+        }
+
+        // 如果前端带了插件 cookie，直接写入本地文件并跳过登录检测
+        if (resolvedCookieStr) { const cookieStr = resolvedCookieStr;
+          const fs = await import('fs');
+          const path = await import('path');
+          const COOKIE_FILE = path.join(process.cwd(), '.douyin-cookie.json');
+          const cookies = cookieStr.split(';').map((c: string) => {
+            const idx = c.indexOf('=');
+            if (idx < 0) return null;
+            return { name: c.slice(0, idx).trim(), value: c.slice(idx + 1).trim(), domain: '.douyin.com', path: '/', secure: true, sameSite: 'None' as const };
+          }).filter((c: any) => c?.name && c?.value);
+          fs.writeFileSync(COOKIE_FILE, JSON.stringify({ cookies, updatedAt: Date.now(), source: 'plugin' }, null, 2));
+          send('log', '🔑 已使用插件登录信息，跳过登录检测');
+        }
+        const skipLoginCheck = resolvedCookieStr ? true : isCookieFresh();
+        if (!cookieStr && skipLoginCheck) send('log', '⏭️ Cookie 有效期内，将跳过登录检测直接发布');
         const result = await publishToDouyin(
-          { videoUrl, title, description, tags },
+          { videoUrl, title, description, tags, skipLoginCheck },
           (type, payload) => send(type, payload),
         );
         // 1. 发送独立的 taskId 事件（结构化，便于脚本/CLI 直接解析）

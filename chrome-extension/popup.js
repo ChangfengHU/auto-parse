@@ -104,84 +104,7 @@ async function copyToClipboard() {
   }
 }
 
-// ── 同步登录抖音（把文本框的 cookie 写入浏览器）──────────
-async function restoreDouyinLogin() {
-  const btn = document.getElementById('loginBtn');
-  const text = document.getElementById('loginText');
 
-  const cookieStr = document.getElementById('cookieBox').value.trim();
-  if (!cookieStr) { showToast('请先填入 Cookie 信息'); return; }
-  if (!cookieStr.includes('sessionid=')) {
-    showToast('Cookie 中缺少 sessionid，请确认登录信息完整');
-    return;
-  }
-
-  btn.disabled = true;
-  text.textContent = '写入中...';
-
-  try {
-    const pairs = parseCookieString(cookieStr);
-    let ok = 0;
-    await Promise.all(pairs.map(({ name, value }) =>
-      new Promise(resolve => {
-        chrome.cookies.set(
-          { url: 'https://www.douyin.com', name, value, domain: '.douyin.com', path: '/', secure: true, sameSite: 'no_restriction' },
-          cookie => { if (cookie) ok++; resolve(); }
-        );
-      })
-    ));
-    showToast(`已写入 ${ok} 个 Cookie 到抖音`);
-    await checkLoginStatus();
-  } catch (e) {
-    showToast('写入失败：' + e.message);
-  } finally {
-    btn.disabled = false;
-    text.textContent = '同步登录抖音';
-  }
-}
-
-// ── 同步 Cookie 到解析平台 ──────────────────────────────
-async function syncToServer() {
-  const btn = document.getElementById('syncBtn');
-  const icon = document.getElementById('syncIcon');
-  const text = document.getElementById('syncText');
-
-  let cookieStr = document.getElementById('cookieBox').value.trim();
-  if (!cookieStr) {
-    const cookies = await getDouyinCookies();
-    cookieStr = cookiesToString(cookies);
-    if (cookieStr) document.getElementById('cookieBox').value = cookieStr;
-  }
-
-  if (!cookieStr) { showToast('未检测到登录状态，请先登录抖音'); return; }
-  if (!cookieStr.includes('sessionid=')) { showToast('Cookie 中缺少 sessionid'); return; }
-
-  btn.disabled = true;
-  icon.textContent = '⟳';
-  text.textContent = '同步中...';
-
-  try {
-    const res = await fetch(`${SERVER}/api/cookie`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookie: cookieStr }),
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('已同步到解析平台！');
-      chrome.storage.local.set({ lastSync: Date.now() });
-      await checkServerStatus();
-    } else {
-      showToast('同步失败：' + (data.error || '未知错误'));
-    }
-  } catch (e) {
-    showToast('网络错误：' + e.message);
-  } finally {
-    btn.disabled = false;
-    icon.textContent = '⇅';
-    text.textContent = '同步到解析平台';
-  }
-}
 
 // ── 检查抖音登录状态（用 uid_tt 做真实验证）──────────────
 async function checkLoginStatus() {
@@ -205,27 +128,6 @@ async function checkLoginStatus() {
   return hasSession && hasUid;
 }
 
-// ── 检查服务器 Cookie 状态 ────────────────────────────────
-async function checkServerStatus() {
-  try {
-    const res = await fetch(`${SERVER}/api/cookie`, { method: 'GET' });
-    const data = await res.json();
-    const el = document.getElementById('serverStatus');
-    if (data.valid) {
-      el.className = 'badge badge-green';
-      el.innerHTML = '<span class="dot dot-green"></span> Cookie 有效';
-    } else {
-      el.className = 'badge badge-red';
-      el.innerHTML = '<span class="dot dot-red"></span> Cookie 已过期';
-    }
-    document.getElementById('lastSync').textContent =
-      data.updatedAt ? formatTime(data.updatedAt) : '—';
-  } catch {
-    const el = document.getElementById('serverStatus');
-    el.className = 'badge badge-gray';
-    el.innerHTML = '<span class="dot dot-gray"></span> 无法连接';
-  }
-}
 
 // ── 保活开关 ──────────────────────────────────────────────
 async function initKeepAliveToggle() {
@@ -253,17 +155,66 @@ async function initKeepAliveToggle() {
   }
 }
 
+
+
+// ── 显示 clientId ──────────────────────────────────────
+async function loadClientId() {
+  const { clientId } = await chrome.storage.local.get('clientId');
+  const el = document.getElementById('clientIdDisplay');
+  if (!el) return;
+  if (clientId) {
+    el.textContent = clientId;
+    el.title = '点击复制凭证';
+    el.addEventListener('click', () => {
+      navigator.clipboard.writeText(clientId).then(() => showToast('凭证已复制！'));
+    });
+  } else {
+    el.textContent = '生成中...';
+    // 触发 background 生成
+    setTimeout(loadClientId, 1000);
+  }
+}
+
+
+// ── 手动同步到发布平台 ─────────────────────────────────
+async function manualSyncToPublish() {
+  const btn = document.getElementById('manualSyncBtn');
+  if (!btn || btn.disabled) return;
+  btn.disabled = true;
+  btn.textContent = '⟳';
+
+  const cookies = await getDouyinCookies();
+  const cookieStr = cookiesToString(cookies);
+  if (!cookieStr || !cookieStr.includes('sessionid=')) {
+    showToast('未检测到抖音登录，无法同步');
+    btn.disabled = false; btn.textContent = '☁';
+    return;
+  }
+
+  chrome.runtime.sendMessage({ type: 'SYNC_TO_SUPABASE', cookieStr }, res => {
+    if (res?.ok) {
+      const now = Date.now();
+      chrome.storage.local.set({ lastPublishSync: now });
+      const el = document.getElementById('lastPublishSync');
+      if (el) el.textContent = formatTime(now);
+      showToast('✅ 已同步到发布平台');
+    } else {
+      showToast('同步失败，请检查网络');
+    }
+    btn.disabled = false; btn.textContent = '☁';
+  });
+}
+
 // ── 初始化 ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   // 恢复本地缓存的同步时间
-  chrome.storage.local.get(['lastSync'], result => {
-    if (result.lastSync) {
-      document.getElementById('lastSync').textContent = formatTime(result.lastSync);
-    }
+  chrome.storage.local.get(['lastPublishSync'], result => {
+    const el = document.getElementById('lastPublishSync');
+    if (el && result.lastPublishSync) el.textContent = formatTime(result.lastPublishSync);
   });
 
   // 并行检查状态
-  await Promise.all([checkLoginStatus(), checkServerStatus()]);
+  await checkLoginStatus();
 
   // 初始化保活开关
   await initKeepAliveToggle();
@@ -271,6 +222,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 绑定按钮
   document.getElementById('readBtn').addEventListener('click', readCookiesToBox);
   document.getElementById('copyBtn').addEventListener('click', copyToClipboard);
-  document.getElementById('loginBtn').addEventListener('click', restoreDouyinLogin);
-  document.getElementById('syncBtn').addEventListener('click', syncToServer);
+
+
+
+  await loadClientId();
+  document.getElementById('manualSyncBtn')?.addEventListener('click', manualSyncToPublish);
 });

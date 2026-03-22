@@ -231,8 +231,18 @@ function PublishPageInner() {
   const [materials,    setMaterials]    = useState<Material[]>([]);
   const [showDrawer,   setShowDrawer]   = useState(false);
 
-  const [loginStatus,  setLoginStatus]  = useState<LoginStatus>('unknown');
-  const [loginQr,      setLoginQr]      = useState<string | null>(null);
+  const [loginStatus,   setLoginStatus]  = useState<LoginStatus>('unknown');
+  const [loginQr,       setLoginQr]      = useState<string | null>(null);
+  const [loginLog,      setLoginLog]     = useState<string>('');
+  const [showCookieInput, setShowCookieInput] = useState(false);
+  const [cookiePaste,   setCookiePaste]  = useState('');
+  const [cookieSaving,  setCookieSaving] = useState(false);
+
+  // 插件凭证（clientId → Supabase）
+  const [clientId,       setClientId]      = useState('');
+  const [pluginFetching, setPluginFetching] = useState(false);
+  const [pluginCookie,   setPluginCookie]  = useState<string | null>(null);
+  const [pluginMsg,      setPluginMsg]     = useState<{ type: 'ok' | 'warn' | 'error'; text: string } | null>(null);
 
   const [publishState, setPublishState] = useState<'idle' | 'publishing' | 'done' | 'error'>('idle');
   const [stages,       setStages]       = useState<StageState[]>([]);
@@ -252,6 +262,37 @@ function PublishPageInner() {
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   // ── 初始化 ─────────────────────────────────────────────────
+
+  // 页面加载时自动检测插件，获取 clientId 并自动拉取登录信息
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type !== 'DOUYIN_CLIENT_ID') return;
+      const id = event.data.clientId as string | null;
+      if (!id) return;
+      window.removeEventListener('message', handler);
+      setClientId(id);
+      // 自动拉取登录信息
+      fetch(`/api/login/supabase?clientId=${encodeURIComponent(id)}`)
+        .then(r => r.json())
+        .then((d: { found?: boolean; expired?: boolean; cookieStr?: string | null; account?: string | null; message?: string }) => {
+          if (d.found && !d.expired && d.cookieStr) {
+            setPluginCookie(d.cookieStr);
+            setLoginStatus('logged_in');
+            setPluginMsg({ type: 'ok', text: d.message ?? '已通过插件自动登录' });
+          } else if (d.found && d.expired) {
+            setPluginMsg({ type: 'warn', text: d.message ?? 'Cookie 可能已过期' });
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('message', handler);
+    // 向插件发送请求
+    window.postMessage({ type: 'DOUYIN_GET_CLIENT_ID' }, '*');
+    // 2s 超时，无响应说明未安装插件
+    const timer = setTimeout(() => window.removeEventListener('message', handler), 2000);
+    return () => { clearTimeout(timer); window.removeEventListener('message', handler); };
+  }, []);
+
   useEffect(() => { fetch('/api/materials').then(r => r.json()).then(setMaterials).catch(() => {}); }, []);
   useEffect(() => {
     fetch('/api/login').then(r => r.json())
@@ -333,13 +374,37 @@ function PublishPageInner() {
     return next;
   }
 
+  const loginAbortRef = useRef<AbortController | null>(null);
+
   async function handleCheckLogin() {
-    if (loginStatus === 'scanning' || loginStatus === 'checking') return;
-    setLoginStatus('scanning'); setLoginQr(null);
+    // 如果正在扫码，点击"取消"
+    if (loginStatus === 'scanning') {
+      loginAbortRef.current?.abort();
+      setLoginStatus('unknown'); setLoginQr(null);
+      return;
+    }
+    if (loginStatus === 'checking') return;
+    setLoginStatus('scanning'); setLoginQr(null); setLoginLog('正在打开浏览器...');
+    const ctrl = new AbortController();
+    loginAbortRef.current = ctrl;
+    const scanStartTime = Date.now();
+
+    // 轮询检测：每 5s 查一次 cookie 是否在本次扫码后更新（防止 SSE 断连漏掉 done 事件）
+    const pollTimer = setInterval(async () => {
+      try {
+        const r = await fetch('/api/login');
+        const d = await r.json() as { loggedIn: boolean; updatedAtMs?: number };
+        // 只有 cookie 更新时间晚于本次扫码开始时间，才视为本次扫码成功
+        if (d.loggedIn && (d.updatedAtMs ?? 0) > scanStartTime) {
+          clearInterval(pollTimer); ctrl.abort();
+          setLoginStatus('logged_in'); setLoginQr(null); setLoginLog('');
+        }
+      } catch { /* ignore */ }
+    }, 5000);
+
     try {
-      const res = await fetch('/api/login', { method: 'POST' });
-      if (!res.ok) { const e = await res.json().catch(() => ({})) as { error?: string }; alert(e.error ?? '失败'); setLoginStatus('unknown'); return; }
-      if (!res.body) { setLoginStatus('unknown'); return; }
+      const res = await fetch('/api/login/qrcode', { signal: ctrl.signal });
+      if (!res.ok || !res.body) { setLoginStatus('unknown'); setLoginLog(''); return; }
       const reader = res.body.getReader(); const decoder = new TextDecoder(); let buf = '';
       while (true) {
         const { done, value } = await reader.read(); if (done) break;
@@ -349,13 +414,64 @@ function PublishPageInner() {
           if (!line.startsWith('data: ')) continue;
           try {
             const { type, payload } = JSON.parse(line.slice(6)) as { type: string; payload: string };
-            if (type === 'qrcode') setLoginQr(payload);
-            else if (type === 'done') { const d = JSON.parse(payload) as { loggedIn: boolean }; setLoginStatus(d.loggedIn ? 'logged_in' : 'not_logged_in'); if (d.loggedIn) setLoginQr(null); }
-            else if (type === 'error') { setLoginStatus('unknown'); setLoginQr(null); }
+            if (type === 'log')    setLoginLog(payload.replace(/^[^\s]+ /, ''));
+            else if (type === 'qrcode') { setLoginQr(payload); setLoginLog('请用抖音 App 扫码，扫后在 App 内点击确认授权'); }
+            else if (type === 'done')   { setLoginStatus('logged_in'); setLoginQr(null); setLoginLog(''); }
+            else if (type === 'error')  { setLoginStatus('not_logged_in'); setLoginQr(null); setLoginLog(''); }
           } catch { /* ignore */ }
         }
       }
-    } catch { setLoginStatus('unknown'); }
+    } catch (e) {
+      if ((e as { name?: string }).name !== 'AbortError') { setLoginStatus('not_logged_in'); setLoginLog(''); }
+    } finally {
+      clearInterval(pollTimer);
+    }
+  }
+
+  async function handleSaveCookie() {
+    if (!cookiePaste.trim() || cookieSaving) return;
+    setCookieSaving(true);
+    try {
+      const res = await fetch('/api/login/cookie', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cookieStr: cookiePaste.trim() }),
+      });
+      const d = await res.json() as { ok?: boolean; error?: string; cookieCount?: number };
+      if (d.ok) {
+        setLoginStatus('logged_in');
+        setCookiePaste('');
+        setShowCookieInput(false);
+      } else {
+        alert(d.error ?? '保存失败');
+      }
+    } catch { alert('请求失败'); }
+    finally { setCookieSaving(false); }
+  }
+
+  async function handleFetchPlugin() {
+    const id = clientId.trim();
+    if (!id || pluginFetching) return;
+    setPluginFetching(true);
+    setPluginMsg(null);
+    setPluginCookie(null);
+    try {
+      const res = await fetch(`/api/login/supabase?clientId=${encodeURIComponent(id)}`);
+      const d = await res.json() as {
+        found?: boolean; expired?: boolean; cookieStr?: string | null;
+        account?: string | null; message?: string; error?: string;
+      };
+      if (d.error) { setPluginMsg({ type: 'error', text: d.error }); return; }
+      if (!d.found) { setPluginMsg({ type: 'error', text: '未找到登录信息，请先安装插件并同步' }); return; }
+      if (d.expired || !d.cookieStr) {
+        setPluginMsg({ type: 'warn', text: d.message ?? 'Cookie 可能已过期，建议重新同步' });
+        return;
+      }
+      setPluginCookie(d.cookieStr);
+      setLoginStatus('logged_in');
+      setPluginMsg({ type: 'ok', text: d.message ?? '登录信息有效' });
+    } catch { setPluginMsg({ type: 'error', text: '请求失败，请检查网络' }); }
+    finally { setPluginFetching(false); }
   }
 
   function handleStop() {
@@ -374,7 +490,7 @@ function PublishPageInner() {
     try {
       const res = await fetch('/api/publish', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoUrl: ossUrl, title, description, tags: tagList }),
+        body: JSON.stringify({ videoUrl: ossUrl, title, description, tags: tagList, clientId: clientId.trim() || undefined, cookieStr: pluginCookie && !clientId.trim() ? pluginCookie : undefined }),
         signal: ctrl.signal,
       });
       if (!res.body) throw new Error('不支持流式响应');
@@ -671,18 +787,99 @@ function PublishPageInner() {
       <div className="space-y-4">
 
         {/* 登录状态 */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className={`border rounded-xl p-4 transition-colors ${
+          loginStatus === 'logged_in'
+            ? 'bg-green-950/40 border-green-800'
+            : loginStatus === 'not_logged_in'
+            ? 'bg-yellow-950/40 border-yellow-800'
+            : 'bg-gray-900 border-gray-800'
+        }`}>
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 font-medium">登录状态</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-400 font-medium">抖音账号</span>
               <span className={`text-xs font-semibold ${loginStatusColor[loginStatus]}`}>{loginStatusLabel[loginStatus]}</span>
+              {loginStatus === 'logged_in' && (
+                <span className="text-xs text-green-700">· Cookie 有效，发布将跳过登录检测</span>
+              )}
             </div>
-            <button onClick={handleCheckLogin}
-              disabled={loginStatus === 'scanning' || loginStatus === 'checking'}
-              className="text-xs text-pink-400 hover:text-pink-300 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors">
-              {loginStatus === 'not_logged_in' || loginStatus === 'unknown' ? '扫码登录' : loginStatus === 'logged_in' ? '重新检测' : '检测中...'}
-            </button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => { setShowCookieInput(v => !v); setLoginQr(null); }}
+                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                title="直接粘贴浏览器 Cookie，无需扫码"
+              >
+                粘贴 Cookie
+              </button>
+              <span className="text-gray-700">|</span>
+              <button onClick={handleCheckLogin}
+                disabled={loginStatus === 'checking'}
+                className="text-xs text-pink-400 hover:text-pink-300 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors">
+                {loginStatus === 'scanning' ? '取消' : loginStatus === 'logged_in' ? '重新扫码' : '扫码登录'}
+              </button>
+            </div>
           </div>
+
+
+          {/* 插件凭证 → Supabase 获取登录信息 */}
+          <div className="mt-3 pt-3 border-t border-gray-800 space-y-2">
+            <p className="text-xs text-gray-500 mb-1">通过插件凭证获取登录信息（推荐）</p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={clientId}
+                onChange={e => { setClientId(e.target.value); setPluginMsg(null); setPluginCookie(null); }}
+                placeholder="粘贴插件凭证 dy_xxxxxxxx"
+                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 outline-none focus:border-pink-600 font-mono transition-colors"
+              />
+              <button
+                onClick={handleFetchPlugin}
+                disabled={!clientId.trim() || pluginFetching}
+                className="text-xs px-3 py-1.5 bg-pink-600 hover:bg-pink-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg transition-colors flex-shrink-0"
+              >
+                {pluginFetching ? '获取中...' : '获取'}
+              </button>
+            </div>
+            {pluginMsg && (
+              <p className={`text-xs ${pluginMsg.type === 'ok' ? 'text-green-500' : pluginMsg.type === 'warn' ? 'text-yellow-500' : 'text-red-400'}`}>
+                {pluginMsg.type === 'ok' ? '✓ ' : pluginMsg.type === 'warn' ? '⚠ ' : '✗ '}{pluginMsg.text}
+              </p>
+            )}
+          </div>
+          {/* 粘贴 Cookie 面板 */}
+          {showCookieInput && (
+            <div className="mt-3 pt-3 border-t border-gray-800 space-y-2">
+              <p className="text-xs text-gray-400">从浏览器插件复制抖音 Cookie 字符串，粘贴到下方：</p>
+              <textarea
+                rows={3}
+                value={cookiePaste}
+                onChange={e => setCookiePaste(e.target.value)}
+                placeholder="sessionid=xxx; uid_tt=xxx; ..."
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 outline-none focus:border-pink-600 resize-none font-mono transition-colors"
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleSaveCookie}
+                  disabled={!cookiePaste.trim() || cookieSaving}
+                  className="text-xs px-3 py-1.5 bg-pink-600 hover:bg-pink-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg transition-colors"
+                >
+                  {cookieSaving ? '保存中...' : '保存并登录'}
+                </button>
+                <button onClick={() => { setShowCookieInput(false); setCookiePaste(''); }}
+                  className="text-xs text-gray-600 hover:text-gray-400">取消</button>
+                <span className="text-xs text-gray-600 ml-auto">需包含 sessionid 字段</span>
+              </div>
+            </div>
+          )}
+          {loginStatus === 'not_logged_in' && !loginQr && (
+            <p className="text-xs text-yellow-600 mt-2">请先扫码登录，否则发布时会中途弹出二维码</p>
+          )}
+          {loginStatus === 'scanning' && loginLog && (
+            <div className="mt-3 pt-3 border-t border-gray-800 flex items-center gap-2">
+              {!loginQr && <span className="w-3.5 h-3.5 border-2 border-pink-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />}
+              {loginQr && <span className="text-xs">📱</span>}
+              <span className="text-xs text-pink-300">{loginLog}</span>
+            </div>
+          )}
           {loginQr && (
             <div className="mt-4 flex flex-col items-center gap-3 pt-3 border-t border-gray-800">
               <p className="text-xs text-yellow-400 font-medium">请用抖音 App 扫描下方二维码</p>
@@ -692,7 +889,7 @@ function PublishPageInner() {
                   style={{ width: 'min(50vw, 200px)', height: 'min(50vw, 200px)' }}
                   className="object-contain block" />
               </button>
-              <p className="text-xs text-yellow-600">扫码后自动保存 Cookie，约 3 分钟有效</p>
+              <p className="text-xs text-yellow-600">扫码后自动保存 Cookie，发布无需再次登录</p>
               <div className="flex items-center gap-4">
                 <button onClick={() => setScreenshotModal({ url: loginQr, label: '抖音扫码登录', isQr: true })}
                   className="text-xs text-yellow-500 hover:text-yellow-300 underline">全屏放大</button>

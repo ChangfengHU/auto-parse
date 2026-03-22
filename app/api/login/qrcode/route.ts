@@ -1,58 +1,12 @@
-import { NextResponse } from 'next/server';
 import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 
 const COOKIE_FILE = path.join(process.cwd(), '.douyin-cookie.json');
-const LOCK_FILE   = path.join(os.tmpdir(), 'douyin-publish.lock');
-const UPLOAD_URL  = 'https://creator.douyin.com/creator-micro/content/upload';
 
-function loadCookies(): Parameters<import('playwright').BrowserContext['addCookies']>[0] {
-  try {
-    if (fs.existsSync(COOKIE_FILE)) {
-      const data = JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf-8'));
-      if (Array.isArray(data.cookies) && data.cookies.length > 0) return data.cookies;
-    }
-  } catch { /* ignore */ }
-  return [];
-}
-
-function isPublishLocked(): boolean {
-  if (!fs.existsSync(LOCK_FILE)) return false;
-  try {
-    const pid = parseInt(fs.readFileSync(LOCK_FILE, 'utf-8').trim(), 10);
-    try { process.kill(pid, 0); return true; } catch { return false; }
-  } catch { return false; }
-}
-
-// GET /api/login → 快速返回 Cookie 文件状态（不开浏览器）
+// GET /api/login/qrcode → SSE：直接跳到抖音二维码登录页，不做已登录预检
+// 适合前端主动发起扫码时调用，用户扫码后 Cookie 自动保存
 export async function GET() {
-  if (!fs.existsSync(COOKIE_FILE)) {
-    return NextResponse.json({ loggedIn: false, reason: 'no_cookie_file' });
-  }
-  try {
-    const stat = fs.statSync(COOKIE_FILE);
-    const data = JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf-8'));
-    const hasCookies = Array.isArray(data?.cookies) && data.cookies.length > 0;
-    const ageHours = Math.round((Date.now() - stat.mtimeMs) / 3_600_000);
-    return NextResponse.json({
-      loggedIn: hasCookies,
-      cookieAgeHours: ageHours,
-      updatedAt: new Date(stat.mtimeMs).toLocaleString('zh-CN'),
-      updatedAtMs: stat.mtimeMs,  // 毫秒时间戳，用于精确比较
-    });
-  } catch {
-    return NextResponse.json({ loggedIn: false, reason: 'parse_error' });
-  }
-}
-
-// POST /api/login → SSE：打开浏览器检测登录，未登录则推送二维码并等待扫码
-export async function POST() {
-  if (isPublishLocked()) {
-    return NextResponse.json({ error: '发布任务进行中，暂无法检测登录' }, { status: 409 });
-  }
-
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -72,28 +26,10 @@ export async function POST() {
           Object.defineProperty(navigator, 'webdriver', { get: () => false });
         });
 
-        const cookies = loadCookies();
-        if (cookies.length > 0) await context.addCookies(cookies);
-
         const page = await context.newPage();
         page.on('dialog', d => d.accept());
 
-        send('log', '🔍 正在检测登录状态...');
-        await page.goto(UPLOAD_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-        await page.waitForTimeout(3000);
-
-        const uploadInput = page.locator('input[accept*="video/mp4"]').first();
-        const isLoggedIn = await uploadInput.waitFor({ state: 'visible', timeout: 12_000 })
-          .then(() => true).catch(() => false);
-
-        if (isLoggedIn) {
-          send('log', '✅ 已登录，Cookie 有效');
-          send('done', JSON.stringify({ loggedIn: true }));
-          return;
-        }
-
-        // 未登录 → 获取二维码
-        send('log', '⚠️ 未检测到登录状态，正在获取扫码二维码...');
+        send('log', '🔐 正在打开抖音登录页...');
         await page.goto('https://creator.douyin.com', { waitUntil: 'networkidle', timeout: 30_000 }).catch(() => {});
         await page.waitForTimeout(2000);
 
@@ -110,12 +46,12 @@ export async function POST() {
               buf = await qrPanel.screenshot().catch(() => null);
             }
           }
-          if (!buf) {
-            buf = await page.screenshot({ fullPage: false }).catch(() => null);
-          }
+          if (!buf) buf = await page.screenshot({ fullPage: false }).catch(() => null);
           if (buf) {
             send('qrcode', `data:image/png;base64,${buf.toString('base64')}`);
-            send('log', '📱 请用抖音 App 扫描二维码登录（约 3 分钟有效）');
+            send('log', '📱 请用抖音 App 扫描二维码（约 3 分钟有效）');
+          } else {
+            send('log', '⚠️ 无法获取二维码，请稍后重试');
           }
         };
 
@@ -131,6 +67,7 @@ export async function POST() {
         }, 50_000);
 
         try {
+          // 等跳转到已登录页面（排除 login/qrcode/passport 等未登录页）
           await page.waitForURL(
             url => {
               const s = url.toString();
@@ -152,10 +89,9 @@ export async function POST() {
         if (douyinCookies.length > 0) {
           fs.writeFileSync(COOKIE_FILE,
             JSON.stringify({ cookies: douyinCookies, updatedAt: Date.now() }, null, 2));
-          send('log', '✅ Cookie 已保存，下次发布无需扫码');
+          send('log', '✅ Cookie 已保存，发布时将自动跳过登录检测');
         }
-
-        send('done', JSON.stringify({ loggedIn: true, message: '登录成功' }));
+        send('done', JSON.stringify({ loggedIn: true }));
 
       } catch (e: unknown) {
         send('error', e instanceof Error ? e.message : String(e));

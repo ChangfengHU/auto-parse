@@ -275,6 +275,8 @@ export interface PublishOptions {
   title: string;
   description?: string;
   tags?: string[];
+  /** Cookie 新鲜时跳过登录检测阶段，直接进入上传 */
+  skipLoginCheck?: boolean;
 }
 
 export interface PublishResult {
@@ -363,16 +365,23 @@ export async function publishToDouyin(
     });
 
     // ── 登录检测 ──────────────────────────────────────────────
-    const uploadInput = page.locator('input[accept*="video/mp4"]').first();
-    const inputVisible = await uploadInput.waitFor({ state: 'visible', timeout: 12_000 })
-      .then(() => true).catch(() => false);
-    const needLogin = !inputVisible;
+    let needLogin = false;
 
-    // 截图：聚焦上传区域
-    const uploadAreaLocator = page.locator('[class*="upload"],[class*="Upload"]').first();
-    const loginCheckShot = await screenshot(page, 'login-check', uploadAreaLocator);
-    tracker.addCheckpoint('login-check', needLogin ? 'warn' : 'ok',
-      needLogin ? '未检测到上传框，需要登录' : '已登录，上传框可见', loginCheckShot);
+    if (options.skipLoginCheck && cookies.length > 0) {
+      // Cookie 有效期内，跳过登录检测，直接进入上传
+      log('⏭️ 登录检测已跳过（Cookie 有效，无需重新验证）');
+      tracker.addCheckpoint('login-check', 'skip', '已携带有效 Cookie，跳过登录检测');
+    } else {
+      const uploadInput = page.locator('input[accept*="video/mp4"]').first();
+      const inputVisible = await uploadInput.waitFor({ state: 'visible', timeout: 12_000 })
+        .then(() => true).catch(() => false);
+      needLogin = !inputVisible;
+
+      const uploadAreaLocator = page.locator('[class*="upload"],[class*="Upload"]').first();
+      const loginCheckShot = await screenshot(page, 'login-check', uploadAreaLocator);
+      tracker.addCheckpoint('login-check', needLogin ? 'warn' : 'ok',
+        needLogin ? '未检测到上传框，需要登录' : '已登录，上传框可见', loginCheckShot);
+    }
 
     if (needLogin) {
       log('⚠️ 检测到未登录，正在获取抖音扫码登录二维码...');
@@ -410,12 +419,12 @@ export async function publishToDouyin(
           tracker.log(`[QRCODE] OSS: ${qrUrl}`);
           
           // 发送给前端/Shell
-          emit('qrcode', qrUrl); // 改为发送 URL 而不是 base64
-          
-          // 更新任务元数据以便状态接口查询
+          emit('qrcode', qrUrl);
+
           tracker.updateMetadata({ needsQrScan: true, latestQrUrl: qrUrl });
 
           log(`📱 请用抖音 App 扫描二维码登录：${qrUrl}`);
+          log('📱 扫码后请在抖音 App 内点击「确认授权」，浏览器将自动继续');
           log('📱 二维码约 3 分钟有效');
         } else {
           log('⚠️ 无法截取二维码，请手动同步 Cookie');
@@ -435,8 +444,15 @@ export async function publishToDouyin(
       }, 50_000);
 
       try {
+        // 等待跳转到已登录后的页面（排除 login/qrcode/passport 等未登录页）
         await page.waitForURL(
-          url => url.toString().includes('creator.douyin.com/creator-micro'),
+          url => {
+            const s = url.toString();
+            return s.includes('creator-micro') &&
+                   !s.includes('/login') &&
+                   !s.includes('qrcode') &&
+                   !s.includes('passport');
+          },
           { timeout: 180_000 }
         );
         loginDone = true;

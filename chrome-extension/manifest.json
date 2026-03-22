@@ -10,7 +10,10 @@
   ],
   "host_permissions": [
     "https://*.douyin.com/*",
-    "https://parse.vyibc.com/*"
+    "https://parse.vyibc.com/*",
+    "https://okkgchwzppghiyfgmrlj.supabase.co/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -27,5 +30,18 @@
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
-  }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://parse.vyibc.com/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
 }

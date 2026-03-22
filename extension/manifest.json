@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "抖音 Cookie 同步",
+  "version": "2.0.0",
+  "description": "自动监听抖音登录状态，每30分钟同步到云端，无需任何额外操作",
+  "permissions": [
+    "cookies",
+    "alarms",
+    "storage"
+  ],
+  "host_permissions": [
+    "*://*.douyin.com/*",
+    "https://okkgchwzppghiyfgmrlj.supabase.co/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "抖音 Cookie 同步"
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

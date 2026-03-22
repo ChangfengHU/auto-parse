@@ -58,6 +58,37 @@ async function pingDouyin(cookieStr) {
   }
 }
 
+
+// ── Supabase 同步（发布平台凭证）────────────────────────
+const SUPABASE_URL = 'https://okkgchwzppghiyfgmrlj.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ra2djaHd6cHBnaGl5ZmdtcmxqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk2NTQwNTAsImV4cCI6MjA2NTIzMDA1MH0.LMhY-7H3ySiXEZt2cjLXhhicL4idx0A6xurvxynqJf8';
+
+async function syncToSupabase(cookieStr) {
+  try {
+    const { clientId } = await chrome.storage.local.get('clientId');
+    if (!clientId) return false;
+
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/douyin_sessions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        Prefer: 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify({
+        client_id: clientId,
+        cookie_str: cookieStr,
+        updated_at: new Date().toISOString(),
+      }),
+    });
+    return res.ok;
+  } catch (e) {
+    console.warn('[发布平台] Supabase 同步失败:', e.message);
+    return false;
+  }
+}
+
 // ── 2. 同步 Cookie 到解析平台 ────────────────────────────
 async function syncToParseServer(cookieStr) {
   try {
@@ -95,6 +126,10 @@ async function keepAliveSync() {
   // Step 2: 同步最新 cookie 到解析平台
   const serverOk = await syncToParseServer(cookieStr);
 
+  // Step 3: 同步到发布平台（Supabase，自动）
+  const supabaseOk = await syncToSupabase(cookieStr);
+  if (supabaseOk) chrome.storage.local.set({ lastPublishSync: Date.now() });
+
   const now = Date.now();
   chrome.storage.local.set({
     lastKeepAlive: now,
@@ -129,6 +164,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'SYNC_TO_SUPABASE') {
+    const { cookieStr } = msg;
+    syncToSupabase(cookieStr).then(ok => sendResponse({ ok }));
+    return true;
+  }
+
   if (msg.type === 'GET_KEEP_ALIVE_STATUS') {
     chrome.alarms.get(ALARM_NAME, alarm => {
       sendResponse({ active: !!alarm });
@@ -148,5 +189,13 @@ function restoreAlarm() {
   });
 }
 
-chrome.runtime.onInstalled.addListener(restoreAlarm);
+chrome.runtime.onInstalled.addListener(async () => {
+  const { clientId } = await chrome.storage.local.get('clientId');
+  if (!clientId) {
+    const id = 'dy_' + crypto.randomUUID().replace(/-/g, '');
+    await chrome.storage.local.set({ clientId: id });
+    console.log('[发布平台] clientId 已生成:', id);
+  }
+  restoreAlarm();
+});
 restoreAlarm();

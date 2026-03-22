@@ -14,12 +14,20 @@
     }
 
     .header {
+      justify-content: space-between;
       padding: 14px 16px;
       border-bottom: 1px solid #1f1f1f;
       display: flex;
       align-items: center;
       gap: 10px;
     }
+    .sync-icon-btn {
+      background: none; border: 1px solid #2a2a2b; border-radius: 6px;
+      color: #6b7280; cursor: pointer; padding: 4px 7px; font-size: 13px;
+      transition: all 0.15s; flex-shrink: 0;
+    }
+    .sync-icon-btn:hover:not(:disabled) { border-color: #7c3aed; color: #a78bfa; }
+    .sync-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .logo {
       width: 30px; height: 30px;
       background: linear-gradient(135deg, #ec4899, #8b5cf6);
@@ -186,6 +194,11 @@
     .dot-gray   { background: #9ca3af; }
 
     /* ── Toast ── */
+    .btn-publish {
+      background: linear-gradient(135deg, #7c3aed, #5b21b6);
+      color: #fff;
+    }
+    .btn-publish:hover:not(:disabled) { filter: brightness(1.1); }
     .toast {
       position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
       background: #1f2937; border: 1px solid #374151;
@@ -204,6 +217,7 @@
       <div class="title">vyibc-auto-parse</div>
       <div class="subtitle">抖音 Cookie 管理</div>
     </div>
+    <button class="sync-icon-btn" id="manualSyncBtn" title="立即同步到发布平台">☁</button>
   </div>
 
   <div class="body">
@@ -227,14 +241,6 @@
 
     <!-- 操作按钮 -->
     <div class="action-section">
-      <button class="btn btn-douyin" id="loginBtn">
-        <span>🔑</span>
-        <span id="loginText">同步登录抖音</span>
-      </button>
-      <button class="btn btn-primary" id="syncBtn">
-        <span id="syncIcon">⇅</span>
-        <span id="syncText">同步到解析平台</span>
-      </button>
     </div>
 
     <!-- 保活开关 -->
@@ -264,8 +270,12 @@
         </span>
       </div>
       <div class="status-row">
-        <span class="status-label">上次同步</span>
-        <span id="lastSync" class="status-value">—</span>
+        <span class="status-label">上次同步（发布平台）</span>
+        <span id="lastPublishSync" class="status-value">—</span>
+      </div>
+      <div class="status-row" style="margin-top:8px;padding-top:8px;border-top:1px solid #2a2a2b;">
+        <span class="status-label">发布平台凭证</span>
+        <span id="clientIdDisplay" class="status-value" style="font-family:monospace;font-size:10px;color:#e94d8a;cursor:pointer;" title="点击复制">—</span>
       </div>
     </div>
 

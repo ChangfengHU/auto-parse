@@ -16,6 +16,7 @@ OSS_URL="${1:-}"
 TITLE="${2:-}"
 DESCRIPTION="${3:-}"
 TAGS="${4:-}"
+CLIENT_ID="${5:-}"
 API="http://localhost:1007/api/publish"
 STATUS_API="http://localhost:1007/api/publish/status"
 
@@ -30,8 +31,9 @@ import json, sys
 d = {'videoUrl': sys.argv[1], 'title': sys.argv[2]}
 if sys.argv[3]: d['description'] = sys.argv[3]
 if sys.argv[4]: d['tags'] = [t.strip() for t in sys.argv[4].split(',') if t.strip()]
+if sys.argv[5]: d['clientId'] = sys.argv[5]
 print(json.dumps(d))
-" "$OSS_URL" "$TITLE" "$DESCRIPTION" "$TAGS")
+" "$OSS_URL" "$TITLE" "$DESCRIPTION" "$TAGS" "$CLIENT_ID")
 
 TASK_ID=""
 FINAL_STATUS=""
