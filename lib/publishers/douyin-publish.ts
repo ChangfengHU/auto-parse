@@ -277,6 +277,8 @@ export interface PublishOptions {
   tags?: string[];
   /** Cookie 新鲜时跳过登录检测阶段，直接进入上传 */
   skipLoginCheck?: boolean;
+  /** 来源凭证（仅用于日志展示）*/
+  clientId?: string;
 }
 
 export interface PublishResult {
@@ -299,6 +301,11 @@ export async function publishToDouyin(
   };
 
   log(`🆔 任务ID：${tracker.taskId}`);
+  // 打印调用方传入的参数摘要
+  if (options.clientId) log(`🔑 登录凭证：${options.clientId}`);
+  if (options.skipLoginCheck && !options.clientId) log(`🍪 使用本地 Cookie 发布`);
+  log(`📋 视频地址：${options.videoUrl.slice(-60)}`);
+  log(`📝 标题：${options.title}`);
 
   if (!acquireLock()) {
 
@@ -368,9 +375,18 @@ export async function publishToDouyin(
     let needLogin = false;
 
     if (options.skipLoginCheck && cookies.length > 0) {
-      // Cookie 有效期内，跳过登录检测，直接进入上传
-      log('⏭️ 登录检测已跳过（Cookie 有效，无需重新验证）');
-      tracker.addCheckpoint('login-check', 'skip', '已携带有效 Cookie，跳过登录检测');
+      // Cookie 声称有效，但仍做 5s 快速验证，避免过期时卡在上传步骤
+      const uploadInput = page.locator('input[accept*="video/mp4"]').first();
+      const inputVisible = await uploadInput.waitFor({ state: 'visible', timeout: 5_000 })
+        .then(() => true).catch(() => false);
+      if (inputVisible) {
+        log('⏭️ Cookie 有效，登录检测已跳过');
+        tracker.addCheckpoint('login-check', 'skip', '已携带有效 Cookie，跳过登录检测');
+      } else {
+        log('⚠️ Cookie 已失效，切换到扫码登录流程...');
+        tracker.addCheckpoint('login-check', 'warn', 'Cookie 失效，需要重新扫码');
+        needLogin = true;
+      }
     } else {
       const uploadInput = page.locator('input[accept*="video/mp4"]').first();
       const inputVisible = await uploadInput.waitFor({ state: 'visible', timeout: 12_000 })
@@ -441,7 +457,7 @@ export async function publishToDouyin(
         await page.reload({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
         await page.waitForTimeout(2000);
         await sendQrCode();
-      }, 50_000);
+      }, 110_000);
 
       try {
         // 等待跳转到已登录后的页面（排除 login/qrcode/passport 等未登录页）
@@ -677,12 +693,44 @@ export async function publishToDouyin(
         break;
       }
 
-      // 条件 2：检测区消失 10s+ 且有过进度 → 视为通过（修复卡在50%问题）
+      // 条件 2：检测区消失 10s+ 且有过进度 → 验证发布按钮可点击 + 无错误文字
       if (disappearedCount >= 5 && maxPct >= 40) {
-        const cp4Shot = await screenshot(page, 'cp4-detection-done');
-        tracker.addCheckpoint('cp4-detection', 'ok', `检测完成（峰值 ${maxPct}%，检测区已消失）`, cp4Shot);
-        log(`✅ 检测完成（${maxPct}% → 检测区消失，视为通过）`);
-        detectionPassed = true;
+        // 等待 2s 让 UI 稳定
+        await page.waitForTimeout(2000);
+
+        const verifyResult = await page.evaluate(() => {
+          const text = document.body.innerText;
+
+          // 明确失败关键词
+          const failKeywords = [
+            '违规', '无法发布', '检测失败', '审核不通过', '发布失败',
+            '不符合', '内容违规', '风险', '限流', '不可发布', '暂不支持',
+          ];
+          const failWord = failKeywords.find(k => text.includes(k));
+          if (failWord) return { pass: false, reason: `页面包含失败关键词：${failWord}` };
+
+          // 检查发布按钮是否可点击
+          const btns = Array.from(document.querySelectorAll('button'));
+          const publishBtn = btns.find(b => b.textContent?.trim() === '发布');
+          if (!publishBtn) return { pass: false, reason: '找不到发布按钮' };
+          if (publishBtn.disabled) return { pass: false, reason: '发布按钮已禁用' };
+          const cls = publishBtn.className || '';
+          if (cls.includes('disabled') || cls.includes('inactive')) {
+            return { pass: false, reason: `发布按钮状态异常（class: ${cls.slice(0, 60)}）` };
+          }
+
+          return { pass: true, reason: '发布按钮可点击，无错误文字' };
+        }).catch(() => ({ pass: false, reason: '页面状态评估异常' }));
+
+        const cp4Shot = await screenshot(page, 'cp4-detection-verify');
+        if (verifyResult.pass) {
+          tracker.addCheckpoint('cp4-detection', 'ok', `检测完成（峰值 ${maxPct}%，检测区消失后验证通过）`, cp4Shot);
+          log(`✅ 检测完成（${maxPct}% → 检测区消失，验证发布按钮可用）`);
+          detectionPassed = true;
+        } else {
+          tracker.addCheckpoint('cp4-detection', 'error', `检测未通过（峰值 ${maxPct}%）：${verifyResult.reason}`, cp4Shot);
+          throw new Error(`内容检测未通过：${verifyResult.reason}`);
+        }
         break;
       }
 
@@ -706,10 +754,12 @@ export async function publishToDouyin(
     }
 
     const finalBodyText = await page.evaluate(() => document.body.innerText);
-    if (finalBodyText.includes('无法发布') || finalBodyText.includes('内容违规') || finalBodyText.includes('审核不通过')) {
+    const violationKeywords = ['无法发布', '内容违规', '审核不通过', '违规', '检测失败', '发布失败', '不符合', '风险', '限流', '不可发布'];
+    const hitKeyword = violationKeywords.find(k => finalBodyText.includes(k));
+    if (hitKeyword) {
       const errShot = await screenshot(page, 'content-violation');
-      tracker.addCheckpoint('violation-check', 'error', '内容违规，无法发布', errShot);
-      throw new Error('视频检测未通过，内容可能违规');
+      tracker.addCheckpoint('violation-check', 'error', `内容检测未通过（${hitKeyword}）`, errShot);
+      throw new Error(`视频检测未通过：页面出现"${hitKeyword}"，内容可能违规`);
     }
 
     // ── 点击发布 ──────────────────────────────────────────────

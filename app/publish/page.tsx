@@ -37,30 +37,30 @@ function MaterialsDrawer({
 
       {/* 抽屉主体 */}
       <div
-        className={`fixed right-0 top-0 h-full z-50 bg-gray-900 border-l border-gray-800 shadow-2xl flex flex-col transition-transform duration-300 ${open ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`fixed right-0 top-0 h-full z-50 bg-card border-l border-border shadow-2xl flex flex-col transition-transform duration-300 ${open ? 'translate-x-0' : 'translate-x-full'}`}
         style={{ width: 400 }}
       >
         {/* 标题栏 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800 flex-shrink-0">
-          <span className="text-sm font-semibold text-white">素材库</span>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+          <span className="text-sm font-semibold text-foreground">素材库</span>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>{filtered.length} 个素材</span>
             <button onClick={onClose} className="ml-2 w-7 h-7 flex items-center justify-center text-gray-500 hover:text-white hover:bg-gray-800 rounded-lg text-xl transition-colors">×</button>
           </div>
         </div>
 
         {/* 搜索框 */}
-        <div className="px-4 py-3 border-b border-gray-800 flex-shrink-0">
+        <div className="px-4 py-3 border-b border-border flex-shrink-0">
           <div className="relative">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-xs">🔍</span>
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">🔍</span>
             <input
               type="text" value={search} onChange={e => setSearch(e.target.value)}
               placeholder="搜索标题..."
-              className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-8 pr-3 py-2 text-sm text-gray-200 outline-none focus:border-pink-600 transition-colors"
+              className="w-full bg-muted border border-border rounded-lg pl-8 pr-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors"
             />
             {search && (
               <button onClick={() => setSearch('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-xs">✕</button>
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs">✕</button>
             )}
           </div>
         </div>
@@ -86,11 +86,11 @@ function MaterialsDrawer({
           ) : (
             <div className="grid grid-cols-2 gap-3">
               {paged.map(m => (
-                <div key={m.id} className="group bg-gray-800 rounded-xl overflow-hidden border border-gray-700 hover:border-pink-500 transition-all duration-200 cursor-pointer"
+                <div key={m.id} className="group bg-muted rounded-xl overflow-hidden border border-border hover:border-primary transition-all duration-200 cursor-pointer"
                   onClick={() => { onSelect(m.ossUrl, m.title); onClose(); }}
                 >
                   {/* 视频缩略图 */}
-                  <div className="aspect-video bg-gray-900 relative overflow-hidden">
+                  <div className="aspect-video bg-black relative overflow-hidden">
                     <video
                       src={m.ossUrl + '#t=1'}
                       preload="metadata"
@@ -110,8 +110,8 @@ function MaterialsDrawer({
                   </div>
                   {/* 标题 + 日期 */}
                   <div className="px-2.5 py-2">
-                    <p className="text-xs text-gray-100 line-clamp-2 leading-tight font-medium">{m.title || '（无标题）'}</p>
-                    <p className="text-xs text-gray-600 mt-1">{new Date(m.parsedAt).toLocaleDateString('zh-CN')}</p>
+                    <p className="text-xs text-foreground line-clamp-2 leading-tight font-medium">{m.title || '（无标题）'}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{new Date(m.parsedAt).toLocaleDateString('zh-CN')}</p>
                   </div>
                 </div>
               ))}
@@ -121,9 +121,9 @@ function MaterialsDrawer({
 
         {/* 分页 */}
         {totalPages > 1 && (
-          <div className="px-4 py-3 border-t border-gray-800 flex-shrink-0 flex items-center justify-between">
+          <div className="px-4 py-3 border-t border-border flex-shrink-0 flex items-center justify-between">
             <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
-              className="text-xs text-gray-400 hover:text-white disabled:text-gray-700 disabled:cursor-not-allowed px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:bg-transparent rounded-lg transition-colors">
+              className="text-xs text-muted-foreground hover:text-foreground disabled:text-muted-foreground/50 disabled:cursor-not-allowed px-3 py-1.5 bg-muted hover:bg-muted/80 disabled:bg-transparent rounded-lg transition-colors">
               ← 上一页
             </button>
             <div className="flex items-center gap-1.5">
@@ -132,14 +132,14 @@ function MaterialsDrawer({
                 const isActive = p === page;
                 return (
                   <button key={i} onClick={() => setPage(Math.max(0, Math.min(totalPages - 1, p)))}
-                    className={`w-6 h-6 rounded text-xs transition-colors ${isActive ? 'bg-pink-600 text-white' : 'text-gray-500 hover:text-white hover:bg-gray-800'}`}>
+                    className={`w-6 h-6 rounded text-xs transition-colors ${isActive ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground hover:bg-muted'}`}>
                     {Math.max(0, Math.min(totalPages - 1, p)) + 1}
                   </button>
                 );
               })}
             </div>
             <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1}
-              className="text-xs text-gray-400 hover:text-white disabled:text-gray-700 disabled:cursor-not-allowed px-3 py-1.5 bg-gray-800 hover:bg-gray-700 disabled:bg-transparent rounded-lg transition-colors">
+              className="text-xs text-muted-foreground hover:text-foreground disabled:text-muted-foreground/50 disabled:cursor-not-allowed px-3 py-1.5 bg-muted hover:bg-muted/80 disabled:bg-transparent rounded-lg transition-colors">
               下一页 →
             </button>
           </div>
@@ -557,46 +557,46 @@ function PublishPageInner() {
           <div key={stage.key}>
             <button
               onClick={() => isActive && toggleStage(stage.key)}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${isActive ? 'hover:bg-gray-800 cursor-pointer' : 'cursor-default'}`}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${isActive ? 'hover:bg-muted cursor-pointer' : 'cursor-default'}`}
             >
               <div className="flex flex-col items-center flex-shrink-0" style={{ width: 20 }}>
                 <StageIcon status={stage.status} />
                 {idx < stages.length - 1 && (
-                  <div className={`w-px mt-0.5 ${stage.status === 'ok' ? 'bg-green-700/60' : 'bg-gray-700/60'}`} style={{ height: 12 }} />
+                  <div className={`w-px mt-0.5 ${stage.status === 'ok' ? 'bg-green-500/40' : 'bg-border'}`} style={{ height: 12 }} />
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className={`text-xs font-medium leading-tight ${
-                  stage.status === 'ok'    ? 'text-green-400' : stage.status === 'running' ? 'text-pink-400' :
-                  stage.status === 'error' ? 'text-red-400'   : stage.status === 'warn' || stage.status === 'skip' ? 'text-yellow-400' : 'text-gray-600'
+                  stage.status === 'ok'    ? 'text-green-500' : stage.status === 'running' ? 'text-primary' :
+                  stage.status === 'error' ? 'text-red-500'   : stage.status === 'warn' || stage.status === 'skip' ? 'text-yellow-500' : 'text-muted-foreground'
                 }`}>{stage.label}</p>
                 {stage.message && stage.status !== 'pending' && (
-                  <p className="text-xs text-gray-600 truncate mt-0.5 leading-tight">{stage.message}</p>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5 leading-tight">{stage.message}</p>
                 )}
               </div>
-              {isActive && <span className="text-gray-600 flex-shrink-0 text-xs">{isLoginQr || hasShot ? '📷' : isExpanded ? '▴' : '▾'}</span>}
+              {isActive && <span className="text-muted-foreground flex-shrink-0 text-xs">{isLoginQr || hasShot ? '📷' : isExpanded ? '▴' : '▾'}</span>}
             </button>
 
             {isExpanded && isActive && (
               <div className="mx-3 mb-1">
                 {isLoginQr ? (
                   <div className="flex flex-col items-center gap-2 py-2">
-                    <p className="text-xs text-yellow-400">扫码登录（可直接扫）</p>
+                    <p className="text-xs text-yellow-500">扫码登录（可直接扫）</p>
                     <button onClick={() => setScreenshotModal({ url: qrCode!, label: '抖音扫码登录', isQr: true })}
-                      className="bg-white rounded-lg p-2 hover:shadow-md transition-shadow">
+                      className="bg-white rounded-lg p-2 shadow-sm hover:shadow-md transition-shadow">
                       <img src={qrCode!} alt="QR Code" className="w-36 h-36 object-contain block" />
                     </button>
                     <button onClick={() => setScreenshotModal({ url: qrCode!, label: '抖音扫码登录', isQr: true })}
-                      className="text-xs text-yellow-600 hover:text-yellow-400 underline">全屏放大</button>
+                      className="text-xs text-yellow-600 hover:text-yellow-500 underline">全屏放大</button>
                   </div>
                 ) : hasShot ? (
                   <button onClick={() => setScreenshotModal({ url: stage.screenshotUrl!, label: stage.label })} className="block w-full group">
                     <img src={stage.screenshotUrl} alt={stage.label}
-                      className="w-full rounded-lg border border-gray-700 group-hover:border-pink-600 object-contain max-h-44 transition-colors" />
-                    <p className="text-xs text-gray-600 text-center mt-1">点击放大</p>
+                      className="w-full rounded-lg border border-border group-hover:border-primary object-contain max-h-44 transition-colors" />
+                    <p className="text-xs text-muted-foreground text-center mt-1">点击放大</p>
                   </button>
                 ) : (
-                  <div className="py-3 text-center text-xs text-gray-600 border border-dashed border-gray-700 rounded-lg">
+                  <div className="py-3 text-center text-xs text-muted-foreground border border-dashed border-border rounded-lg">
                     {stage.status === 'running' ? '⏳ 截图生成中...' : '暂无截图'}
                   </div>
                 )}
@@ -619,13 +619,13 @@ function PublishPageInner() {
         {/* 顶栏 */}
         <div className="flex items-center gap-3 mb-3 flex-shrink-0 min-w-0">
           <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${
-            isPublishing ? 'bg-pink-900 text-pink-300' :
-            publishState === 'done' ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'
+            isPublishing ? 'bg-primary/20 text-primary' :
+            publishState === 'done' ? 'bg-green-500/20 text-green-500' : 'bg-red-500/20 text-red-500'
           }`}>
             {isPublishing ? '发布中' : publishState === 'done' ? '✓ 发布成功' : '✕ 发布失败'}
           </span>
-          <p className="text-sm font-medium text-white truncate flex-1 min-w-0">{title}</p>
-          {taskId && <span className="text-xs text-gray-600 font-mono flex-shrink-0 hidden sm:block">ID: {taskId}</span>}
+          <p className="text-sm font-medium text-foreground truncate flex-1 min-w-0">{title}</p>
+          {taskId && <span className="text-xs text-muted-foreground font-mono flex-shrink-0 hidden sm:block">ID: {taskId}</span>}
           <div className="flex items-center gap-2 flex-shrink-0">
             {/* 发布中：停止 + 返回（最小化） */}
             {isPublishing && (
@@ -638,7 +638,7 @@ function PublishPageInner() {
                 </button>
                 <button
                   onClick={() => setIsMinimized(true)}
-                  className="text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1 rounded-lg transition-colors"
+                  className="text-xs text-muted-foreground hover:text-foreground border border-border hover:border-muted-foreground/30 px-3 py-1 rounded-lg transition-colors"
                 >
                   返回
                 </button>
@@ -648,7 +648,7 @@ function PublishPageInner() {
             {hasResult && (
               <button
                 onClick={() => { setPublishState('idle'); setStages([]); setLogs([]); updateTaskId(''); setQrCode(null); setIsMinimized(false); }}
-                className="text-xs text-pink-400 hover:text-pink-300 border border-pink-900 hover:border-pink-600 px-3 py-1 rounded-lg transition-colors"
+                className="text-xs text-primary hover:text-primary/80 border border-primary/30 hover:border-primary/60 px-3 py-1 rounded-lg transition-colors"
               >
                 重新发布
               </button>
@@ -679,34 +679,34 @@ function PublishPageInner() {
         {/* 主体：日志 + 阶段进度并排，flex-1 撑满剩余高度 */}
         <div className="flex gap-3 flex-1 min-h-0">
 
-          {/* ── 实时日志（左，flex-1，独立滚动） ── */}
-          <div className="flex-1 min-w-0 flex flex-col bg-gray-950 border border-gray-800 rounded-xl overflow-hidden">
-            <div className="px-3 py-2 border-b border-gray-800 flex-shrink-0 flex items-center justify-between">
+          {/* ── 实时日志 (左) ── */}
+          <div className="flex-1 min-w-0 flex flex-col bg-card border border-border rounded-xl overflow-hidden">
+            <div className="px-3 py-2 border-b border-border flex-shrink-0 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-xs text-gray-400 font-medium">实时日志</span>
-                <span className="text-xs text-gray-600">({logs.length} 行)</span>
+                <span className="text-xs text-muted-foreground font-medium">实时日志</span>
+                <span className="text-xs text-muted-foreground/60">({logs.length} 行)</span>
                 {isPublishing && <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />}
               </div>
               {resultMsg && (
-                <span className={`text-xs truncate ml-2 ${publishState === 'done' ? 'text-green-400' : 'text-red-400'}`}>
+                <span className={`text-xs truncate ml-2 ${publishState === 'done' ? 'text-green-500' : 'text-red-500'}`}>
                   {resultMsg.slice(0, 60)}
                 </span>
               )}
             </div>
-            <div className="flex-1 overflow-y-auto p-3 font-mono text-xs text-green-400 space-y-0.5">
+            <div className="flex-1 overflow-y-auto p-3 font-mono text-xs text-primary dark:text-green-400 space-y-0.5 bg-muted/30">
               {logs.length === 0
-                ? <p className="text-gray-600 text-center mt-8">等待日志...</p>
+                ? <p className="text-muted-foreground text-center mt-8">等待日志...</p>
                 : logs.map((l, i) => <div key={i} className="leading-relaxed">{l}</div>)
               }
               <div ref={logsEndRef} />
             </div>
           </div>
 
-          {/* ── 阶段进度（右，固定宽度，独立滚动） ── */}
-          <div className="w-64 flex-shrink-0 flex flex-col bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-            <div className="px-3 py-2 border-b border-gray-800 flex-shrink-0">
-              <p className="text-xs font-medium text-gray-300">发布进度</p>
-              {taskId && <p className="text-xs text-gray-600 font-mono mt-0.5 truncate" title={taskId}>#{taskId.slice(-12)}</p>}
+          {/* ── 阶段进度 (右) ── */}
+          <div className="w-64 flex-shrink-0 flex flex-col bg-card border border-border rounded-xl overflow-hidden shadow-sm">
+            <div className="px-3 py-2 border-b border-border flex-shrink-0">
+              <p className="text-xs font-medium text-foreground/80">发布进度</p>
+              {taskId && <p className="text-xs text-muted-foreground/60 font-mono mt-0.5 truncate" title={taskId}>#{taskId.slice(-12)}</p>}
             </div>
             <div className="flex-1 overflow-y-auto p-2">
               <StagePanel />
@@ -780,8 +780,8 @@ function PublishPageInner() {
       )}
 
       <div className="mb-8">
-        <h1 className="text-2xl font-bold">视频发布</h1>
-        <p className="mt-1 text-gray-400 text-sm">将视频发布到抖音账号，实时追踪每个发布阶段</p>
+        <h1 className="text-2xl font-bold text-foreground">视频发布</h1>
+        <p className="mt-1 text-muted-foreground text-sm">将视频发布到抖音账号，实时追踪每个发布阶段</p>
       </div>
 
       <div className="space-y-4">
@@ -789,14 +789,14 @@ function PublishPageInner() {
         {/* 登录状态 */}
         <div className={`border rounded-xl p-4 transition-colors ${
           loginStatus === 'logged_in'
-            ? 'bg-green-950/40 border-green-800'
+            ? 'bg-green-500/5 border-green-500/20'
             : loginStatus === 'not_logged_in'
-            ? 'bg-yellow-950/40 border-yellow-800'
-            : 'bg-gray-900 border-gray-800'
+            ? 'bg-yellow-500/5 border-yellow-500/20'
+            : 'bg-card border-border'
         }`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-gray-400 font-medium">抖音账号</span>
+              <span className="text-xs text-muted-foreground font-medium">抖音账号</span>
               <span className={`text-xs font-semibold ${loginStatusColor[loginStatus]}`}>{loginStatusLabel[loginStatus]}</span>
               {loginStatus === 'logged_in' && (
                 <span className="text-xs text-green-700">· Cookie 有效，发布将跳过登录检测</span>
@@ -805,15 +805,15 @@ function PublishPageInner() {
             <div className="flex items-center gap-2 flex-shrink-0">
               <button
                 onClick={() => { setShowCookieInput(v => !v); setLoginQr(null); }}
-                className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
                 title="直接粘贴浏览器 Cookie，无需扫码"
               >
                 粘贴 Cookie
               </button>
-              <span className="text-gray-700">|</span>
+              <span className="text-border">|</span>
               <button onClick={handleCheckLogin}
                 disabled={loginStatus === 'checking'}
-                className="text-xs text-pink-400 hover:text-pink-300 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors">
+                className="text-xs text-primary hover:text-primary/80 disabled:text-muted-foreground/50 disabled:cursor-not-allowed transition-colors font-medium">
                 {loginStatus === 'scanning' ? '取消' : loginStatus === 'logged_in' ? '重新扫码' : '扫码登录'}
               </button>
             </div>
@@ -821,52 +821,52 @@ function PublishPageInner() {
 
 
           {/* 插件凭证 → Supabase 获取登录信息 */}
-          <div className="mt-3 pt-3 border-t border-gray-800 space-y-2">
-            <p className="text-xs text-gray-500 mb-1">通过插件凭证获取登录信息（推荐）</p>
+          <div className="mt-3 pt-3 border-t border-border space-y-2">
+            <p className="text-xs text-muted-foreground mb-1">通过插件凭证获取登录信息（推荐）</p>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={clientId}
                 onChange={e => { setClientId(e.target.value); setPluginMsg(null); setPluginCookie(null); }}
                 placeholder="粘贴插件凭证 dy_xxxxxxxx"
-                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-xs text-gray-200 outline-none focus:border-pink-600 font-mono transition-colors"
+                className="flex-1 bg-muted border border-border rounded-lg px-3 py-1.5 text-xs text-foreground outline-none focus:border-primary font-mono transition-colors"
               />
               <button
                 onClick={handleFetchPlugin}
                 disabled={!clientId.trim() || pluginFetching}
-                className="text-xs px-3 py-1.5 bg-pink-600 hover:bg-pink-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg transition-colors flex-shrink-0"
+                className="text-xs px-3 py-1.5 bg-primary text-white hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground/50 rounded-lg transition-colors flex-shrink-0 font-medium"
               >
                 {pluginFetching ? '获取中...' : '获取'}
               </button>
             </div>
             {pluginMsg && (
-              <p className={`text-xs ${pluginMsg.type === 'ok' ? 'text-green-500' : pluginMsg.type === 'warn' ? 'text-yellow-500' : 'text-red-400'}`}>
+              <p className={`text-xs ${pluginMsg.type === 'ok' ? 'text-green-500' : pluginMsg.type === 'warn' ? 'text-yellow-500' : 'text-red-500'}`}>
                 {pluginMsg.type === 'ok' ? '✓ ' : pluginMsg.type === 'warn' ? '⚠ ' : '✗ '}{pluginMsg.text}
               </p>
             )}
           </div>
           {/* 粘贴 Cookie 面板 */}
           {showCookieInput && (
-            <div className="mt-3 pt-3 border-t border-gray-800 space-y-2">
-              <p className="text-xs text-gray-400">从浏览器插件复制抖音 Cookie 字符串，粘贴到下方：</p>
+            <div className="mt-3 pt-3 border-t border-border space-y-2">
+              <p className="text-xs text-muted-foreground">从浏览器插件复制抖音 Cookie 字符串，粘贴到下方：</p>
               <textarea
                 rows={3}
                 value={cookiePaste}
                 onChange={e => setCookiePaste(e.target.value)}
                 placeholder="sessionid=xxx; uid_tt=xxx; ..."
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 outline-none focus:border-pink-600 resize-none font-mono transition-colors"
+                className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs text-foreground outline-none focus:border-primary resize-none font-mono transition-colors"
               />
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleSaveCookie}
                   disabled={!cookiePaste.trim() || cookieSaving}
-                  className="text-xs px-3 py-1.5 bg-pink-600 hover:bg-pink-500 disabled:bg-gray-700 disabled:text-gray-500 rounded-lg transition-colors"
+                  className="text-xs px-3 py-1.5 bg-primary text-white hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground/50 rounded-lg transition-colors font-medium"
                 >
                   {cookieSaving ? '保存中...' : '保存并登录'}
                 </button>
                 <button onClick={() => { setShowCookieInput(false); setCookiePaste(''); }}
-                  className="text-xs text-gray-600 hover:text-gray-400">取消</button>
-                <span className="text-xs text-gray-600 ml-auto">需包含 sessionid 字段</span>
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors">取消</button>
+                <span className="text-xs text-muted-foreground/60 ml-auto">需包含 sessionid 字段</span>
               </div>
             </div>
           )}
@@ -874,14 +874,14 @@ function PublishPageInner() {
             <p className="text-xs text-yellow-600 mt-2">请先扫码登录，否则发布时会中途弹出二维码</p>
           )}
           {loginStatus === 'scanning' && loginLog && (
-            <div className="mt-3 pt-3 border-t border-gray-800 flex items-center gap-2">
-              {!loginQr && <span className="w-3.5 h-3.5 border-2 border-pink-500 border-t-transparent rounded-full animate-spin flex-shrink-0" />}
+            <div className="mt-3 pt-3 border-t border-border flex items-center gap-2">
+              {!loginQr && <span className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />}
               {loginQr && <span className="text-xs">📱</span>}
-              <span className="text-xs text-pink-300">{loginLog}</span>
+              <span className="text-xs text-primary font-medium">{loginLog}</span>
             </div>
           )}
           {loginQr && (
-            <div className="mt-4 flex flex-col items-center gap-3 pt-3 border-t border-gray-800">
+            <div className="mt-4 flex flex-col items-center gap-3 pt-3 border-t border-border">
               <p className="text-xs text-yellow-400 font-medium">请用抖音 App 扫描下方二维码</p>
               <button onClick={() => setScreenshotModal({ url: loginQr, label: '抖音扫码登录', isQr: true })}
                 className="bg-white rounded-xl p-2 hover:shadow-lg transition-shadow">
@@ -892,54 +892,54 @@ function PublishPageInner() {
               <p className="text-xs text-yellow-600">扫码后自动保存 Cookie，发布无需再次登录</p>
               <div className="flex items-center gap-4">
                 <button onClick={() => setScreenshotModal({ url: loginQr, label: '抖音扫码登录', isQr: true })}
-                  className="text-xs text-yellow-500 hover:text-yellow-300 underline">全屏放大</button>
+                  className="text-xs text-yellow-500 hover:text-yellow-600 underline transition-colors">全屏放大</button>
                 <button onClick={() => { setLoginQr(null); setLoginStatus('unknown'); }}
-                  className="text-xs text-gray-600 hover:text-gray-400">取消</button>
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors">取消</button>
               </div>
             </div>
           )}
         </div>
 
         {/* OSS URL */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+        <div className="bg-card border border-border rounded-xl p-4 shadow-sm transition-shadow hover:shadow-md">
           <div className="flex items-center justify-between mb-2">
-            <label className="text-xs text-gray-400 font-medium">视频地址 (OSS URL)</label>
+            <label className="text-xs text-muted-foreground font-medium">视频地址 (OSS URL)</label>
             <button onClick={() => setShowDrawer(true)}
-              className="text-xs text-pink-400 hover:text-pink-300 transition-colors flex items-center gap-1">
+              className="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1 font-medium">
               从素材库选择
-              {materials.length > 0 && <span className="bg-pink-900 text-pink-300 rounded-full px-1.5 py-0.5 text-xs leading-none">{materials.length}</span>}
+              {materials.length > 0 && <span className="bg-primary/20 text-primary rounded-full px-1.5 py-0.5 text-xs leading-none">{materials.length}</span>}
             </button>
           </div>
           <input type="text" value={ossUrl} onChange={e => setOssUrl(e.target.value)}
             placeholder="https://articel.oss-cn-hangzhou.aliyuncs.com/..."
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 outline-none focus:border-pink-600 transition-colors" />
+            className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-xs text-foreground outline-none focus:border-primary transition-colors" />
         </div>
 
         {/* Title */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <label className="text-xs text-gray-400 font-medium block mb-2">标题（最多 30 字）</label>
+        <div className="bg-card border border-border rounded-xl p-4 shadow-sm transition-shadow hover:shadow-md">
+          <label className="text-xs text-muted-foreground font-medium block mb-2">标题（最多 30 字）</label>
           <input type="text" maxLength={30} value={title} onChange={e => setTitle(e.target.value)} placeholder="输入发布标题..."
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none focus:border-pink-600 transition-colors" />
-          <p className="text-right text-xs text-gray-600 mt-1">{title.length}/30</p>
+            className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors" />
+          <p className="text-right text-xs text-muted-foreground/60 mt-1">{title.length}/30</p>
         </div>
 
         {/* Description */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <label className="text-xs text-gray-400 font-medium block mb-2">正文（可选）</label>
+        <div className="bg-card border border-border rounded-xl p-4 shadow-sm transition-shadow hover:shadow-md">
+          <label className="text-xs text-muted-foreground font-medium block mb-2">正文（可选）</label>
           <textarea rows={3} value={description} onChange={e => setDescription(e.target.value)} placeholder="输入正文内容..."
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none resize-none focus:border-pink-600 transition-colors" />
+            className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none resize-none focus:border-primary transition-colors" />
         </div>
 
         {/* Tags */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-          <label className="text-xs text-gray-400 font-medium block mb-2">话题标签（逗号分隔，不含 #）</label>
+        <div className="bg-card border border-border rounded-xl p-4 shadow-sm transition-shadow hover:shadow-md">
+          <label className="text-xs text-muted-foreground font-medium block mb-2">话题标签（逗号分隔，不含 #）</label>
           <input type="text" value={tags} onChange={e => setTags(e.target.value)} placeholder="例如：情感,治愈,日常"
-            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 outline-none focus:border-pink-600 transition-colors" />
+            className="w-full bg-muted border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary transition-colors" />
         </div>
 
         {/* 发布按钮 */}
         <button onClick={handlePublish} disabled={!ossUrl.trim() || !title.trim() || isPublishing}
-          className="w-full py-3 bg-pink-600 hover:bg-pink-500 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed rounded-xl text-sm font-medium transition-colors">
+          className="w-full py-3 bg-primary hover:bg-primary/90 text-white disabled:bg-muted disabled:text-muted-foreground/50 disabled:cursor-not-allowed rounded-xl text-sm font-semibold transition-all shadow-lg shadow-primary/20 active:scale-[0.98]">
           {isPublishing ? '发布中...' : '开始发布'}
         </button>
       </div>

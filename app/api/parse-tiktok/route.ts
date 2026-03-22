@@ -50,8 +50,8 @@ export async function POST(req: NextRequest) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         if (parsed.localFile) {
-          const { uploadVideoFromFile } = await import('@/lib/oss');
-          ossUrl = await uploadVideoFromFile(parsed.localFile, ossKey);
+          const { uploadFromFile } = await import('@/lib/oss');
+          ossUrl = await uploadFromFile(parsed.localFile, ossKey);
         } else {
           ossUrl = await uploadVideoFromUrl(parsed.videoUrl, ossKey);
         }

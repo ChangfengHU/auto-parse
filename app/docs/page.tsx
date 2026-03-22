@@ -182,33 +182,35 @@ data: [DONE] 发布成功！视频已提交抖音审核\n`,
 ];
 
 const METHOD_COLOR: Record<string, string> = {
-  GET: 'text-green-400 bg-green-400/10 border-green-400/30',
-  POST: 'text-blue-400 bg-blue-400/10 border-blue-400/30',
-  DELETE: 'text-red-400 bg-red-400/10 border-red-400/30',
+  GET: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20',
+  POST: 'text-blue-500 bg-blue-500/10 border-blue-500/20',
+  DELETE: 'text-red-500 bg-red-500/10 border-red-500/20',
 };
 
 function ParamTable({ params }: { params: Param[] }) {
   return (
-    <table className="w-full text-xs mt-2 border border-gray-800 rounded overflow-hidden">
-      <thead className="bg-gray-800/60 text-gray-400">
-        <tr>
-          <th className="px-3 py-1.5 text-left font-medium">参数</th>
-          <th className="px-3 py-1.5 text-left font-medium">类型</th>
-          <th className="px-3 py-1.5 text-left font-medium">必填</th>
-          <th className="px-3 py-1.5 text-left font-medium">说明</th>
-        </tr>
-      </thead>
-      <tbody>
-        {params.map((p) => (
-          <tr key={p.name} className="border-t border-gray-800 hover:bg-gray-800/30">
-            <td className="px-3 py-1.5 font-mono text-yellow-300">{p.name}</td>
-            <td className="px-3 py-1.5 text-purple-400">{p.type}</td>
-            <td className="px-3 py-1.5">{p.required ? <span className="text-red-400">是</span> : <span className="text-gray-500">否</span>}</td>
-            <td className="px-3 py-1.5 text-gray-300">{p.desc}</td>
+    <div className="border border-border rounded-xl overflow-hidden shadow-sm">
+      <table className="w-full text-xs">
+        <thead className="bg-muted text-muted-foreground uppercase tracking-wider text-[10px] font-bold">
+          <tr>
+            <th className="px-4 py-2 text-left font-medium">参数</th>
+            <th className="px-4 py-2 text-left font-medium">类型</th>
+            <th className="px-4 py-2 text-left font-medium">必填</th>
+            <th className="px-4 py-2 text-left font-medium">说明</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody className="bg-card divide-y divide-border">
+          {params.map((p) => (
+            <tr key={p.name} className="hover:bg-muted/50 transition-colors">
+              <td className="px-4 py-2.5 font-mono text-primary font-semibold">{p.name}</td>
+              <td className="px-4 py-2.5 text-indigo-500/80">{p.type}</td>
+              <td className="px-4 py-2.5">{p.required ? <span className="text-red-500 font-medium">是</span> : <span className="text-muted-foreground/60">否</span>}</td>
+              <td className="px-4 py-2.5 text-foreground/80">{p.desc}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -217,58 +219,59 @@ export default function DocsPage() {
     <div className="max-w-4xl mx-auto px-6 py-8 space-y-10">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">接口文档</h1>
-        <p className="text-gray-400 mt-1 text-sm">
-          Base URL：<code className="text-pink-400 bg-gray-800 px-1.5 py-0.5 rounded">{BASE}</code>
-          <span className="ml-3 text-gray-600">（parse.vyibc.com → localhost:1007）</span>
+        <h1 className="text-2xl font-bold text-foreground">接口文档</h1>
+        <p className="text-muted-foreground mt-1 text-sm flex items-center gap-2">
+          Base URL：
+          <code className="text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded font-mono font-medium">{BASE}</code>
+          <span className="text-muted-foreground/40 font-mono text-xs">（localhost:1007）</span>
         </p>
       </div>
 
       {/* API List */}
       {APIS.map((api) => (
-        <section key={api.path + api.method} className="border border-gray-800 rounded-xl overflow-hidden">
+        <section key={api.path + api.method} className="border border-border rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
           {/* Title bar */}
-          <div className="flex items-center gap-3 px-5 py-3 bg-gray-900">
-            <span className={`text-xs font-bold px-2 py-0.5 rounded border font-mono ${METHOD_COLOR[api.method]}`}>
+          <div className="flex items-center gap-3 px-5 py-3.5 bg-card border-b border-border">
+            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border tracking-wider uppercase font-mono ${METHOD_COLOR[api.method]}`}>
               {api.method}
             </span>
-            <code className="text-white font-mono text-sm">{api.path}</code>
-            <span className="text-gray-400 text-sm ml-1">{api.title}</span>
+            <code className="text-foreground font-mono text-sm font-semibold">{api.path}</code>
+            <span className="text-muted-foreground text-sm ml-auto font-medium">{api.title}</span>
           </div>
 
-          <div className="px-5 py-4 space-y-4 bg-gray-950">
+          <div className="px-6 py-5 space-y-5 bg-card/50">
             {/* Description */}
-            <p className="text-gray-300 text-sm">{api.desc}</p>
+            <p className="text-foreground/70 text-sm leading-relaxed">{api.desc}</p>
 
             {/* Query params */}
             {api.query && api.query.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Query 参数</p>
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest pl-1">Query Params</p>
                 <ParamTable params={api.query} />
               </div>
             )}
 
             {/* Body params */}
             {api.body && api.body.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Request Body（JSON）</p>
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest pl-1">Request Body (JSON)</p>
                 <ParamTable params={api.body} />
               </div>
             )}
 
             {/* Response */}
-            <div>
-              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">返回示例</p>
-              <pre className="bg-gray-900 border border-gray-800 rounded-lg p-3 text-xs text-green-300 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest pl-1">Response JSON</p>
+              <pre className="bg-muted border border-border rounded-xl p-4 text-[11px] text-emerald-600 dark:text-emerald-400 overflow-x-auto font-mono leading-relaxed shadow-inner">
                 {api.response}
               </pre>
             </div>
 
             {/* Example */}
             {api.example && (
-              <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">cURL 示例</p>
-                <pre className="bg-gray-900 border border-gray-800 rounded-lg p-3 text-xs text-sky-300 overflow-x-auto whitespace-pre-wrap">
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest pl-1">cURL Example</p>
+                <pre className="bg-muted border border-border rounded-xl p-4 text-[11px] text-blue-600 dark:text-blue-400 overflow-x-auto font-mono leading-relaxed shadow-inner">
                   {api.example}
                 </pre>
               </div>
@@ -278,8 +281,9 @@ export default function DocsPage() {
       ))}
 
       {/* Footer */}
-      <div className="text-center text-xs text-gray-600 pb-4">
-        所有接口均为 JSON 格式，Content-Type: application/json，/api/publish 使用 SSE 流式响应。
+      <div className="text-center text-xs text-muted-foreground/60 pb-8 border-t border-border pt-8 mt-4 leading-relaxed">
+        所有接口均使用 JSON 格式交互，默认请求头：<code className="bg-muted px-1 rounded">Content-Type: application/json</code>。<br />
+        <span className="text-primary font-medium">/api/publish</span> 接口特殊，采用 SSE（Server-Sent Events）推送实时任务进度。
       </div>
     </div>
   );

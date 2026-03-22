@@ -76,7 +76,7 @@ async function readCookiesToBox() {
 
     document.getElementById('cookieBox').value = str;
     showToast('已读取到文本框，可点击复制按钮复制');
-    await checkLoginStatus();
+    await Promise.all([checkLoginStatus(), checkServerStatus()]);
   } catch (e) {
     showToast('读取失败：' + e.message);
   } finally {
@@ -106,26 +106,54 @@ async function copyToClipboard() {
 
 
 
-// ── 检查抖音登录状态（用 uid_tt 做真实验证）──────────────
+// ── 检查抖音登录状态，并在"未登录→已登录"时自动触发同步 ──
 async function checkLoginStatus() {
-  const cookies = await getDouyinCookies();
-  const hasSession = !!cookies.sessionid;
-  const hasUid = !!cookies.uid_tt;
   const el = document.getElementById('loginStatus');
+  el.className = 'badge badge-gray';
+  el.innerHTML = '<span class="dot dot-gray"></span> 验证中...';
 
-  if (hasSession && hasUid) {
-    // sessionid + uid_tt 都有 → 确认是真实登录
-    el.className = 'badge badge-green';
-    el.innerHTML = '<span class="dot dot-green"></span> 已登录（已验证）';
-  } else if (hasSession && !hasUid) {
-    // 只有 sessionid，没有 uid_tt → 可能是过期的残留 cookie
-    el.className = 'badge badge-yellow';
-    el.innerHTML = '<span class="dot dot-yellow"></span> Cookie 不完整';
-  } else {
-    el.className = 'badge badge-red';
-    el.innerHTML = '<span class="dot dot-red"></span> 未登录';
-  }
-  return hasSession && hasUid;
+  // 读取上次记录的登录状态
+  const { lastLoginState } = await chrome.storage.local.get('lastLoginState');
+
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({ type: 'CHECK_LOGIN_STATUS' }, async res => {
+      const nowLoggedIn = !!res?.loggedIn;
+
+      if (res?.loggedIn && res?.reason === 'ok') {
+        el.className = 'badge badge-green';
+        el.innerHTML = '<span class="dot dot-green"></span> 已登录（已验证）';
+      } else if (res?.loggedIn) {
+        el.className = 'badge badge-green';
+        el.innerHTML = '<span class="dot dot-green"></span> 已登录';
+      } else if (res?.reason === 'session_expired') {
+        el.className = 'badge badge-yellow';
+        el.innerHTML = '<span class="dot dot-yellow"></span> 已失效，请重新登录';
+      } else {
+        el.className = 'badge badge-red';
+        el.innerHTML = '<span class="dot dot-red"></span> 未登录';
+      }
+
+      // 持久化当前状态
+      await chrome.storage.local.set({ lastLoginState: nowLoggedIn });
+
+      // 检测到"未登录 → 已登录（已验证）"：立即同步到 Supabase + 解析服务器
+      if (!lastLoginState && nowLoggedIn && res?.reason === 'ok') {
+        showToast('🔄 检测到登录，正在自动同步...');
+        chrome.runtime.sendMessage({ type: 'AUTO_SYNC_ON_LOGIN' }, syncRes => {
+          if (syncRes?.ok) {
+            const now = Date.now();
+            chrome.storage.local.set({ lastPublishSync: now });
+            const syncEl = document.getElementById('lastPublishSync');
+            if (syncEl) syncEl.textContent = formatTime(now);
+            showToast('✅ 已自动同步到发布平台');
+            checkServerStatus();
+          }
+        });
+      }
+
+      resolve(nowLoggedIn);
+    });
+  });
 }
 
 
@@ -176,7 +204,7 @@ async function loadClientId() {
 }
 
 
-// ── 手动同步到发布平台 ─────────────────────────────────
+// ── 手动同步（解析服务器 + 发布平台 Supabase 一起同步）──
 async function manualSyncToPublish() {
   const btn = document.getElementById('manualSyncBtn');
   if (!btn || btn.disabled) return;
@@ -191,18 +219,62 @@ async function manualSyncToPublish() {
     return;
   }
 
-  chrome.runtime.sendMessage({ type: 'SYNC_TO_SUPABASE', cookieStr }, res => {
-    if (res?.ok) {
-      const now = Date.now();
-      chrome.storage.local.set({ lastPublishSync: now });
-      const el = document.getElementById('lastPublishSync');
-      if (el) el.textContent = formatTime(now);
-      showToast('✅ 已同步到发布平台');
+  // 同时同步两个目标
+  const [parseRes, supabaseRes] = await Promise.all([
+    // 1. 解析服务器（服务器 Cookie）
+    fetch(`${SERVER}/api/cookie`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cookie: cookieStr }),
+    }).then(r => r.json()).catch(() => null),
+    // 2. 发布平台 Supabase
+    new Promise(resolve => {
+      chrome.runtime.sendMessage({ type: 'SYNC_TO_SUPABASE', cookieStr }, resolve);
+    }),
+  ]);
+
+  const parseOk = parseRes?.success === true;
+  const supabaseOk = supabaseRes?.ok === true;
+
+  if (parseOk || supabaseOk) {
+    const now = Date.now();
+    chrome.storage.local.set({ lastPublishSync: now });
+    const el = document.getElementById('lastPublishSync');
+    if (el) el.textContent = formatTime(now);
+    const msg = parseOk && supabaseOk ? '✅ 全部同步成功'
+      : parseOk ? '✅ 解析服务器已同步（发布平台失败）'
+      : '✅ 发布平台已同步（解析服务器失败）';
+    showToast(msg);
+    checkServerStatus();
+  } else {
+    showToast('❌ 同步失败，请检查网络');
+  }
+
+  btn.disabled = false; btn.textContent = '☁';
+}
+
+// ── 检查解析服务器 Cookie 状态 ────────────────────────────
+async function checkServerStatus() {
+  const el = document.getElementById('serverStatus');
+  if (!el) return;
+  try {
+    const res = await fetch(`${SERVER}/api/cookie`, { cache: 'no-store' });
+    const data = await res.json();
+    if (data.valid) {
+      el.className = 'badge badge-green';
+      const ago = data.updatedAt
+        ? Math.round((Date.now() - data.updatedAt) / 60000)
+        : null;
+      const agoStr = ago === null ? '' : ago < 1 ? ' · 刚刚同步' : ` · ${ago < 60 ? ago + '分钟' : Math.round(ago / 60) + '小时'}前`;
+      el.innerHTML = `<span class="dot dot-green"></span> 有效${agoStr}`;
     } else {
-      showToast('同步失败，请检查网络');
+      el.className = 'badge badge-yellow';
+      el.innerHTML = '<span class="dot dot-yellow"></span> 未同步';
     }
-    btn.disabled = false; btn.textContent = '☁';
-  });
+  } catch {
+    el.className = 'badge badge-gray';
+    el.innerHTML = '<span class="dot dot-gray"></span> 未知';
+  }
 }
 
 // ── 初始化 ────────────────────────────────────────────────
@@ -214,7 +286,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // 并行检查状态
-  await checkLoginStatus();
+  await Promise.all([
+    checkLoginStatus(),
+    checkServerStatus(),
+  ]);
 
   // 初始化保活开关
   await initKeepAliveToggle();
@@ -222,8 +297,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 绑定按钮
   document.getElementById('readBtn').addEventListener('click', readCookiesToBox);
   document.getElementById('copyBtn').addEventListener('click', copyToClipboard);
-
-
 
   await loadClientId();
   document.getElementById('manualSyncBtn')?.addEventListener('click', manualSyncToPublish);

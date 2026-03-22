@@ -46,11 +46,11 @@ export default function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-52 shrink-0 border-r border-gray-800 bg-gray-950 flex flex-col py-6 px-3 gap-1">
+    <aside className="w-52 shrink-0 border-r border-border bg-card flex flex-col py-6 px-3 gap-1 transition-colors">
       {/* Logo */}
       <div className="px-3 mb-6">
-        <span className="text-lg font-bold tracking-tight text-white">doouyin</span>
-        <p className="text-xs text-gray-600 mt-0.5">视频解析 & 发布</p>
+        <span className="text-lg font-bold tracking-tight text-foreground">doouyin</span>
+        <p className="text-xs text-muted-foreground mt-0.5">视频解析 & 发布</p>
       </div>
 
       {NAV.map(({ href, label, icon }) => {
@@ -59,10 +59,10 @@ export default function Sidebar() {
           <Link
             key={href}
             href={href}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
               active
-                ? 'bg-pink-600/20 text-pink-400 border border-pink-600/30'
-                : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                ? 'bg-primary/10 text-primary border border-primary/20 shadow-sm'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
           >
             {icon}

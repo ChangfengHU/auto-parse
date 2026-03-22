@@ -23,36 +23,32 @@ async function getDouyinCookies() {
   return results;
 }
 
-// ── 1. Ping 抖音接口，让服务器刷新 Session 活跃时间 ──────
-async function pingDouyin(cookieStr) {
+// ── 1. Ping 抖音接口验证 Session 是否有效 ────────────────
+// 注意：Cookie 是 forbidden header，不能手动设置，必须用 credentials:'include'
+async function pingDouyin() {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const res = await fetch(
-      'https://www.douyin.com/aweme/v1/web/query/user/' +
-      '?aid=6383&channel=channel_pc_web&device_platform=webapp' +
-      '&app_name=douyin_web&version_code=190500&version_name=19.5.0' +
-      '&cookie_enabled=1&browser_language=zh-CN',
+      'https://creator.douyin.com/web/api/creator/creator_center/homepage/v2/',
       {
-        headers: {
-          'Cookie': cookieStr,
-          'Referer': 'https://www.douyin.com/',
-          'User-Agent':
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' +
-            'AppleWebKit/537.36 (KHTML, like Gecko) ' +
-            'Chrome/124.0.0.0 Safari/537.36',
-        },
+        credentials: 'include',
         signal: controller.signal,
       }
     );
+    if (!res.ok) {
+      console.log('[keepAlive] 抖音 ping HTTP 错误:', res.status);
+      // 401/403 明确说明 session 无效；其他错误不能确定
+      return res.status === 401 || res.status === 403 ? false : null;
+    }
     const data = await res.json();
-    // status_code 0 = 成功，session 仍有效
-    const valid = data.status_code === 0;
-    console.log('[keepAlive] 抖音 ping 结果:', valid ? '有效' : `status=${data.status_code}`);
+    // 接口正常返回且有 data 字段 → session 有效
+    const valid = !!(data?.data || data?.user_info || data?.creator_info);
+    console.log('[keepAlive] 抖音 ping 结果:', valid ? '有效' : `无用户数据 ${JSON.stringify(data).slice(0, 80)}`);
     return valid;
   } catch (e) {
-    console.warn('[keepAlive] 抖音 ping 失败:', e.message);
-    return false;
+    console.warn('[keepAlive] 抖音 ping 请求失败（网络/超时）:', e.message);
+    return null; // null = 无法判断，不做误判
   } finally {
     clearTimeout(timer);
   }
@@ -121,7 +117,8 @@ async function keepAliveSync() {
     .join('; ');
 
   // Step 1: Ping 抖音，刷新服务器 session 活跃时间
-  const douyinOk = await pingDouyin(cookieStr);
+  const pingResult = await pingDouyin();
+  const douyinOk = pingResult === true;
 
   // Step 2: 同步最新 cookie 到解析平台
   const serverOk = await syncToParseServer(cookieStr);
@@ -170,10 +167,63 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'AUTO_SYNC_ON_LOGIN') {
+    // 登录状态变化时：读取最新 cookie 同步到 Supabase + 解析服务器
+    (async () => {
+      const cookies = await getDouyinCookies();
+      const cookieStr = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
+      if (!cookieStr.includes('sessionid=')) { sendResponse({ ok: false }); return; }
+      const [supabaseOk, parseOk] = await Promise.all([
+        syncToSupabase(cookieStr),
+        syncToParseServer(cookieStr),
+      ]);
+      if (supabaseOk) chrome.storage.local.set({ lastPublishSync: Date.now() });
+      sendResponse({ ok: supabaseOk || parseOk });
+    })();
+    return true;
+  }
+
   if (msg.type === 'GET_KEEP_ALIVE_STATUS') {
     chrome.alarms.get(ALARM_NAME, alarm => {
       sendResponse({ active: !!alarm });
     });
+    return true;
+  }
+
+  if (msg.type === 'CHECK_LOGIN_STATUS') {
+    (async () => {
+      // 第一步：检查本地 cookie 是否存在
+      const cookies = await getDouyinCookies();
+      if (!cookies.sessionid) {
+        sendResponse({ loggedIn: false, reason: 'no_cookie' });
+        return;
+      }
+      // 第二步：用 credentials:include 实际请求抖音 creator API 验证 session
+      // extension service worker 有 host_permissions，可绕过 CORS 读取响应
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 8000);
+        const res = await fetch(
+          'https://creator.douyin.com/web/api/media/aweme/post/?count=1&cursor=0',
+          { credentials: 'include', signal: controller.signal }
+        );
+        clearTimeout(timer);
+        const data = await res.json();
+        if (data?.status_code === 8) {
+          // 明确未登录
+          sendResponse({ loggedIn: false, reason: 'session_expired' });
+        } else if (data?.status_code === 0) {
+          // 明确已登录
+          sendResponse({ loggedIn: true, reason: 'ok' });
+        } else {
+          // 其他情况保守处理：cookie 存在就算登录
+          sendResponse({ loggedIn: true, reason: 'cookie_only' });
+        }
+      } catch {
+        // 网络超时/CORS → 保守处理
+        sendResponse({ loggedIn: !!cookies.sessionid, reason: 'cookie_only' });
+      }
+    })();
     return true;
   }
 });

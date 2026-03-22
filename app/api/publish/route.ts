@@ -36,8 +36,12 @@ export async function POST(req: NextRequest) {
       };
 
       try {
+        // ── 打印传入参数摘要 ──────────────────────────────────
+        send('log', `📋 发布参数：视频=${(videoUrl||'').slice(-40)} 标题="${(title||'').slice(0,15)}" ${clientId ? `凭证=${clientId}` : cookieStr ? '含Cookie字符串' : '无登录凭证'}`);
+
         // 如果提供了 clientId，从 Supabase 拉取 cookie（更安全，cookie 不经过前端）
         let resolvedCookieStr = cookieStr;
+        let clientIdFailed = false; // clientId 提供了但 Supabase 没拿到数据
         if (clientId && !resolvedCookieStr) {
           try {
             const SUPABASE_URL = process.env.SUPABASE_URL || 'https://okkgchwzppghiyfgmrlj.supabase.co';
@@ -47,9 +51,19 @@ export async function POST(req: NextRequest) {
             });
             if (r.ok) {
               const rows = await r.json() as Array<{ cookie_str: string }>;
-              if (rows[0]?.cookie_str) { resolvedCookieStr = rows[0].cookie_str; send('log', `🔑 已通过凭证 ${clientId} 获取登录信息`); }
+              if (rows[0]?.cookie_str) {
+                resolvedCookieStr = rows[0].cookie_str;
+                send('log', `🔑 已通过凭证 ${clientId} 获取登录信息`);
+              } else {
+                clientIdFailed = true;
+                send('log', `⚠️ 凭证 ${clientId} 在云端未找到，请先用插件同步登录状态`);
+              }
+            } else {
+              clientIdFailed = true;
             }
-          } catch { /* ignore, fall back to local cookie */ }
+          } catch {
+            clientIdFailed = true;
+          }
         }
 
         // 如果前端带了插件 cookie，直接写入本地文件并跳过登录检测
@@ -65,10 +79,11 @@ export async function POST(req: NextRequest) {
           fs.writeFileSync(COOKIE_FILE, JSON.stringify({ cookies, updatedAt: Date.now(), source: 'plugin' }, null, 2));
           send('log', '🔑 已使用插件登录信息，跳过登录检测');
         }
-        const skipLoginCheck = resolvedCookieStr ? true : isCookieFresh();
+        // clientId 提供了但没拿到数据 → 强制走登录检测（不 fallback 到本地 cookie）
+        const skipLoginCheck = clientIdFailed ? false : (resolvedCookieStr ? true : isCookieFresh());
         if (!cookieStr && skipLoginCheck) send('log', '⏭️ Cookie 有效期内，将跳过登录检测直接发布');
         const result = await publishToDouyin(
-          { videoUrl, title, description, tags, skipLoginCheck },
+          { videoUrl, title, description, tags, skipLoginCheck, clientId: clientId || undefined },
           (type, payload) => send(type, payload),
         );
         // 1. 发送独立的 taskId 事件（结构化，便于脚本/CLI 直接解析）

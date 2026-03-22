@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseDouyin, parseDouyinFast } from '@/lib/parsers/douyin';
 import { parseXiaohongshu } from '@/lib/parsers/xiaohongshu';
-import { uploadVideoFromUrl, uploadVideoFromFile } from '@/lib/oss';
+import { uploadVideoFromUrl, uploadFromFile } from '@/lib/oss';
 import { addMaterial } from '@/lib/materials';
 
 export const maxDuration = 600;
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       try {
         const localFile = (parsed as { localFile?: string }).localFile;
         ossUrl = localFile
-          ? await uploadVideoFromFile(localFile, ossKey)
+          ? await uploadFromFile(localFile, ossKey)
           : await uploadVideoFromUrl(parsed.videoUrl, ossKey);
         break;
       } catch (e) {
