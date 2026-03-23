@@ -5,6 +5,7 @@ import path from 'path';
 import os from 'os';
 import { markPublished } from '@/lib/materials';
 import { uploadFromFile, uploadBuffer } from '@/lib/oss';
+import { getPersistentContext } from '@/lib/persistent-browser';
 
 // ─────────────────────────────────────────────────────────────
 //  任务追踪器：每次发布任务创建独立目录，记录截图 + 日志 + 结果
@@ -206,14 +207,38 @@ function parseCookieStr(cookieStr: string) {
 //  工具函数
 // ─────────────────────────────────────────────────────────────
 async function downloadToTemp(url: string): Promise<string> {
+  const https = await import('https');
   const tmpPath = path.join(os.tmpdir(), `douyin-pub-${Date.now()}.mp4`);
-  const res = await axios.get(url, {
-    responseType: 'arraybuffer',
-    timeout: 180_000,
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible)', 'Referer': 'https://www.douyin.com/' },
-  });
-  fs.writeFileSync(tmpPath, Buffer.from(res.data as ArrayBuffer));
-  return tmpPath;
+
+  // 忽略 SSL 证书错误（兼容代理环境 / 自签名 CDN）
+  const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+
+  const attemptDownload = async (targetUrl: string) => {
+    const res = await axios.get(targetUrl, {
+      responseType: 'arraybuffer',
+      timeout: 180_000,
+      httpsAgent,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Referer': 'https://www.douyin.com/',
+      },
+    });
+    fs.writeFileSync(tmpPath, Buffer.from(res.data as ArrayBuffer));
+    return tmpPath;
+  };
+
+  // 尝试原始 URL
+  try {
+    return await attemptDownload(url);
+  } catch (e1) {
+    // 若是 HTTPS 失败，尝试 HTTP 降级
+    if (url.startsWith('https://')) {
+      try {
+        return await attemptDownload(url.replace('https://', 'http://'));
+      } catch { /* ignore, throw original */ }
+    }
+    throw e1;
+  }
 }
 
 async function withRetry<T>(
@@ -279,6 +304,8 @@ export interface PublishOptions {
   skipLoginCheck?: boolean;
   /** 来源凭证（仅用于日志展示）*/
   clientId?: string;
+  /** 已解析的 Cookie 字符串，注入到持久化浏览器以覆盖最新登录态 */
+  cookieStr?: string;
 }
 
 export interface PublishResult {
@@ -328,16 +355,24 @@ export async function publishToDouyin(
     return { success: false, message: msg, taskId: tracker.taskId };
   }
 
-  log('🚀 启动浏览器（无头模式）...');
-  const browser = await chromium.launch({ headless: true });
+  log('🚀 连接持久化浏览器...');
+  // 优先使用持久化浏览器（固定指纹 + 保持登录状态），启动失败时回退到临时浏览器
+  let context: import('playwright').BrowserContext;
+  let usePersistent = false;
+  let fallbackBrowser: import('playwright').Browser | null = null;
 
   try {
-    const context = await browser.newContext({
+    context = await getPersistentContext();
+    usePersistent = true;
+    log('✅ 使用持久化浏览器（指纹一致，无需重新登录）');
+  } catch (e) {
+    log(`⚠️ 持久化浏览器启动失败（${e instanceof Error ? e.message : e}），回退到临时浏览器`);
+    fallbackBrowser = await chromium.launch({ headless: true });
+    context = await fallbackBrowser.newContext({
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       locale: 'zh-CN',
       viewport: { width: 1280, height: 800 },
     });
-
     await context.addInitScript(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
       Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
@@ -349,11 +384,39 @@ export async function publishToDouyin(
       window.navigator.permissions.query = (p: PermissionDescriptor) =>
         p.name === 'notifications' ? Promise.resolve({ state: Notification.permission } as PermissionStatus) : oq(p);
     });
-
+    // 回退模式下仍注入 Cookie
     const cookies = loadCookies();
     if (cookies.length > 0) await context.addCookies(cookies);
+  }
 
-    const page = await context.newPage();
+  // 持久化浏览器：若提供了 options.cookieStr，注入以覆盖最新 Cookie
+  if (usePersistent && options.cookieStr) {
+    try {
+      const parsed: import('playwright').Cookie[] = options.cookieStr
+        .split(';')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(s => {
+          const eq = s.indexOf('=');
+          return {
+            name: s.slice(0, eq).trim(),
+            value: s.slice(eq + 1).trim(),
+            domain: '.douyin.com',
+            path: '/',
+          } as import('playwright').Cookie;
+        });
+      if (parsed.length > 0) await context.addCookies(parsed);
+    } catch { /* ignore parse errors */ }
+  }
+
+  // 加载本地 Cookie 文件（持久化模式下通常为空，回退模式已在上方注入）
+  const fileCookies = loadCookies();
+
+  // page 和 outer try 一起声明，保证 catch/finally 可访问 page
+  let page!: Page;
+
+  try {
+    page = await context.newPage();
     page.on('dialog', d => d.accept());
 
     const UPLOAD_URL = 'https://creator.douyin.com/creator-micro/content/upload';
@@ -374,7 +437,7 @@ export async function publishToDouyin(
     // ── 登录检测 ──────────────────────────────────────────────
     let needLogin = false;
 
-    if (options.skipLoginCheck && cookies.length > 0) {
+    if (options.skipLoginCheck && (usePersistent || fileCookies.length > 0)) {
       // Cookie 声称有效，但仍做 5s 快速验证，避免过期时卡在上传步骤
       const uploadInput = page.locator('input[accept*="video/mp4"]').first();
       const inputVisible = await uploadInput.waitFor({ state: 'visible', timeout: 5_000 })
@@ -837,18 +900,20 @@ export async function publishToDouyin(
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     try {
-      const pages = browser.contexts()[0]?.pages();
-      if (pages?.length) {
-        const errShot = await screenshot(pages[0], 'error-final');
-        tracker.addCheckpoint('error', 'error', msg, errShot);
-      }
+      const errShot = await screenshot(page, 'error-final').catch(() => undefined);
+      tracker.addCheckpoint('error', 'error', msg, errShot);
     } catch { /* ignore */ }
     tracker.finish(false, `发布失败: ${msg}`);
     return { success: false, message: `发布失败: ${msg}`, taskId: tracker.taskId, historyDir: tracker.dir };
 
   } finally {
     releaseLock();
-    await browser.close();
+    // 持久化浏览器：只关闭当前 Page，Context 继续存活（保持登录状态 + 固定指纹）
+    // 临时浏览器（回退模式）：关闭整个 Browser
+    try { await page.close(); } catch { /* ignore */ }
+    if (fallbackBrowser) {
+      await fallbackBrowser.close().catch(() => {});
+    }
     if (tmpFile) try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
   }
 }

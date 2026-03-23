@@ -83,7 +83,7 @@ export async function POST(req: NextRequest) {
         const skipLoginCheck = clientIdFailed ? false : (resolvedCookieStr ? true : isCookieFresh());
         if (!cookieStr && skipLoginCheck) send('log', '⏭️ Cookie 有效期内，将跳过登录检测直接发布');
         const result = await publishToDouyin(
-          { videoUrl, title, description, tags, skipLoginCheck, clientId: clientId || undefined },
+          { videoUrl, title, description, tags, skipLoginCheck, clientId: clientId || undefined, cookieStr: resolvedCookieStr || undefined },
           (type, payload) => send(type, payload),
         );
         // 1. 发送独立的 taskId 事件（结构化，便于脚本/CLI 直接解析）

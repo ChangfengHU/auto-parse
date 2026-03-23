@@ -294,9 +294,15 @@ function PublishPageInner() {
   }, []);
 
   useEffect(() => { fetch('/api/materials').then(r => r.json()).then(setMaterials).catch(() => {}); }, []);
+  // 页面加载：本地 Cookie 文件只是"可能有效"，不直接亮绿灯
+  // 真正已登录需要通过插件凭证验证或扫码确认
   useEffect(() => {
     fetch('/api/login').then(r => r.json())
-      .then(d => setLoginStatus(d.loggedIn ? 'logged_in' : 'not_logged_in')).catch(() => {});
+      .then(d => {
+        // 只有本地 cookie 且未被插件验证覆盖时，才做初始状态判断
+        // 保守策略：cookie 存在但未验证 → 'unknown'（灰色），待用户主动验证
+        setLoginStatus(d.loggedIn ? 'unknown' : 'not_logged_in');
+      }).catch(() => {});
   }, []);
   useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
 
@@ -414,10 +420,26 @@ function PublishPageInner() {
           if (!line.startsWith('data: ')) continue;
           try {
             const { type, payload } = JSON.parse(line.slice(6)) as { type: string; payload: string };
-            if (type === 'log')    setLoginLog(payload.replace(/^[^\s]+ /, ''));
-            else if (type === 'qrcode') { setLoginQr(payload); setLoginLog('请用抖音 App 扫码，扫后在 App 内点击确认授权'); }
-            else if (type === 'done')   { setLoginStatus('logged_in'); setLoginQr(null); setLoginLog(''); }
-            else if (type === 'error')  { setLoginStatus('not_logged_in'); setLoginQr(null); setLoginLog(''); }
+            if (type === 'log') {
+              setLoginLog(payload.replace(/^[^\s]+ /, ''));
+            } else if (type === 'qrcode' || type === 'refresh') {
+              // 'refresh' = 110s 后自动刷新的新二维码
+              setLoginQr(payload);
+              if (type === 'qrcode') setLoginLog('请用抖音 App 扫码，扫后在 App 内点击确认授权');
+            } else if (type === 'done') {
+              // 新流程：done 携带 { clientId, loggedIn }
+              let newClientId = '';
+              try { const d = JSON.parse(payload) as { clientId?: string }; newClientId = d.clientId ?? ''; } catch { /* old format */ }
+              setLoginStatus('logged_in');
+              setLoginQr(null);
+              setLoginLog('');
+              if (newClientId) {
+                setClientId(newClientId);
+                setPluginMsg({ type: 'ok', text: `✅ 登录成功，凭证已自动填入：${newClientId}` });
+              }
+            } else if (type === 'error') {
+              setLoginStatus('not_logged_in'); setLoginQr(null); setLoginLog('');
+            }
           } catch { /* ignore */ }
         }
       }
@@ -461,10 +483,19 @@ function PublishPageInner() {
         found?: boolean; expired?: boolean; cookieStr?: string | null;
         account?: string | null; message?: string; error?: string;
       };
-      if (d.error) { setPluginMsg({ type: 'error', text: d.error }); return; }
-      if (!d.found) { setPluginMsg({ type: 'error', text: '未找到登录信息，请先安装插件并同步' }); return; }
+      if (d.error) {
+        setPluginMsg({ type: 'error', text: d.error });
+        setLoginStatus('not_logged_in');
+        return;
+      }
+      if (!d.found) {
+        setPluginMsg({ type: 'error', text: '未找到登录信息，请先安装插件并同步' });
+        setLoginStatus('not_logged_in');
+        return;
+      }
       if (d.expired || !d.cookieStr) {
         setPluginMsg({ type: 'warn', text: d.message ?? 'Cookie 可能已过期，建议重新同步' });
+        setLoginStatus('not_logged_in');  // 与插件验证结果保持一致
         return;
       }
       setPluginCookie(d.cookieStr);
@@ -800,6 +831,9 @@ function PublishPageInner() {
               <span className={`text-xs font-semibold ${loginStatusColor[loginStatus]}`}>{loginStatusLabel[loginStatus]}</span>
               {loginStatus === 'logged_in' && (
                 <span className="text-xs text-green-700">· Cookie 有效，发布将跳过登录检测</span>
+              )}
+              {loginStatus === 'unknown' && (
+                <span className="text-xs text-muted-foreground">· 请通过插件凭证获取或扫码确认登录状态</span>
               )}
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
