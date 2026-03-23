@@ -1,0 +1,434 @@
+{
+  "id": "douyin-publish",
+  "name": "抖音视频发布",
+  "platform": "douyin",
+  "version": "1.0.0",
+  "description": "自动化发布视频到抖音创作者平台",
+  "variables": {
+    "uploadUrl": "https://creator.douyin.com/creator-micro/content/upload",
+    "creatorUrl": "https://creator.douyin.com",
+    "uploadSelector": "input[accept*=\"video/mp4\"]",
+    "titleSelector": "[class*=\"title\"] input, [placeholder*=\"标题\"], .editor-kit-editor-container input",
+    "descSelector": ".editor-kit-editor-container, [class*=\"description\"] textarea, [class*=\"content\"] .DraftEditor-root",
+    "publishBtn": "button:has-text(\"发布\"), [class*=\"publish\"] button",
+    "qrSelectors": "[class*=\"qrcode_img\"], [class*=\"qrcode-img\"], canvas[class*=\"qr\"], [class*=\"scan_qrcode\"] img"
+  },
+  "steps": [
+    {
+      "id": "start",
+      "name": "打开发布页面",
+      "type": "navigate",
+      "params": {
+        "url": "${uploadUrl}"
+      },
+      "timeout": 30000,
+      "onSuccess": "waitPageLoad",
+      "onFail": "navFailed"
+    },
+    {
+      "id": "waitPageLoad",
+      "name": "等待页面加载",
+      "type": "sleep",
+      "params": {
+        "timeout": 3000
+      },
+      "onSuccess": "checkLogin"
+    },
+    {
+      "id": "checkLogin",
+      "name": "检测登录状态",
+      "type": "condition",
+      "params": {
+        "condition": {
+          "selector": "${uploadSelector}",
+          "state": "visible"
+        }
+      },
+      "timeout": 10000,
+      "onSuccess": "loggedIn",
+      "onFail": "needLogin"
+    },
+    {
+      "id": "loggedIn",
+      "name": "已登录",
+      "type": "emit",
+      "params": {
+        "event": "log",
+        "message": "✅ 检测到已登录状态"
+      },
+      "onSuccess": "upload"
+    },
+    {
+      "id": "needLogin",
+      "name": "需要登录",
+      "type": "emit",
+      "params": {
+        "event": "log",
+        "message": "⚠️ 未检测到登录状态，需要扫码登录"
+      },
+      "onSuccess": "gotoCreator"
+    },
+    {
+      "id": "gotoCreator",
+      "name": "跳转创作者首页",
+      "type": "navigate",
+      "params": {
+        "url": "${creatorUrl}"
+      },
+      "timeout": 30000,
+      "onSuccess": "waitQRPage"
+    },
+    {
+      "id": "waitQRPage",
+      "name": "等待二维码页面",
+      "type": "sleep",
+      "params": {
+        "timeout": 3000
+      },
+      "onSuccess": "captureQR"
+    },
+    {
+      "id": "captureQR",
+      "name": "截取登录二维码",
+      "type": "captureQR",
+      "params": {
+        "selector": "${qrSelectors}"
+      },
+      "timeout": 15000,
+      "onSuccess": "notifyQR",
+      "onFail": "qrFailed"
+    },
+    {
+      "id": "notifyQR",
+      "name": "提示扫码",
+      "type": "emit",
+      "params": {
+        "event": "log",
+        "message": "📱 请用抖音 App 扫描二维码登录（有效期约 3 分钟）"
+      },
+      "onSuccess": "waitLogin"
+    },
+    {
+      "id": "waitLogin",
+      "name": "等待扫码登录",
+      "type": "waitForLogin",
+      "params": {
+        "urlPattern": "creator-micro",
+        "excludePatterns": ["/login", "qrcode", "passport"],
+        "timeout": 300000
+      },
+      "onSuccess": "loginSuccess",
+      "onFail": "loginTimeout"
+    },
+    {
+      "id": "loginSuccess",
+      "name": "登录成功",
+      "type": "emit",
+      "params": {
+        "event": "log",
+        "message": "✅ 扫码登录成功！"
+      },
+      "onSuccess": "extractCookie"
+    },
+    {
+      "id": "extractCookie",
+      "name": "提取 Cookie",
+      "type": "extractCookie",
+      "params": {
+        "domain": "douyin.com",
+        "variableName": "cookieStr"
+      },
+      "onSuccess": "gotoUpload"
+    },
+    {
+      "id": "gotoUpload",
+      "name": "跳转上传页",
+      "type": "navigate",
+      "params": {
+        "url": "${uploadUrl}"
+      },
+      "timeout": 30000,
+      "onSuccess": "waitUploadPage"
+    },
+    {
+      "id": "waitUploadPage",
+      "name": "等待上传页加载",
+      "type": "sleep",
+      "params": {
+        "timeout": 2000
+      },
+      "onSuccess": "upload"
+    },
+    {
+      "id": "upload",
+      "name": "上传视频文件",
+      "type": "upload",
+      "params": {
+        "selector": "${uploadSelector}",
+        "filePath": "${videoPath}"
+      },
+      "timeout": 60000,
+      "retry": {
+        "times": 2,
+        "delayMs": 3000
+      },
+      "onSuccess": "notifyUploading",
+      "onFail": "uploadFailed"
+    },
+    {
+      "id": "notifyUploading",
+      "name": "提示上传中",
+      "type": "emit",
+      "params": {
+        "event": "log",
+        "message": "📤 视频上传中，请稍候..."
+      },
+      "onSuccess": "waitUploadComplete"
+    },
+    {
+      "id": "waitUploadComplete",
+      "name": "等待上传完成",
+      "type": "loop",
+      "params": {
+        "condition": {
+          "or": [
+            { "selector": ":text(\"上传成功\")", "state": "visible" },
+            { "selector": ":text(\"100%\")", "state": "visible" },
+            { "selector": "[class*=\"progress\"]:has-text(\"100\")", "state": "visible" },
+            { "selector": "[class*=\"upload\"][class*=\"success\"]", "state": "visible" }
+          ]
+        },
+        "interval": 3000,
+        "timeout": 180000
+      },
+      "onSuccess": "uploadSuccess",
+      "onFail": "uploadTimeout"
+    },
+    {
+      "id": "uploadSuccess",
+      "name": "上传成功",
+      "type": "emit",
+      "params": {
+        "event": "log",
+        "message": "✅ 视频上传完成"
+      },
+      "onSuccess": "fillTitle"
+    },
+    {
+      "id": "fillTitle",
+      "name": "填写标题",
+      "type": "fill",
+      "params": {
+        "selector": "${titleSelector}",
+        "value": "${title}"
+      },
+      "timeout": 10000,
+      "onSuccess": "notifyTitle",
+      "onFail": "titleFailed"
+    },
+    {
+      "id": "notifyTitle",
+      "name": "提示标题已填写",
+      "type": "emit",
+      "params": {
+        "event": "log",
+        "message": "✅ 标题已填写: ${title}"
+      },
+      "onSuccess": "checkDescription"
+    },
+    {
+      "id": "checkDescription",
+      "name": "检查是否有描述",
+      "type": "condition",
+      "params": {
+        "condition": {
+          "variable": "description",
+          "exists": true
+        }
+      },
+      "onSuccess": "fillDescription",
+      "onFail": "waitDetection"
+    },
+    {
+      "id": "fillDescription",
+      "name": "填写描述",
+      "type": "fill",
+      "params": {
+        "selector": "${descSelector}",
+        "value": "${description}"
+      },
+      "timeout": 10000,
+      "onSuccess": "notifyDesc",
+      "onFail": "waitDetection"
+    },
+    {
+      "id": "notifyDesc",
+      "name": "提示描述已填写",
+      "type": "emit",
+      "params": {
+        "event": "log",
+        "message": "✅ 描述已填写"
+      },
+      "onSuccess": "waitDetection"
+    },
+    {
+      "id": "waitDetection",
+      "name": "等待视频检测",
+      "type": "emit",
+      "params": {
+        "event": "log",
+        "message": "⏳ 等待视频检测..."
+      },
+      "onSuccess": "loopDetection"
+    },
+    {
+      "id": "loopDetection",
+      "name": "循环检测",
+      "type": "loop",
+      "params": {
+        "condition": {
+          "or": [
+            { "selector": ":text(\"检测通过\")", "state": "visible" },
+            { "selector": ":text(\"可以发布\")", "state": "visible" },
+            { "selector": ":text(\"允许发布\")", "state": "visible" },
+            { "selector": "[class*=\"check\"][class*=\"pass\"]", "state": "visible" }
+          ]
+        },
+        "interval": 3000,
+        "timeout": 120000
+      },
+      "onSuccess": "detectionPassed",
+      "onFail": "detectionFailed"
+    },
+    {
+      "id": "detectionPassed",
+      "name": "检测通过",
+      "type": "emit",
+      "params": {
+        "event": "log",
+        "message": "✅ 视频检测通过"
+      },
+      "onSuccess": "clickPublish"
+    },
+    {
+      "id": "clickPublish",
+      "name": "点击发布按钮",
+      "type": "click",
+      "params": {
+        "selector": "${publishBtn}"
+      },
+      "timeout": 10000,
+      "onSuccess": "waitPublishResult",
+      "onFail": "publishClickFailed"
+    },
+    {
+      "id": "waitPublishResult",
+      "name": "等待发布结果",
+      "type": "loop",
+      "params": {
+        "condition": {
+          "or": [
+            { "selector": ":text(\"发布成功\")", "state": "visible" },
+            { "selector": ":text(\"已发布\")", "state": "visible" },
+            { "selector": ":text(\"提交成功\")", "state": "visible" },
+            { "urlContains": "manage" }
+          ]
+        },
+        "interval": 2000,
+        "timeout": 30000
+      },
+      "onSuccess": "done",
+      "onFail": "publishFailed"
+    },
+    {
+      "id": "done",
+      "name": "发布完成",
+      "type": "emit",
+      "params": {
+        "event": "done",
+        "message": "🎉 视频发布成功！已提交抖音审核"
+      }
+    },
+    {
+      "id": "navFailed",
+      "name": "导航失败",
+      "type": "emit",
+      "params": {
+        "event": "error",
+        "message": "❌ 无法打开抖音发布页面，请检查网络"
+      }
+    },
+    {
+      "id": "qrFailed",
+      "name": "二维码获取失败",
+      "type": "emit",
+      "params": {
+        "event": "error",
+        "message": "❌ 无法获取登录二维码，请稍后重试"
+      }
+    },
+    {
+      "id": "loginTimeout",
+      "name": "登录超时",
+      "type": "emit",
+      "params": {
+        "event": "error",
+        "message": "❌ 扫码登录超时，请重试"
+      }
+    },
+    {
+      "id": "uploadFailed",
+      "name": "上传失败",
+      "type": "emit",
+      "params": {
+        "event": "error",
+        "message": "❌ 视频上传失败，请检查文件是否有效"
+      }
+    },
+    {
+      "id": "uploadTimeout",
+      "name": "上传超时",
+      "type": "emit",
+      "params": {
+        "event": "error",
+        "message": "❌ 视频上传超时，请检查网络或文件大小"
+      }
+    },
+    {
+      "id": "titleFailed",
+      "name": "标题填写失败",
+      "type": "emit",
+      "params": {
+        "event": "error",
+        "message": "❌ 无法填写标题，页面结构可能已变化"
+      }
+    },
+    {
+      "id": "detectionFailed",
+      "name": "检测未通过",
+      "type": "emit",
+      "params": {
+        "event": "error",
+        "message": "❌ 视频检测未通过，请检查视频内容是否合规"
+      }
+    },
+    {
+      "id": "publishClickFailed",
+      "name": "发布按钮点击失败",
+      "type": "emit",
+      "params": {
+        "event": "error",
+        "message": "❌ 无法点击发布按钮，页面结构可能已变化"
+      }
+    },
+    {
+      "id": "publishFailed",
+      "name": "发布失败",
+      "type": "emit",
+      "params": {
+        "event": "error",
+        "message": "❌ 发布失败，请手动检查发布状态"
+      }
+    }
+  ]
+}

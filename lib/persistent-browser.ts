@@ -10,6 +10,7 @@
 import { chromium, BrowserContext } from 'playwright';
 import path from 'path';
 import os from 'os';
+import fs from 'fs';
 
 export const BROWSER_DATA_DIR =
   process.env.DOUYIN_BROWSER_DATA_DIR ??
@@ -39,6 +40,34 @@ declare global {
   var __douyinBrowserCtx: BrowserContext | undefined;
 }
 
+/**
+ * 启动前修复 Chrome Preferences，将 exit_type 重置为 Normal
+ * 防止每次启动弹出「Chromium 未正确关闭，要恢复页面吗？」
+ */
+function patchChromePreferences(dataDir: string) {
+  const prefFile = path.join(dataDir, 'Default', 'Preferences');
+  try {
+    if (!fs.existsSync(prefFile)) return;
+    const raw = fs.readFileSync(prefFile, 'utf-8');
+    const prefs = JSON.parse(raw);
+    let changed = false;
+    if (prefs?.profile?.exit_type !== 'Normal') {
+      prefs.profile = prefs.profile ?? {};
+      prefs.profile.exit_type = 'Normal';
+      changed = true;
+    }
+    if (prefs?.profile?.crashed_session_version !== undefined) {
+      delete prefs.profile.crashed_session_version;
+      changed = true;
+    }
+    if (changed) {
+      fs.writeFileSync(prefFile, JSON.stringify(prefs), 'utf-8');
+    }
+  } catch {
+    // 静默失败，不影响启动
+  }
+}
+
 let launching = false;
 
 export async function getPersistentContext(): Promise<BrowserContext> {
@@ -63,6 +92,9 @@ export async function getPersistentContext(): Promise<BrowserContext> {
 
   launching = true;
   try {
+    // 启动前把 Preferences 里的 exit_type 改成 Normal，防止「恢复页面」弹窗
+    patchChromePreferences(BROWSER_DATA_DIR);
+
     console.log(
       `[Browser] 启动持久化浏览器  headless=${IS_HEADLESS}  dataDir=${BROWSER_DATA_DIR}`
     );
@@ -73,12 +105,23 @@ export async function getPersistentContext(): Promise<BrowserContext> {
         'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       locale: 'zh-CN',
       viewport: { width: 1280, height: 800 },
+      // 明确不授予任何权限（清除历史授权）
+      permissions: [],
       args: [
         '--no-sandbox',
         '--disable-blink-features=AutomationControlled',
         '--disable-infobars',
+        // 自动拒绝所有权限弹窗（地理位置、通知、麦克风等）
+        '--deny-permission-prompts',
+        '--disable-notifications',
+        // 禁止「未正确关闭」恢复弹窗
+        '--no-session-crashed-bubble',
+        '--disable-session-restore-from-crash',
       ],
     });
+
+    // 清除持久化 userDataDir 中残留的权限授权
+    await ctx.clearPermissions();
 
     await ctx.addInitScript(ANTI_BOT_SCRIPT);
 

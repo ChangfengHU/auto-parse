@@ -810,11 +810,10 @@ function PublishPageInner() {
         </div>
       )}
 
-      <div className="mb-8">
+      <div className="mb-6">
         <h1 className="text-2xl font-bold text-foreground">视频发布</h1>
         <p className="mt-1 text-muted-foreground text-sm">将视频发布到抖音账号，实时追踪每个发布阶段</p>
       </div>
-
       <div className="space-y-4">
 
         {/* 登录状态 */}
@@ -972,10 +971,26 @@ function PublishPageInner() {
         </div>
 
         {/* 发布按钮 */}
-        <button onClick={handlePublish} disabled={!ossUrl.trim() || !title.trim() || isPublishing}
-          className="w-full py-3 bg-primary hover:bg-primary/90 text-white disabled:bg-muted disabled:text-muted-foreground/50 disabled:cursor-not-allowed rounded-xl text-sm font-semibold transition-all shadow-lg shadow-primary/20 active:scale-[0.98]">
-          {isPublishing ? '发布中...' : '开始发布'}
-        </button>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            onClick={handlePublish}
+            disabled={!ossUrl.trim() || !title.trim() || isPublishing}
+            className="w-full py-3 bg-primary hover:bg-primary/90 text-white disabled:bg-muted disabled:text-muted-foreground/50 disabled:cursor-not-allowed rounded-xl text-sm font-semibold transition-all shadow-lg shadow-primary/20 active:scale-[0.98]"
+          >
+            {isPublishing ? '发布中...' : '开始发布'}
+          </button>
+
+          <a
+            href={`/workflows?ossUrl=${encodeURIComponent(ossUrl)}&title=${encodeURIComponent(title)}&description=${encodeURIComponent(description)}&tags=${encodeURIComponent(tags)}&clientId=${encodeURIComponent(clientId)}`}
+            className={`w-full py-3 rounded-xl text-sm font-semibold transition-all text-center border ${
+              !ossUrl.trim() || !title.trim() || isPublishing
+                ? 'border-border text-muted-foreground bg-muted/30 pointer-events-none'
+                : 'border-primary/40 text-primary hover:border-primary hover:bg-primary/10'
+            }`}
+          >
+            Debug 发布（逐步执行）
+          </a>
+        </div>
       </div>
 
       {screenshotModal && (
