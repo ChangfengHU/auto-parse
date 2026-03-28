@@ -24,6 +24,7 @@ export function createSession(
     ...partial,
     id: randomUUID(),
     currentStep: 0,
+    lastExecutedStep: null,
     status: 'paused',
     history: [],
     createdAt: Date.now(),

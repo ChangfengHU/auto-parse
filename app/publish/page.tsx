@@ -187,6 +187,63 @@ function StageIcon({ status }: { status: StageStatus }) {
   return null;
 }
 
+// ── Debug 工作流按钮（含工作流选择，记住上次选择）──────────────
+function DebugWorkflowButton({ ossUrl, title, description, tags, clientId, disabled }: {
+  ossUrl: string; title: string; description: string; tags: string; clientId: string; disabled: boolean;
+}) {
+  const STORAGE_KEY = 'preferred-workflow-id';
+  const [workflows, setWorkflows] = useState<{ id: string; name: string }[]>([]);
+  const [selectedId, setSelectedId] = useState<string>(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem(STORAGE_KEY) ?? 'douyin-publish';
+    return 'douyin-publish';
+  });
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/workflows').then(r => r.json()).then(d => {
+      if (Array.isArray(d)) setWorkflows(d.map((w: { id: string; name: string }) => ({ id: w.id, name: w.name })));
+    }).catch(() => {});
+  }, []);
+
+  function select(id: string) {
+    setSelectedId(id);
+    localStorage.setItem(STORAGE_KEY, id);
+    setOpen(false);
+  }
+
+  const params = new URLSearchParams({ ossUrl, title, description, tags, clientId });
+  const href = `/workflows/${selectedId}?${params.toString()}`;
+  const selected = workflows.find(w => w.id === selectedId);
+
+  return (
+    <div className="flex gap-1.5 items-stretch">
+      <a href={href}
+        className={`flex-1 py-3 rounded-xl text-sm font-semibold transition-all text-center border ${disabled ? 'border-border text-muted-foreground bg-muted/30 pointer-events-none' : 'border-primary/40 text-primary hover:border-primary hover:bg-primary/10'}`}>
+        Debug {selected ? `· ${selected.name}` : '发布（逐步执行）'}
+      </a>
+      {!disabled && (
+        <div className="relative">
+          <button onClick={() => setOpen(p => !p)}
+            className="h-full px-3 rounded-xl border border-primary/40 text-primary hover:border-primary hover:bg-primary/10 transition-all text-sm">
+            ▾
+          </button>
+          {open && (
+            <div className="absolute right-0 bottom-full mb-1 bg-card border border-border rounded-xl shadow-xl py-1 z-50 min-w-[180px]">
+              <p className="text-[9px] uppercase tracking-wide text-muted-foreground px-3 pt-1 pb-0.5">选择工作流</p>
+              {workflows.map(w => (
+                <button key={w.id} onClick={() => select(w.id)}
+                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors ${selectedId === w.id ? 'text-primary' : 'text-foreground'}`}>
+                  {selectedId === w.id ? '✓ ' : ''}{w.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── 全屏截图弹窗 ─────────────────────────────────────────────
 function ScreenshotModal({ url, label, onClose, isQr }: {
   url: string; label: string; onClose: () => void; isQr?: boolean;
@@ -980,16 +1037,7 @@ function PublishPageInner() {
             {isPublishing ? '发布中...' : '开始发布'}
           </button>
 
-          <a
-            href={`/workflows?ossUrl=${encodeURIComponent(ossUrl)}&title=${encodeURIComponent(title)}&description=${encodeURIComponent(description)}&tags=${encodeURIComponent(tags)}&clientId=${encodeURIComponent(clientId)}`}
-            className={`w-full py-3 rounded-xl text-sm font-semibold transition-all text-center border ${
-              !ossUrl.trim() || !title.trim() || isPublishing
-                ? 'border-border text-muted-foreground bg-muted/30 pointer-events-none'
-                : 'border-primary/40 text-primary hover:border-primary hover:bg-primary/10'
-            }`}
-          >
-            Debug 发布（逐步执行）
-          </a>
+          <DebugWorkflowButton ossUrl={ossUrl} title={title} description={description} tags={tags} clientId={clientId} disabled={!ossUrl.trim() || !title.trim() || isPublishing} />
         </div>
       </div>
 

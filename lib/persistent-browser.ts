@@ -11,38 +11,70 @@ import { chromium, BrowserContext } from 'playwright';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
+import { IdleSimulator } from './workflow/idle-simulator';
 
 export const BROWSER_DATA_DIR =
   process.env.DOUYIN_BROWSER_DATA_DIR ??
   path.join(os.homedir(), '.douyin-browser-data');
 
 export const IS_HEADLESS = process.env.BROWSER_HEADLESS !== 'false';
+export const IS_IDLE_SIMULATION = process.env.BROWSER_IDLE_SIMULATION === 'true';
 
 const ANTI_BOT_SCRIPT = () => {
+  // 隐藏 webdriver
   Object.defineProperty(navigator, 'webdriver', { get: () => false });
-  Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+  
+  // 模拟 Chrome 特色属性
+  // @ts-ignore
+  window.chrome = {
+    runtime: {},
+    loadTimes: function() {},
+    csi: function() {},
+    app: {}
+  };
+
+  // 模拟插件列表
+  Object.defineProperty(navigator, 'plugins', {
+    get: () => [
+      { description: "Portable Document Format", filename: "internal-pdf-viewer", name: "Chrome PDF Viewer" },
+      { description: "", filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai", name: "Chrome PDF Viewer" }
+    ]
+  });
+
+  // 模拟语言环境
   Object.defineProperty(navigator, 'languages', {
     get: () => ['zh-CN', 'zh', 'en-US', 'en'],
   });
-  // @ts-ignore
-  window.chrome = { runtime: {} };
+
+  // 修复权限查询
   const oq = window.navigator.permissions.query.bind(window.navigator.permissions);
   // @ts-ignore
   window.navigator.permissions.query = (p: PermissionDescriptor) =>
     p.name === 'notifications'
       ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
       : oq(p);
+
+  // 隐藏 WebGL 指纹风险
+  const getParameter = WebGLRenderingContext.prototype.getParameter;
+  WebGLRenderingContext.prototype.getParameter = function(parameter) {
+    if (parameter === 37445) return 'Intel Inc.';
+    if (parameter === 37446) return 'Intel(R) Iris(TM) Plus Graphics 640';
+    return getParameter.apply(this, [parameter]);
+  };
 };
 
 // 用 global 跨热重载保持实例
 declare global {
   // eslint-disable-next-line no-var
   var __douyinBrowserCtx: BrowserContext | undefined;
+  // eslint-disable-next-line no-var
+  var __browserIdleSim: IdleSimulator | undefined;
+  // eslint-disable-next-line no-var
+  var __debugScratchPage: import('playwright').Page | undefined;
 }
 
 /**
  * 启动前修复 Chrome Preferences，将 exit_type 重置为 Normal
- * 防止每次启动弹出「Chromium 未正确关闭，要恢复页面吗？」
  */
 function patchChromePreferences(dataDir: string) {
   const prefFile = path.join(dataDir, 'Default', 'Preferences');
@@ -64,24 +96,22 @@ function patchChromePreferences(dataDir: string) {
       fs.writeFileSync(prefFile, JSON.stringify(prefs), 'utf-8');
     }
   } catch {
-    // 静默失败，不影响启动
+    // 静默失败
   }
 }
 
 let launching = false;
 
 export async function getPersistentContext(): Promise<BrowserContext> {
-  // 已有实例且存活 → 直接返回
   if (global.__douyinBrowserCtx) {
     try {
-      global.__douyinBrowserCtx.pages(); // 若已关闭会 throw
+      global.__douyinBrowserCtx.pages();
       return global.__douyinBrowserCtx;
     } catch {
       global.__douyinBrowserCtx = undefined;
     }
   }
 
-  // 防止并发重复启动
   if (launching) {
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 500));
@@ -92,73 +122,82 @@ export async function getPersistentContext(): Promise<BrowserContext> {
 
   launching = true;
   try {
-    // 启动前把 Preferences 里的 exit_type 改成 Normal，防止「恢复页面」弹窗
     patchChromePreferences(BROWSER_DATA_DIR);
+    console.log(`[Browser] 启动持久化浏览器  headless=${IS_HEADLESS}  dataDir=${BROWSER_DATA_DIR}`);
 
-    console.log(
-      `[Browser] 启动持久化浏览器  headless=${IS_HEADLESS}  dataDir=${BROWSER_DATA_DIR}`
-    );
+    const channel = process.env.BROWSER_CHANNEL as 'chrome' | 'msedge' | undefined;
 
     const ctx = await chromium.launchPersistentContext(BROWSER_DATA_DIR, {
+      channel,
       headless: IS_HEADLESS,
-      userAgent:
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
       locale: 'zh-CN',
       viewport: { width: 1280, height: 800 },
-      // 明确不授予任何权限（清除历史授权）
-      permissions: [],
+      ignoreDefaultArgs: ['--enable-automation'],
       args: [
         '--no-sandbox',
         '--disable-blink-features=AutomationControlled',
         '--disable-infobars',
-        // 自动拒绝所有权限弹窗（地理位置、通知、麦克风等）
+        '--window-position=0,0',
+        '--enable-webgl',
+        '--ignore-certificate-errors',
         '--deny-permission-prompts',
         '--disable-notifications',
-        // 禁止「未正确关闭」恢复弹窗
-        '--no-session-crashed-bubble',
-        '--disable-session-restore-from-crash',
       ],
     });
 
-    // 清除持久化 userDataDir 中残留的权限授权
     await ctx.clearPermissions();
-
     await ctx.addInitScript(ANTI_BOT_SCRIPT);
 
     ctx.on('close', () => {
-      console.log('[Browser] 持久化浏览器已关闭，下次请求时将自动重启');
+      console.log('[Browser] 持久化浏览器已关闭');
       global.__douyinBrowserCtx = undefined;
+      global.__browserIdleSim?.stop();
     });
 
     global.__douyinBrowserCtx = ctx;
+
+    if (IS_IDLE_SIMULATION) {
+      const pages = ctx.pages();
+      const page = pages.length > 0 ? pages[0] : await ctx.newPage();
+      const sim = new IdleSimulator();
+      sim.start(page);
+      global.__browserIdleSim = sim;
+    }
+
     return ctx;
   } finally {
     launching = false;
   }
 }
 
-/** 检查持久化浏览器当前是否已登录抖音（通过 Cookie 判断） */
 export async function isPersistentContextLoggedIn(): Promise<boolean> {
   try {
     const ctx = await getPersistentContext();
     const cookies = await ctx.cookies(['https://creator.douyin.com']);
-    const sessionid = cookies.find(c => c.name === 'sessionid');
-    const uid_tt = cookies.find(c => c.name === 'uid_tt');
-    return !!(sessionid?.value && uid_tt?.value);
+    return !!cookies.find(c => c.name === 'sessionid')?.value;
   } catch {
     return false;
   }
 }
 
-/** 将持久化浏览器当前的抖音 Cookie 导出为字符串（供 Supabase 同步） */
-export async function exportDouyinCookieStr(): Promise<string | null> {
+/** 检查持久化浏览器当前是否已登录小红书 */
+export async function isXhsLoggedIn(): Promise<boolean> {
   try {
     const ctx = await getPersistentContext();
-    const cookies = await ctx.cookies([
-      'https://www.douyin.com',
-      'https://creator.douyin.com',
-    ]);
-    const relevant = cookies.filter(c => c.domain.includes('douyin.com'));
+    const cookies = await ctx.cookies(['https://www.xiaohongshu.com']);
+    return !!cookies.find(c => c.name === 'web_session')?.value;
+  } catch {
+    return false;
+  }
+}
+
+/** 导出小红书 Cookie 字符串（供 HTTP 请求使用） */
+export async function exportXhsCookieStr(): Promise<string | null> {
+  try {
+    const ctx = await getPersistentContext();
+    const cookies = await ctx.cookies(['https://www.xiaohongshu.com']);
+    const relevant = cookies.filter(c => c.domain.includes('xiaohongshu.com'));
     if (relevant.length === 0) return null;
     return relevant.map(c => `${c.name}=${c.value}`).join('; ');
   } catch {
@@ -166,7 +205,40 @@ export async function exportDouyinCookieStr(): Promise<string | null> {
   }
 }
 
-/** 关闭持久化浏览器（一般不需要调用） */
+export async function exportDouyinCookieStr(): Promise<string | null> {
+  try {
+    const ctx = await getPersistentContext();
+    const cookies = await ctx.cookies(['https://www.douyin.com', 'https://creator.douyin.com']);
+    return cookies.map(c => `${c.name}=${c.value}`).join('; ');
+  } catch {
+    return null;
+  }
+}
+
+export async function getDebugScratchPage(): Promise<import('playwright').Page> {
+  const ctx = await getPersistentContext();
+  if (global.__debugScratchPage) {
+    try {
+      await global.__debugScratchPage.title();
+      return global.__debugScratchPage;
+    } catch {
+      global.__debugScratchPage = undefined;
+    }
+  }
+  const page = await ctx.newPage();
+  page.on('dialog', d => d.accept());
+  page.on('close', () => { global.__debugScratchPage = undefined; });
+  global.__debugScratchPage = page;
+  return page;
+}
+
+export async function resetDebugScratchPage(): Promise<void> {
+  if (global.__debugScratchPage) {
+    await global.__debugScratchPage.close().catch(() => {});
+    global.__debugScratchPage = undefined;
+  }
+}
+
 export async function closePersistentBrowser(): Promise<void> {
   if (global.__douyinBrowserCtx) {
     await global.__douyinBrowserCtx.close().catch(() => {});
@@ -174,32 +246,8 @@ export async function closePersistentBrowser(): Promise<void> {
   }
 }
 
-/** 浏览器状态快照（供 /api/browser/status 使用） */
 export function browserStatus() {
-  const alive = (() => {
-    try {
-      if (!global.__douyinBrowserCtx) return false;
-      global.__douyinBrowserCtx.pages();
-      return true;
-    } catch {
-      return false;
-    }
-  })();
-
-  const pageCount = alive
-    ? (() => {
-        try {
-          return global.__douyinBrowserCtx!.pages().length;
-        } catch {
-          return 0;
-        }
-      })()
-    : 0;
-
-  return {
-    alive,
-    headless: IS_HEADLESS,
-    dataDir: BROWSER_DATA_DIR,
-    openPages: pageCount,
-  };
+  const alive = !!global.__douyinBrowserCtx;
+  const pageCount = alive ? global.__douyinBrowserCtx!.pages().length : 0;
+  return { alive, headless: IS_HEADLESS, dataDir: BROWSER_DATA_DIR, openPages: pageCount };
 }

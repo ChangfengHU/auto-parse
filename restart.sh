@@ -1,23 +1,21 @@
 #!/bin/bash
 
-# 定义端口 (对应 package.json 中的 "dev": "next dev -p 1007")
 PORT=1007
 
-echo "🔄 正在检查端口 $PORT..."
+echo "🔄 清理旧进程..."
 
-# 查找占用端口的进程 ID
-# lsof -t -i:1007 返回占用该端口的 PID
-PID=$(lsof -t -i:$PORT)
+# 杀所有 next dev 进程（包括后台启动、还没绑定端口的）
+pkill -f "next dev" 2>/dev/null
 
+# 再杀仍然占用端口的进程（兜底）
+PID=$(lsof -t -i:$PORT 2>/dev/null)
 if [ -n "$PID" ]; then
-  echo "⚠️  发现旧进程 (PID: $PID) 正在运行，正在终止..."
-  kill -9 $PID
-  echo "✅ 旧进程已终止。"
-else
-  echo "✅ 端口 $PORT 未被占用。"
+  kill -9 $PID 2>/dev/null
 fi
 
-# 等待一秒确保端口释放
+# 清除 Next.js dev 锁文件，防止 "Unable to acquire lock" 报错
+rm -f .next/dev/lock
+
 sleep 1
 
 echo "🚀 正在启动 Next.js 开发服务器..."

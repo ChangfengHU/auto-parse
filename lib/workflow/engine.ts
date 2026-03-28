@@ -9,6 +9,7 @@
 import type { Page } from 'playwright';
 import type { NodeDef, NodeResult, NodeType, WorkflowContext, WorkflowDef } from './types';
 import { resolveParams } from './resolver';
+import { captureScreenshot } from './utils';
 
 import { executeNavigate } from './nodes/navigate';
 import { executeTextInput } from './nodes/text-input';
@@ -18,6 +19,9 @@ import { executeScreenshot } from './nodes/screenshot';
 import { executeFileUpload } from './nodes/file-upload';
 import { executeWaitCondition } from './nodes/wait-condition';
 import { executeQRCode } from './nodes/qrcode';
+import { executeHumanPause } from './nodes/human-pause';
+import { executeExtractImage } from './nodes/extract-image';
+import { executeXhsDownload } from './nodes/xhs-download';
 
 // ── 节点注册表 ────────────────────────────────────────────────────────────────
 
@@ -33,6 +37,9 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   file_upload:    executeFileUpload,
   wait_condition: executeWaitCondition,
   qrcode:         executeQRCode,
+  human_pause:    executeHumanPause,
+  extract_image:  executeExtractImage,
+  xhs_download:   executeXhsDownload,
 };
 
 // ── 单步执行 ──────────────────────────────────────────────────────────────────
@@ -50,16 +57,80 @@ export async function executeNode(
   // 解析模板变量
   const resolvedParams = resolveParams(node.params, ctx.vars);
 
+  // ── 节点前置导航（url 字段设置时自动跳转）─────────────────────────────────
+  if (node.url) {
+    const resolvedUrl = resolveParams({ url: node.url }, ctx.vars).url as string;
+    const currentUrl = page.url();
+    if (!currentUrl.includes(resolvedUrl) && !resolvedUrl.includes(currentUrl)) {
+      ctx.emit?.('log', `🌐 自动导航到：${resolvedUrl}`);
+      try {
+        await page.goto(resolvedUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      } catch (e) {
+        ctx.emit?.('log', `⚠️ 导航超时，继续执行：${String(e).slice(0, 80)}`);
+      }
+    }
+  }
+
   ctx.emit?.('log', `▶️ 执行节点：${node.label ?? node.type}`);
 
+  let result: NodeResult;
   try {
-    const result = await executor(page, resolvedParams, ctx);
+    result = await executor(page, resolvedParams, ctx);
     if (result.screenshot) ctx.emit?.('screenshot', result.screenshot);
-    return result;
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     return { success: false, log: [`❌ 节点异常: ${error}`], error };
   }
+
+  // ── 节点后置等待（waitAfter 启用时）────────────────────────────────────────
+  if (result.success && node.waitAfter?.enabled) {
+    const wa = node.waitAfter;
+    const timeout = wa.timeout ?? 15_000;
+    const start = Date.now();
+    ctx.emit?.('log', `⏳ 等待后置条件（最多 ${timeout / 1000}s）...`);
+
+    while (Date.now() - start < timeout) {
+      const url = page.url();
+
+      if (wa.urlContains && url.includes(wa.urlContains)) {
+        ctx.emit?.('log', `✅ 后置条件满足：URL 包含 "${wa.urlContains}"`);
+        break;
+      }
+
+      if (wa.selector) {
+        const visible = await page.locator(wa.selector).isVisible().catch(() => false);
+        if (wa.action === 'appeared' && visible) { ctx.emit?.('log', `✅ 后置元素出现`); break; }
+        if (wa.action === 'disappeared' && !visible) { ctx.emit?.('log', `✅ 后置元素消失`); break; }
+      }
+
+      if (wa.successKeywords?.length || wa.failKeywords?.length) {
+        const text = await page.evaluate(() => document.body.innerText).catch(() => '');
+        const failWord = wa.failKeywords?.find(k => text.includes(k));
+        if (failWord) {
+          result = { ...result, success: false, error: `后置检测失败：页面含"${failWord}"` };
+          ctx.emit?.('log', `❌ 后置检测失败：${failWord}`);
+          break;
+        }
+        const successWord = wa.successKeywords?.find(k => text.includes(k));
+        if (successWord) { ctx.emit?.('log', `✅ 后置关键词满足："${successWord}"`); break; }
+      }
+
+      await page.waitForTimeout(500);
+    }
+  }
+
+  // ── 自动截图（默认开启，除非明确关闭）────────────────────────────────────
+  if (node.autoScreenshot !== false && !result.screenshot) {
+    const shot = await captureScreenshot(page).catch(() => undefined);
+    if (shot) {
+      result = { ...result, screenshot: shot };
+      ctx.emit?.('screenshot', shot);
+    }
+  } else if (result.screenshot) {
+    ctx.emit?.('screenshot', result.screenshot);
+  }
+
+  return result;
 }
 
 // ── 自动全流程执行（SSE 模式）─────────────────────────────────────────────────

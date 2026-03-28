@@ -91,6 +91,8 @@ export async function parseDouyinWithPlaywright(videoId: string): Promise<{
 
     return result;
   } finally {
-    await browser.close();
+    if (process.env.KEEP_BROWSER_OPEN !== 'true') {
+      await browser.close();
+    }
   }
 }

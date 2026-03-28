@@ -208,6 +208,32 @@
       white-space: nowrap; z-index: 999;
     }
     .toast.show { opacity: 1; }
+
+    /* ── Platform Tabs ── */
+    .platform-tabs {
+      display: flex;
+      gap: 0;
+      background: #1a1a1a;
+      border-bottom: 1px solid #2a2a2a;
+      padding: 0 16px;
+    }
+    .tab-btn {
+      flex: 1;
+      padding: 10px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #6b7280;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .tab-btn:hover { color: #e5e5e5; }
+    .tab-btn.active {
+      color: #a78bfa;
+      border-bottom-color: #8b5cf6;
+    }
   </style>
 </head>
 <body>
@@ -215,9 +241,15 @@
     <div class="logo">▶</div>
     <div>
       <div class="title">vyibc-auto-parse</div>
-      <div class="subtitle">抖音 Cookie 管理</div>
+      <div class="subtitle" id="platformSubtitle">抖音 Cookie 管理</div>
     </div>
     <button class="sync-icon-btn" id="manualSyncBtn" title="立即同步到发布平台">☁</button>
+  </div>
+
+  <!-- Platform Tabs -->
+  <div class="platform-tabs">
+    <button class="tab-btn active" id="tabDouyin" data-platform="douyin">抖音</button>
+    <button class="tab-btn" id="tabXhs" data-platform="xhs">小红书</button>
   </div>
 
   <div class="body">
@@ -241,6 +273,10 @@
 
     <!-- 操作按钮 -->
     <div class="action-section">
+      <!-- 调试按钮：显示读取到的 cookies -->
+      <button class="btn btn-douyin" id="debugBtn" style="font-size:11px;padding:6px;">
+        🐛 调试：查看读取到的 Cookie
+      </button>
     </div>
 
     <!-- 保活开关 -->

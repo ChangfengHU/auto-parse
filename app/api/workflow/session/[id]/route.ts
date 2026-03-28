@@ -43,7 +43,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const session = getSession(id);
   if (!session) return NextResponse.json({ error: 'session not found' }, { status: 404 });
 
-  if (session._page) {
+  if (session._page && process.env.KEEP_BROWSER_OPEN !== 'true') {
     await session._page.close().catch(() => {});
   }
   deleteSession(id);

@@ -10,6 +10,7 @@
   ],
   "host_permissions": [
     "https://*.douyin.com/*",
+    "https://*.xiaohongshu.com/*",
     "https://parse.vyibc.com/*",
     "https://okkgchwzppghiyfgmrlj.supabase.co/*",
     "http://localhost/*",

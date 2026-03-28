@@ -1,53 +1,78 @@
 /**
- * POST /api/workflow/session
- * 创建 Debug 工作流 Session
+ * POST /api/workflow/session — 创建 Debug 工作流 Session
  *
- * body: { workflowId: string, vars: Record<string,string> }
- * → { sessionId, workflow, currentStep: 0, totalSteps }
+ * body: {
+ *   workflowId?: string           — 从 DB 加载
+ *   workflow?:   WorkflowDef      — 直接传入（优先，支持未保存的编辑）
+ *   vars?:       Record<string,string>
+ *   humanOptions?: HumanOptions
+ * }
+ *
+ * GET /api/workflow/session — 列出所有 Session
  */
 import { NextResponse } from 'next/server';
-import { createSession, listSessions } from '@/lib/workflow/session-store';
+import { createSession, listSessions, updateSession } from '@/lib/workflow/session-store';
 import { getPersistentContext } from '@/lib/persistent-browser';
-import { douyinPublishWorkflow } from '@/lib/workflow/workflows/douyin-publish';
-
-const WORKFLOW_REGISTRY: Record<string, import('@/lib/workflow/types').WorkflowDef> = {
-  'douyin-publish': douyinPublishWorkflow,
-};
+import { getWorkflow } from '@/lib/workflow/workflow-db';
+import { DEFAULT_HUMAN_OPTIONS } from '@/lib/workflow/human-options';
+import { IdleSimulator } from '@/lib/workflow/idle-simulator';
+import type { WorkflowDef } from '@/lib/workflow/types';
 
 export async function POST(req: Request) {
-  const { workflowId, vars = {} } = await req.json().catch(() => ({}));
+  const body = await req.json().catch(() => ({}));
+  const { workflowId, workflow: inlineWorkflow, vars = {}, humanOptions } = body as {
+    workflowId?: string;
+    workflow?: WorkflowDef;
+    vars?: Record<string, string>;
+    humanOptions?: Record<string, boolean>;
+  };
 
-  const workflow = WORKFLOW_REGISTRY[workflowId];
+  // 1. 解析工作流定义（inline 优先，否则从 DB 加载）
+  let workflow: WorkflowDef | null = inlineWorkflow ?? null;
+  if (!workflow && workflowId) {
+    workflow = await getWorkflow(workflowId).catch(() => null);
+  }
   if (!workflow) {
     return NextResponse.json(
-      { error: `未知工作流: ${workflowId}`, available: Object.keys(WORKFLOW_REGISTRY) },
+      { error: `工作流未找到，请传入 workflow 或有效的 workflowId` },
       { status: 400 }
     );
   }
 
-  // 验证必填变量
-  const missing = workflow.vars.filter(v => !vars[v]);
-  if (missing.length > 0) {
-    return NextResponse.json(
-      { error: `缺少变量: ${missing.join(', ')}` },
-      { status: 400 }
-    );
-  }
+  // 2. 变量校验（仅警告，不阻断 — 允许空变量进行单节点调试）
+  const mergedHumanOptions = { ...DEFAULT_HUMAN_OPTIONS, ...(humanOptions ?? {}) };
 
-  // 在持久化浏览器中开一个新 Tab
+  // 3. 在持久化浏览器中开新 Tab
   const ctx = await getPersistentContext();
   const page = await ctx.newPage();
   page.on('dialog', d => d.accept());
 
-  const session = createSession({ workflowId, workflow, vars });
-  // 把 page 存入 session（运行时引用）
-  (session as typeof session & { _page: typeof page })._page = page;
+  const session = createSession({ 
+    workflowId: workflow.id, 
+    workflow, 
+    vars, 
+    humanOptions: mergedHumanOptions,
+    lastExecutedStep: null 
+  });
+  updateSession(session.id, { _page: page } as Partial<typeof session>);
+
+  // 4. 空闲模拟
+  if (mergedHumanOptions.idleSimulation) {
+    const idleSim = new IdleSimulator();
+    idleSim.start(page);
+    updateSession(session.id, { _idleSim: idleSim } as Partial<typeof session>);
+  }
 
   return NextResponse.json({
     sessionId: session.id,
-    workflow: { id: workflow.id, name: workflow.name, nodes: workflow.nodes.map((n, i) => ({ index: i, type: n.type, label: n.label })) },
+    workflow: {
+      id: workflow.id,
+      name: workflow.name,
+      nodes: workflow.nodes.map((n, i) => ({ index: i, type: n.type, label: n.label })),
+    },
     currentStep: 0,
     totalSteps: workflow.nodes.length,
+    humanOptions: mergedHumanOptions,
   });
 }
 

@@ -163,6 +163,8 @@ export async function parseTikTokWithPlaywright(videoUrl: string): Promise<{
 
     return result;
   } finally {
-    await browser.close();
+    if (process.env.KEEP_BROWSER_OPEN !== 'true') {
+      await browser.close();
+    }
   }
 }

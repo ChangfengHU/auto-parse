@@ -11,8 +11,22 @@ export type NodeType =
   | 'file_upload'     // 高级：URL → 下载 → 注入 <input type=file>
   | 'wait_condition'  // 高级：轮询 + 条件判断（值/URL/元素存在）
   | 'qrcode'          // 高级：截取二维码 → 等待扫码成功（URL 跳转判断）
+  | 'human_pause'     // 高级：暂停等待人工操作（验证码/拦截页）
+  | 'extract_image'   // 高级：提取页面图片 → 下载 → 上传 OSS
+  | 'xhs_download'   // 高级：小红书帖子图片/视频批量下载 → 上传 OSS
 
 // ── 节点定义 ──────────────────────────────────────────────────────────────────
+
+/** 节点执行完成后的等待条件（每个节点都可配置，默认关闭） */
+export interface WaitAfterConfig {
+  enabled?: boolean             // 是否启用（默认 false）
+  urlContains?: string          // 等待 URL 包含此字符串
+  selector?: string             // 等待元素出现/消失（CSS 或 XPath）
+  action?: 'appeared' | 'disappeared' | 'url_match'
+  timeout?: number              // ms，默认 15000
+  failKeywords?: string[]       // 页面含任一关键词则判定失败
+  successKeywords?: string[]    // 页面含任一关键词则判定成功（优先）
+}
 
 export interface NodeDef {
   id?: string                        // 可选 ID，用于引用
@@ -20,6 +34,9 @@ export interface NodeDef {
   label?: string                     // 展示给用户的名称
   params: Record<string, unknown>    // 节点参数（支持 {{变量}} 模板）
   continueOnError?: boolean          // 失败时是否继续（默认 false）
+  url?: string                       // 执行前自动导航到此 URL（空则不导航）
+  waitAfter?: WaitAfterConfig        // 执行后等待条件
+  autoScreenshot?: boolean           // 执行后自动截图（默认 true）
 }
 
 // ── 节点参数类型（各节点 params 的具体定义）────────────────────────────────────
@@ -109,6 +126,22 @@ export interface QRCodeParams {
   timeout?: number               // 等待扫码超时 ms（默认 300000）
 }
 
+export interface ExtractImageParams {
+  selector?: string              // CSS 选择器（默认：页面第一个 img）
+  index?: number                 // 如果匹配多个，取第几个（默认 0）
+  uploadToOSS?: boolean          // 是否上传到 OSS（默认 true）
+  ossPath?: string               // OSS 存储路径（默认：extract-images/{timestamp}.jpg）
+  outputVar?: string             // 输出变量名（默认：imageUrl）
+}
+
+export interface XhsDownloadParams {
+  noteUrl?: string               // 帖子直链（不填则在当前页操作）
+  cardIndex?: number             // 在列表页时点第几张卡片（默认 0）
+  maxImages?: number             // 最多下载张数（默认 20）
+  ossPrefix?: string             // OSS 路径前缀（默认 'xhs'）
+  outputVar?: string             // 输出变量名（默认 'xhsImages'）
+}
+
 // ── 工作流定义 ────────────────────────────────────────────────────────────────
 
 export interface WorkflowDef {
@@ -133,6 +166,7 @@ export interface WorkflowContext {
   vars: Record<string, string>              // 输入变量（{{title}} 等）
   outputs: Record<string, unknown>          // 累积的节点输出
   emit?: (type: string, payload: string) => void  // SSE 推送（可选）
+  humanOptions?: import('./human-options').HumanOptions  // 人工模拟开关
 }
 
 // ── Session（Debug 模式）─────────────────────────────────────────────────────
@@ -151,9 +185,12 @@ export interface WorkflowSession {
   workflow: WorkflowDef
   vars: Record<string, string>
   currentStep: number
+  lastExecutedStep: number | null   // 最近一次实际执行的步骤索引（用于接力判断）
   status: 'paused' | 'running' | 'done' | 'error'
   history: StepHistory[]
   createdAt: number
-  // Playwright page 引用（运行时，不序列化）
+  humanOptions: import('./human-options').HumanOptions
+  // 运行时引用（不序列化）
   _page?: import('playwright').Page
+  _idleSim?: import('./idle-simulator').IdleSimulator
 }

@@ -910,9 +910,11 @@ export async function publishToDouyin(
     releaseLock();
     // 持久化浏览器：只关闭当前 Page，Context 继续存活（保持登录状态 + 固定指纹）
     // 临时浏览器（回退模式）：关闭整个 Browser
-    try { await page.close(); } catch { /* ignore */ }
-    if (fallbackBrowser) {
-      await fallbackBrowser.close().catch(() => {});
+    if (process.env.KEEP_BROWSER_OPEN !== 'true') {
+      try { await page.close(); } catch { /* ignore */ }
+      if (fallbackBrowser) {
+        await fallbackBrowser.close().catch(() => {});
+      }
     }
     if (tmpFile) try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
   }

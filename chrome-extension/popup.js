@@ -1,7 +1,10 @@
 const SERVER = 'https://parse.vyibc.com';
 
+// ── 全局状态 ───────────────────────────────────────────────
+let currentPlatform = 'douyin'; // 'douyin' | 'xhs'
+
 // uid_tt 是登录后才会出现的用户 ID cookie，用于判断是否真实登录
-const COOKIE_KEYS = [
+const DOUYIN_COOKIE_KEYS = [
   'sessionid', 'sessionid_ss',
   'uid_tt', 'uid_tt_ss',
   'ttwid', 'passport_csrf_token', 'passport_csrf_token_default',
@@ -27,7 +30,7 @@ function formatTime(ts) {
 async function getDouyinCookies() {
   const results = {};
   await Promise.all(
-    COOKIE_KEYS.map(name =>
+    DOUYIN_COOKIE_KEYS.map(name =>
       new Promise(resolve => {
         chrome.cookies.get({ url: 'https://www.douyin.com', name }, cookie => {
           if (cookie) results[name] = cookie.value;
@@ -37,6 +40,36 @@ async function getDouyinCookies() {
     )
   );
   return results;
+}
+
+// ── 从浏览器读取小红书 cookies ────────────────────────────
+async function getXhsCookies() {
+  // 小红书需要完整的 cookie 字符串，尝试多个域名
+  const domains = ['.xiaohongshu.com', 'xiaohongshu.com', 'www.xiaohongshu.com'];
+  
+  for (const domain of domains) {
+    try {
+      const cookies = await new Promise((resolve) => {
+        chrome.cookies.getAll({ domain: domain }, (cookies) => {
+          resolve(cookies || []);
+        });
+      });
+      
+      if (cookies.length > 0) {
+        console.log(`成功从域名 ${domain} 读取到 ${cookies.length} 个 cookies`);
+        const results = {};
+        cookies.forEach(cookie => {
+          results[cookie.name] = cookie.value;
+        });
+        return results;
+      }
+    } catch (error) {
+      console.warn(`从域名 ${domain} 读取 cookies 失败:`, error);
+    }
+  }
+  
+  console.warn('所有域名都无法读取到 cookies');
+  return {};
 }
 
 // cookie 对象 → 字符串
@@ -55,7 +88,7 @@ function parseCookieString(str) {
   }).filter(c => c && c.name && c.value);
 }
 
-// ── 一键读取抖音登录信息 → 填入文本框 ──────────────────
+// ── 一键读取登录信息 → 填入文本框 ──────────────────
 async function readCookiesToBox() {
   const btn = document.getElementById('readBtn');
   const icon = document.getElementById('readIcon');
@@ -66,12 +99,21 @@ async function readCookiesToBox() {
   text.textContent = '读取中...';
 
   try {
-    const cookies = await getDouyinCookies();
-    const str = cookiesToString(cookies);
-
-    if (!str) {
-      showToast('未读取到抖音 Cookie，请先登录抖音网页版');
-      return;
+    let cookies, str;
+    if (currentPlatform === 'douyin') {
+      cookies = await getDouyinCookies();
+      str = cookiesToString(cookies);
+      if (!str) {
+        showToast('未读取到抖音 Cookie，请先登录抖音网页版');
+        return;
+      }
+    } else {
+      cookies = await getXhsCookies();
+      str = cookiesToString(cookies);
+      if (!str || str.length === 0) {
+        showToast('未读取到小红书 Cookie，请先登录小红书网页版');
+        return;
+      }
     }
 
     document.getElementById('cookieBox').value = str;
@@ -82,7 +124,53 @@ async function readCookiesToBox() {
   } finally {
     btn.disabled = false;
     icon.textContent = '📋';
-    text.textContent = '一键读取抖音登录信息';
+    const platformName = currentPlatform === 'douyin' ? '抖音' : '小红书';
+    text.textContent = `一键读取${platformName}登录信息`;
+  }
+}
+
+// ── 调试：显示读取到的 cookies ──────────────────────────
+async function debugShowCookies() {
+  const btn = document.getElementById('debugBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ 读取中...';
+
+  try {
+    let cookies, cookieStr;
+    if (currentPlatform === 'douyin') {
+      cookies = await getDouyinCookies();
+      cookieStr = cookiesToString(cookies);
+    } else {
+      cookies = await getXhsCookies();
+      cookieStr = cookiesToString(cookies);
+    }
+
+    const platformName = currentPlatform === 'douyin' ? '抖音' : '小红书';
+    
+    // 显示详细信息
+    console.log(`=== ${platformName} Cookie 调试信息 ===`);
+    console.log('Cookie 对象:', cookies);
+    console.log('Cookie 数量:', Object.keys(cookies).length);
+    console.log('Cookie 字段名:', Object.keys(cookies));
+    console.log('完整字符串长度:', cookieStr.length);
+    console.log('完整字符串（前200字符）:', cookieStr.substring(0, 200));
+    
+    // 在文本框显示
+    document.getElementById('cookieBox').value = cookieStr;
+    
+    // 弹出提示
+    alert(`${platformName} Cookie 调试信息：\n\n` +
+      `Cookie 数量: ${Object.keys(cookies).length}\n` +
+      `字段名: ${Object.keys(cookies).join(', ')}\n\n` +
+      `完整字符串长度: ${cookieStr.length}\n\n` +
+      `已填入文本框，详细信息请查看控制台（F12）`);
+      
+  } catch (e) {
+    console.error('读取 Cookie 失败:', e);
+    alert('读取失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🐛 调试：查看读取到的 Cookie';
   }
 }
 
@@ -112,7 +200,22 @@ async function checkLoginStatus() {
   el.className = 'badge badge-gray';
   el.innerHTML = '<span class="dot dot-gray"></span> 验证中...';
 
-  // 读取上次记录的登录状态
+  if (currentPlatform === 'xhs') {
+    // 小红书：检查是否读取到了 cookies
+    const cookies = await getXhsCookies();
+    const cookieStr = cookiesToString(cookies);
+    const hasSession = !!(cookieStr && cookieStr.length > 0);
+    if (hasSession) {
+      el.className = 'badge badge-green';
+      el.innerHTML = '<span class="dot dot-green"></span> 已登录';
+    } else {
+      el.className = 'badge badge-red';
+      el.innerHTML = '<span class="dot dot-red"></span> 未登录';
+    }
+    return hasSession;
+  }
+
+  // 抖音：读取上次记录的登录状态
   const { lastLoginState } = await chrome.storage.local.get('lastLoginState');
 
   return new Promise(resolve => {
@@ -211,30 +314,52 @@ async function manualSyncToPublish() {
   btn.disabled = true;
   btn.textContent = '⟳';
 
-  const cookies = await getDouyinCookies();
-  const cookieStr = cookiesToString(cookies);
-  if (!cookieStr || !cookieStr.includes('sessionid=')) {
-    showToast('未检测到抖音登录，无法同步');
-    btn.disabled = false; btn.textContent = '☁';
-    return;
+  let cookies, cookieStr, apiUrl;
+  if (currentPlatform === 'douyin') {
+    cookies = await getDouyinCookies();
+    cookieStr = cookiesToString(cookies);
+    apiUrl = `${SERVER}/api/cookie`;
+    if (!cookieStr || !cookieStr.includes('sessionid=')) {
+      showToast('未检测到抖音登录，无法同步');
+      btn.disabled = false; btn.textContent = '☁';
+      return;
+    }
+  } else {
+    cookies = await getXhsCookies();
+    cookieStr = cookiesToString(cookies);
+    apiUrl = `${SERVER}/api/analysis/xhs/cookie`;
+    if (!cookieStr || cookieStr.length === 0) {
+      showToast('未检测到小红书登录，无法同步');
+      btn.disabled = false; btn.textContent = '☁';
+      return;
+    }
   }
 
-  // 同时同步两个目标
-  const [parseRes, supabaseRes] = await Promise.all([
+  // 同时同步两个目标（抖音同时同步解析服务器和Supabase，小红书只同步解析服务器）
+  const tasks = [
     // 1. 解析服务器（服务器 Cookie）
-    fetch(`${SERVER}/api/cookie`, {
+    fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cookie: cookieStr }),
     }).then(r => r.json()).catch(() => null),
-    // 2. 发布平台 Supabase
-    new Promise(resolve => {
-      chrome.runtime.sendMessage({ type: 'SYNC_TO_SUPABASE', cookieStr }, resolve);
-    }),
-  ]);
+  ];
 
-  const parseOk = parseRes?.success === true;
-  const supabaseOk = supabaseRes?.ok === true;
+  // 2. 抖音额外同步发布平台 Supabase
+  if (currentPlatform === 'douyin') {
+    tasks.push(
+      new Promise(resolve => {
+        chrome.runtime.sendMessage({ type: 'SYNC_TO_SUPABASE', cookieStr }, resolve);
+      })
+    );
+  }
+
+  const results = await Promise.all(tasks);
+  const parseRes = results[0];
+  const supabaseRes = results[1];
+
+  const parseOk = parseRes?.success === true || parseRes?.ok === true;
+  const supabaseOk = currentPlatform === 'xhs' || supabaseRes?.ok === true;
 
   if (parseOk || supabaseOk) {
     const now = Date.now();
@@ -258,9 +383,13 @@ async function checkServerStatus() {
   const el = document.getElementById('serverStatus');
   if (!el) return;
   try {
-    const res = await fetch(`${SERVER}/api/cookie`, { cache: 'no-store' });
+    const apiUrl = currentPlatform === 'douyin' 
+      ? `${SERVER}/api/cookie` 
+      : `${SERVER}/api/analysis/xhs/cookie`;
+    const res = await fetch(apiUrl, { cache: 'no-store' });
     const data = await res.json();
-    if (data.valid) {
+    const valid = currentPlatform === 'douyin' ? data.valid : data.set;
+    if (valid) {
       el.className = 'badge badge-green';
       const ago = data.updatedAt
         ? Math.round((Date.now() - data.updatedAt) / 60000)
@@ -277,8 +406,57 @@ async function checkServerStatus() {
   }
 }
 
+// ── 切换平台 ──────────────────────────────────────────────
+function switchPlatform(platform) {
+  currentPlatform = platform;
+  
+  // 更新 Tab 样式
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.platform === platform);
+  });
+  
+  // 更新标题
+  const platformName = platform === 'douyin' ? '抖音' : '小红书';
+  document.getElementById('platformSubtitle').textContent = `${platformName} Cookie 管理`;
+  
+  // 更新按钮文本
+  const text = document.getElementById('readText');
+  if (text) text.textContent = `一键读取${platformName}登录信息`;
+  
+  // 更新状态标签
+  const loginLabel = document.querySelector('.status-row:nth-child(1) .status-label');
+  if (loginLabel) loginLabel.textContent = `${platformName}登录状态`;
+  
+  // 重置输入框
+  const cookieBox = document.getElementById('cookieBox');
+  if (cookieBox) cookieBox.value = '';
+  
+  // 显示/隐藏保活开关（仅抖音）
+  const keepAliveRow = document.querySelector('.keepalive-row');
+  if (keepAliveRow) {
+    keepAliveRow.style.display = platform === 'douyin' ? 'flex' : 'none';
+  }
+  
+  // 刷新状态
+  Promise.all([checkLoginStatus(), checkServerStatus()]);
+  
+  // 保存到 storage
+  chrome.storage.local.set({ currentPlatform: platform });
+}
+
 // ── 初始化 ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+  // 恢复上次选择的平台
+  const { currentPlatform: savedPlatform } = await chrome.storage.local.get('currentPlatform');
+  if (savedPlatform) {
+    currentPlatform = savedPlatform;
+    switchPlatform(currentPlatform);
+  }
+
+  // Tab 切换事件
+  document.getElementById('tabDouyin').addEventListener('click', () => switchPlatform('douyin'));
+  document.getElementById('tabXhs').addEventListener('click', () => switchPlatform('xhs'));
+
   // 恢复本地缓存的同步时间
   chrome.storage.local.get(['lastPublishSync'], result => {
     const el = document.getElementById('lastPublishSync');
@@ -291,12 +469,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     checkServerStatus(),
   ]);
 
-  // 初始化保活开关
-  await initKeepAliveToggle();
+  // 初始化保活开关（仅抖音需要）
+  if (currentPlatform === 'douyin') {
+    await initKeepAliveToggle();
+  }
 
   // 绑定按钮
   document.getElementById('readBtn').addEventListener('click', readCookiesToBox);
   document.getElementById('copyBtn').addEventListener('click', copyToClipboard);
+  document.getElementById('debugBtn').addEventListener('click', debugShowCookies);
 
   await loadClientId();
   document.getElementById('manualSyncBtn')?.addEventListener('click', manualSyncToPublish);
