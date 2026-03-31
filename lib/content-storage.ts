@@ -62,19 +62,26 @@ export function saveXhsPost(postData: any, originalUrl?: string): SavedXhsPost {
       ...existing,
       title: postData.title || existing.title,
       content: postData.desc || postData.content || existing.content,
-      author_name: postData.user?.nickname || postData.author_name || existing.author_name,
-      author_id: postData.user?.userId || postData.author_id || existing.author_id,
-      author_avatar: postData.user?.avatar || postData.author_avatar || existing.author_avatar,
-      tags: postData.tagList || postData.tags || existing.tags,
-      like_count: parseInt(postData.interactInfo?.likedCount || postData.like_count || '0'),
-      comment_count: parseInt(postData.interactInfo?.commentCount || postData.comment_count || '0'),
-      share_count: parseInt(postData.interactInfo?.shareCount || postData.share_count || '0'),
-      collect_count: parseInt(postData.interactInfo?.collectedCount || postData.collect_count || '0'),
+      author_name: postData.author?.name || postData.user?.nickname || postData.author_name || existing.author_name,
+      author_id: postData.author?.id || postData.user?.userId || postData.author_id || existing.author_id,
+      author_avatar: postData.author?.avatar || postData.user?.avatar || postData.author_avatar || existing.author_avatar,
+      tags: postData.tags || postData.tagList || existing.tags,
+      like_count: postData.stats?.likes || parseInt(postData.interactInfo?.likedCount || postData.like_count || '0'),
+      comment_count: postData.stats?.comments || parseInt(postData.interactInfo?.commentCount || postData.comment_count || '0'),
+      share_count: postData.stats?.shares || parseInt(postData.interactInfo?.shareCount || postData.share_count || '0'),
+      collect_count: postData.stats?.collects || parseInt(postData.interactInfo?.collectedCount || postData.collect_count || '0'),
       location: postData.ipLocation || postData.location || existing.location,
       original_url: originalUrl || existing.original_url,
-      saved_at: new Date().toISOString()
+      saved_at: new Date().toISOString(),
+      images: (postData.images || postData.imageList || []).map((img: any, index: number) => ({
+        id: `${Date.now()}-img-${index}`,
+        original_url: img.oss_url || '',
+        oss_url: img.oss_url || undefined,
+        width: img.width,
+        height: img.height
+      }))
     };
-    
+
     const index = list.findIndex(p => p.note_id === noteId);
     list[index] = updated;
     writeAll(list);
@@ -87,22 +94,23 @@ export function saveXhsPost(postData: any, originalUrl?: string): SavedXhsPost {
     note_id: noteId,
     title: postData.title || '',
     content: postData.desc || '',
-    author_name: postData.user?.nickname || '',
-    author_id: postData.user?.userId || '',
-    author_avatar: postData.user?.avatar || '',
-    tags: postData.tagList || [],
-    like_count: parseInt(postData.interactInfo?.likedCount || '0'),
-    comment_count: parseInt(postData.interactInfo?.commentCount || '0'),
-    share_count: parseInt(postData.interactInfo?.shareCount || '0'),
-    collect_count: parseInt(postData.interactInfo?.collectedCount || '0'),
+    author_name: postData.author?.name || postData.user?.nickname || '',
+    author_id: postData.author?.id || postData.user?.userId || '',
+    author_avatar: postData.author?.avatar || postData.user?.avatar || '',
+    tags: postData.tags || postData.tagList || [],
+    like_count: postData.stats?.likes || parseInt(postData.interactInfo?.likedCount || '0'),
+    comment_count: postData.stats?.comments || parseInt(postData.interactInfo?.commentCount || '0'),
+    share_count: postData.stats?.shares || parseInt(postData.interactInfo?.shareCount || '0'),
+    collect_count: postData.stats?.collects || parseInt(postData.interactInfo?.collectedCount || '0'),
     original_url: originalUrl || '',
     location: postData.ipLocation || '',
-    publish_time: postData.time ? new Date(parseInt(postData.time)).toISOString() : undefined,
+    publish_time: postData.publishTime || (postData.time ? new Date(parseInt(postData.time)).toISOString() : undefined),
     saved_at: new Date().toISOString(),
     parsed_at: new Date().toISOString(),
-    images: (postData.imageList || []).map((img: any, index: number) => ({
+    images: (postData.images || postData.imageList || []).map((img: any, index: number) => ({
       id: `${Date.now()}-img-${index}`,
-      original_url: img.urlDefault,
+      original_url: img.oss_url || '',
+      oss_url: img.oss_url || undefined,
       width: img.width,
       height: img.height
     }))
@@ -122,6 +130,53 @@ export function deleteXhsPost(id: string): boolean {
   list.splice(index, 1);
   writeAll(list);
   return true;
+}
+
+/** 更新帖子图片的OSS地址 */
+export function updatePostImagesOss(postId: string, ossUpdates: Array<{index: number, ossUrl: string}>): void {
+  const list = readAll();
+  const postIndex = list.findIndex(p => p.id === postId);
+  
+  if (postIndex === -1) return;
+  
+  const post = list[postIndex];
+  if (!post.images) return;
+  
+  // 更新对应索引的图片OSS地址
+  ossUpdates.forEach(update => {
+    if (post.images && post.images[update.index]) {
+      post.images[update.index].oss_url = update.ossUrl;
+    }
+  });
+  
+  // 更新保存时间
+  post.saved_at = new Date().toISOString();
+  
+  list[postIndex] = post;
+  writeAll(list);
+  
+  console.log(`已更新帖子 ${postId} 的图片OSS地址`);
+}
+
+/** 更新内容 */
+export function updateXhsPost(updatedData: Partial<SavedXhsPost> & { id: string }): SavedXhsPost | null {
+  const list = readAll();
+  const index = list.findIndex(p => p.id === updatedData.id);
+  if (index === -1) return null;
+  
+  // 保留原始数据，只更新提供的字段
+  const originalPost = list[index];
+  const updatedPost: SavedXhsPost = {
+    ...originalPost,
+    ...updatedData,
+    saved_at: originalPost.saved_at, // 保持原始保存时间
+    id: originalPost.id, // 确保ID不被修改
+    note_id: originalPost.note_id, // 确保note_id不被修改
+  };
+  
+  list[index] = updatedPost;
+  writeAll(list);
+  return updatedPost;
 }
 
 /** 获取单个内容 */
