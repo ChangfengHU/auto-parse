@@ -21,7 +21,10 @@ import { executeWaitCondition } from './nodes/wait-condition';
 import { executeQRCode } from './nodes/qrcode';
 import { executeHumanPause } from './nodes/human-pause';
 import { executeExtractImage } from './nodes/extract-image';
+import { executeExtractImageClipboard } from './nodes/extract-image-clipboard';
 import { executeXhsDownload } from './nodes/xhs-download';
+import { executeLocalhostImageDownload } from './nodes/localhost-image-download';
+import { executeLocalhostImageDownloadDebug } from './nodes/localhost-image-download-debug';
 
 // ── 节点注册表 ────────────────────────────────────────────────────────────────
 
@@ -29,17 +32,20 @@ import { executeXhsDownload } from './nodes/xhs-download';
 type NodeExecutor = (page: Page, params: any, ctx: WorkflowContext) => Promise<NodeResult>;
 
 const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
-  navigate:       executeNavigate,
-  text_input:     executeTextInput,
-  click:          executeClick,
-  scroll:         executeScroll,
-  screenshot:     executeScreenshot,
-  file_upload:    executeFileUpload,
-  wait_condition: executeWaitCondition,
-  qrcode:         executeQRCode,
-  human_pause:    executeHumanPause,
-  extract_image:  executeExtractImage,
-  xhs_download:   executeXhsDownload,
+  navigate:              executeNavigate,
+  text_input:            executeTextInput,
+  click:                 executeClick,
+  scroll:                executeScroll,
+  screenshot:            executeScreenshot,
+  file_upload:           executeFileUpload,
+  wait_condition:        executeWaitCondition,
+  qrcode:                executeQRCode,
+  human_pause:           executeHumanPause,
+  extract_image:         executeExtractImage,
+  extract_image_clipboard: executeExtractImageClipboard,
+  xhs_download:          executeXhsDownload,
+  localhost_image_download: executeLocalhostImageDownload,
+  localhost_image_download_debug: executeLocalhostImageDownloadDebug,
 };
 
 // ── 单步执行 ──────────────────────────────────────────────────────────────────

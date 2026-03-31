@@ -428,6 +428,171 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       },
     },
   },
+
+  // ─────────────────── 高级：剪贴板高清图片提取（Gemini 专用）──────────
+  {
+    type: 'extract_image_clipboard',
+    label: '📋 剪贴板高清提取',
+    icon: '📋',
+    category: 'advanced',
+    desc: '点击页面"复制图片"按钮 → 通过系统剪贴板中转 → 保存原始分辨率 PNG → 上传 OSS。专为 Gemini 等使用 blob: URL 的平台设计，图片质量远优于截图方案',
+    defaultParams: {
+      copyButtonSelector: '[aria-label="Copy image"]',
+      waitAfterCopy: 3000,
+      uploadToOSS: true,
+      ossPath: 'gemini-images/{{timestamp}}.png',
+      outputVar: 'imageUrl',
+    },
+    paramMeta: {
+      copyButtonSelector: {
+        label: '复制按钮选择器',
+        desc: '触发复制的按钮的 CSS 选择器。Gemini 默认为 [aria-label="Copy image"]，其他平台可自定义',
+        type: 'selector',
+        example: '[aria-label="Copy image"]',
+      },
+      waitAfterCopy: {
+        label: '等待剪贴板就绪（ms）',
+        desc: '点击复制按钮后等待图片写入剪贴板的时间（毫秒）。网速慢时可适当增大，默认 3000',
+        type: 'number',
+        example: '3000',
+      },
+      uploadToOSS: {
+        label: '上传到 OSS',
+        desc: '是否将图片上传到 OSS（默认 true）',
+        type: 'boolean',
+        example: 'true',
+      },
+      ossPath: {
+        label: 'OSS 存储路径',
+        desc: 'OSS 上的存储路径，支持 {{timestamp}} 模板',
+        type: 'template',
+        example: 'gemini-images/{{timestamp}}.png',
+      },
+      outputVar: {
+        label: '输出变量名',
+        desc: '提取的图片 URL 将保存到此变量，后续节点可通过 {{变量名}} 使用',
+        type: 'string',
+        example: 'imageUrl',
+      },
+    },
+  },
+
+  // ─────────────────── 高级：本地图片批量下载 ───────────────────
+  {
+    type: 'localhost_image_download',
+    label: '本地图片批量下载',
+    icon: '💾',
+    category: 'advanced',
+    desc: '从本地解析页面批量右键下载图片并上传OSS，完全绕过防盗链限制',
+    defaultParams: {
+      pageUrl: 'http://localhost:1007/analysis/xhs',
+      imageContainerSelector: 'div.rounded-lg.overflow-hidden.border',
+      imageSelector: 'img',
+      maxImages: 10,
+      ossPrefix: 'xhs/localhost-download',
+      outputVar: 'ossImageUrls',
+      downloadTimeout: 10000,
+      waitTime: 3000,
+    },
+    paramMeta: {
+      pageUrl: {
+        label: '解析页面URL',
+        desc: '要访问的本地解析页面地址（默认：localhost:1007/analysis/xhs）。如果当前已在目标页面，可留空',
+        type: 'url',
+        example: 'http://localhost:1007/analysis/xhs',
+      },
+      imageContainerSelector: {
+        label: '图片容器选择器',
+        desc: '包含图片的容器元素CSS选择器，用于批量识别图片区域',
+        type: 'selector',
+        example: 'div.rounded-lg.overflow-hidden.border',
+      },
+      imageSelector: {
+        label: '图片选择器',
+        desc: '图片元素的CSS选择器，在容器内查找图片',
+        type: 'selector',
+        example: 'img',
+      },
+      maxImages: {
+        label: '最大下载数量',
+        desc: '最多下载多少张图片（默认10张，避免下载过多）',
+        type: 'number',
+        example: '10',
+      },
+      ossPrefix: {
+        label: 'OSS路径前缀',
+        desc: '上传到OSS的路径前缀，最终路径为 {前缀}/{时间戳}_{文件名}',
+        type: 'string',
+        example: 'xhs/localhost-download',
+      },
+      outputVar: {
+        label: '输出变量名',
+        desc: 'OSS图片URL数组将保存到此变量，后续节点可通过 {{变量名}} 使用',
+        type: 'string',
+        example: 'ossImageUrls',
+      },
+      downloadTimeout: {
+        label: '下载超时时间（ms）',
+        desc: '单张图片下载的超时时间（毫秒），超时则跳过该图片',
+        type: 'number',
+        example: '10000',
+      },
+      waitTime: {
+        label: '等待加载时间（ms）',
+        desc: '页面加载后等待图片完全显示的时间（毫秒）',
+        type: 'number',
+        example: '3000',
+      },
+    },
+  },
+
+  // ─────────────────── 调试：本地图片批量下载调试 ───────────────────
+  {
+    type: 'localhost_image_download_debug',
+    label: '本地图片下载调试',
+    icon: '🔧',
+    category: 'advanced',
+    desc: '调试版本：检查本地解析页面的图片结构和选择器，快速诊断问题',
+    defaultParams: {
+      pageUrl: 'http://localhost:1007/analysis/xhs',
+      imageContainerSelector: 'div.rounded-lg.overflow-hidden.border',
+      imageSelector: 'img',
+      maxImages: 5,
+      outputVar: 'debugImageUrls',
+    },
+    paramMeta: {
+      pageUrl: {
+        label: '解析页面URL',
+        desc: '要检查的本地解析页面地址',
+        type: 'url',
+        example: 'http://localhost:1007/analysis/xhs',
+      },
+      imageContainerSelector: {
+        label: '图片容器选择器',
+        desc: '要测试的图片容器CSS选择器',
+        type: 'selector',
+        example: 'div.rounded-lg.overflow-hidden.border',
+      },
+      imageSelector: {
+        label: '图片选择器',
+        desc: '要测试的图片CSS选择器',
+        type: 'selector',
+        example: 'img',
+      },
+      maxImages: {
+        label: '最大检查数量',
+        desc: '最多检查多少张图片（调试用，建议5张以内）',
+        type: 'number',
+        example: '5',
+      },
+      outputVar: {
+        label: '输出变量名',
+        desc: '调试结果保存的变量名',
+        type: 'string',
+        example: 'debugImageUrls',
+      },
+    },
+  },
 ];
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────

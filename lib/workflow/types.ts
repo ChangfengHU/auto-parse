@@ -13,7 +13,10 @@ export type NodeType =
   | 'qrcode'          // 高级：截取二维码 → 等待扫码成功（URL 跳转判断）
   | 'human_pause'     // 高级：暂停等待人工操作（验证码/拦截页）
   | 'extract_image'   // 高级：提取页面图片 → 下载 → 上传 OSS
+  | 'extract_image_clipboard' // 高级：剪贴板中转提取高清图片（解决 blob: URL 问题）→ 上传 OSS
   | 'xhs_download'   // 高级：小红书帖子图片/视频批量下载 → 上传 OSS
+  | 'localhost_image_download' // 高级：本地解析页面图片批量下载 → 上传 OSS
+  | 'localhost_image_download_debug' // 调试：本地图片批量下载调试版本
 
 // ── 节点定义 ──────────────────────────────────────────────────────────────────
 
@@ -126,6 +129,19 @@ export interface QRCodeParams {
   timeout?: number               // 等待扫码超时 ms（默认 300000）
 }
 
+export interface ExtractImageClipboardParams {
+  /** 触发复制的按钮选择器，默认为 Gemini "Copy image" 按钮 */
+  copyButtonSelector?: string;
+  /** 点击后等待剪贴板就绪时间（ms），默认 3000 */
+  waitAfterCopy?: number;
+  /** 是否上传到 OSS（默认 true） */
+  uploadToOSS?: boolean;
+  /** OSS 存储路径，支持 {{timestamp}} 模板 */
+  ossPath?: string;
+  /** 输出变量名（默认：imageUrl） */
+  outputVar?: string;
+}
+
 export interface ExtractImageParams {
   selector?: string              // CSS 选择器（默认：页面第一个 img）
   index?: number                 // 如果匹配多个，取第几个（默认 0）
@@ -140,6 +156,25 @@ export interface XhsDownloadParams {
   maxImages?: number             // 最多下载张数（默认 20）
   ossPrefix?: string             // OSS 路径前缀（默认 'xhs'）
   outputVar?: string             // 输出变量名（默认 'xhsImages'）
+}
+
+export interface LocalhostImageDownloadParams {
+  pageUrl?: string               // 解析页面URL（默认：http://localhost:1007/analysis/xhs）
+  imageContainerSelector?: string // 图片容器选择器（默认：.rounded-xl.overflow-hidden.border）
+  imageSelector?: string         // 图片选择器（默认：img）
+  maxImages?: number             // 最大下载图片数量（默认：20）
+  ossPrefix?: string             // OSS上传路径前缀（默认：xhs）
+  outputVar?: string             // 输出变量名（默认：ossImageUrls）
+  downloadTimeout?: number       // 单张图片下载超时时间（默认：10000ms）
+  waitTime?: number              // 等待图片加载时间（默认：3000ms）
+}
+
+export interface LocalhostImageDownloadDebugParams {
+  pageUrl?: string               // 解析页面URL
+  imageContainerSelector?: string // 图片容器选择器
+  imageSelector?: string         // 图片选择器
+  maxImages?: number             // 最大检查图片数量
+  outputVar?: string             // 输出变量名
 }
 
 // ── 工作流定义 ────────────────────────────────────────────────────────────────

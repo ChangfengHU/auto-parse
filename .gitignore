@@ -43,3 +43,9 @@ next-env.d.ts
 # douyin cookie (managed by chrome extension, keep local only)
 .douyin-cookie.json
 .publish-history/
+
+# xhs cookie (local storage for persistence)
+.xhs-cookie
+
+# content library (local json storage)
+.content-library.json

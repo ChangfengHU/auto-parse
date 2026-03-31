@@ -11,6 +11,10 @@ const DOUYIN_COOKIE_KEYS = [
   's_v_web_id', 'UIFID', 'is_dash_user', 'login_time', 'bit_env',
 ];
 
+const XHS_COOKIE_KEYS = [
+  'a1', 'web_session', 'gid', 'id_token', 'xsecappid', 'webId', 'websectiga', 'webBuild'
+];
+
 // ── Toast ──────────────────────────────────────────────
 function showToast(msg, duration = 2500) {
   const el = document.getElementById('toast');
@@ -44,32 +48,58 @@ async function getDouyinCookies() {
 
 // ── 从浏览器读取小红书 cookies ────────────────────────────
 async function getXhsCookies() {
-  // 小红书需要完整的 cookie 字符串，尝试多个域名
-  const domains = ['.xiaohongshu.com', 'xiaohongshu.com', 'www.xiaohongshu.com'];
+  console.log('开始执行增强版 getXhsCookies...');
+  const allResults = {};
   
-  for (const domain of domains) {
-    try {
-      const cookies = await new Promise((resolve) => {
-        chrome.cookies.getAll({ domain: domain }, (cookies) => {
-          resolve(cookies || []);
-        });
+  try {
+    // 策略 1: 优先获取核心字段，确保它们存在（直接按名称拉取最可靠）
+    await Promise.all(
+      XHS_COOKIE_KEYS.map(name =>
+        new Promise(resolve => {
+          chrome.cookies.get({ url: 'https://www.xiaohongshu.com', name }, cookie => {
+            if (cookie) allResults[name] = cookie.value;
+            resolve();
+          });
+        })
+      )
+    );
+
+    // 策略 2: 全局检索所有 cookies 作为补充（捕获可能漏掉的字段）
+    const allCookies = await new Promise((resolve) => {
+      chrome.cookies.getAll({}, (cookies) => {
+        resolve(cookies || []);
       });
-      
-      if (cookies.length > 0) {
-        console.log(`成功从域名 ${domain} 读取到 ${cookies.length} 个 cookies`);
-        const results = {};
-        cookies.forEach(cookie => {
-          results[cookie.name] = cookie.value;
-        });
-        return results;
+    });
+
+    const xhsCookies = allCookies.filter(c => 
+      c.domain && c.domain.includes('xiaohongshu.com')
+    );
+    
+    console.log(`全局补充检索到 ${xhsCookies.length} 个小红书相关 cookies`);
+    
+    // 合并补充发现的字段（不覆盖已获取的核心字段）
+    xhsCookies.forEach(cookie => {
+      if (!allResults[cookie.name]) {
+        allResults[cookie.name] = cookie.value;
       }
-    } catch (error) {
-      console.warn(`从域名 ${domain} 读取 cookies 失败:`, error);
+    });
+
+    if (allResults['a1']) {
+      console.log('✅ 成功捕获到关键字段: a1');
+    } else {
+      console.warn('❌ 仍未找到 a1 字段，请确认是否已在浏览器登录小红书');
+      // 尝试最后一次强力扫描
+      const fallbackA1 = await new Promise(resolve => {
+        chrome.cookies.get({ url: 'https://edith.xiaohongshu.com', name: 'a1' }, c => resolve(c));
+      });
+      if (fallbackA1) allResults['a1'] = fallbackA1.value;
     }
+
+  } catch (error) {
+    console.error('获取 cookies 过程出错:', error);
   }
   
-  console.warn('所有域名都无法读取到 cookies');
-  return {};
+  return allResults;
 }
 
 // cookie 对象 → 字符串
@@ -424,6 +454,9 @@ function switchPlatform(platform) {
   if (text) text.textContent = `一键读取${platformName}登录信息`;
   
   // 更新状态标签
+  const label = document.querySelector('.cookie-section .section-label');
+  if (label) label.textContent = `${platformName}登录信息（Cookie）`;
+
   const loginLabel = document.querySelector('.status-row:nth-child(1) .status-label');
   if (loginLabel) loginLabel.textContent = `${platformName}登录状态`;
   

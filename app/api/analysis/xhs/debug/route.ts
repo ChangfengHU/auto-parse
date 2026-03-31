@@ -143,7 +143,7 @@ export async function POST(req: Request) {
           }
         }
       } catch (e) {
-        debug.newNote = { error: e.message };
+        debug.newNote = { error: e instanceof Error ? e.message : String(e) };
       }
 
       // PC 路径：noteDetailMap.{noteId}.note
@@ -163,7 +163,7 @@ export async function POST(req: Request) {
           }
         }
       } catch (e) {
-        debug.pcNote = { error: e.message };
+        debug.pcNote = { error: e instanceof Error ? e.message : String(e) };
       }
 
       // 移动端路径：noteData.data.noteData
@@ -179,7 +179,7 @@ export async function POST(req: Request) {
           };
         }
       } catch (e) {
-        debug.mobileNote = { error: e.message };
+        debug.mobileNote = { error: e instanceof Error ? e.message : String(e) };
       }
     }
 
