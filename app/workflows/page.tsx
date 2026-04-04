@@ -1,20 +1,22 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { WorkflowDef } from '@/lib/workflow/types';
 import DropdownMenu from '@/components/DropdownMenu';
-import type { DropdownMenuItem } from '@/components/DropdownMenu';
 
 const NODE_ICONS: Record<string, string> = {
   navigate: '🌐', text_input: '✏️', click: '👆', scroll: '🖱️',
   screenshot: '📸', file_upload: '📤', wait_condition: '⏳', qrcode: '📱',
+  vertex_ai: '🖼️',
 };
 
 const NODE_COLORS: Record<string, string> = {
   navigate: 'bg-blue-500', text_input: 'bg-purple-500', click: 'bg-orange-500',
   scroll: 'bg-cyan-500', screenshot: 'bg-gray-500', file_upload: 'bg-green-500',
   wait_condition: 'bg-yellow-500', qrcode: 'bg-pink-500',
+  vertex_ai: 'bg-indigo-500',
 };
 
 export default function WorkflowsPage() {
@@ -22,6 +24,7 @@ export default function WorkflowsPage() {
   const [workflows, setWorkflows] = useState<WorkflowDef[]>([]);
   const [loading, setLoading] = useState(true);
   const [copying, setCopying] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -51,11 +54,37 @@ export default function WorkflowsPage() {
     finally { setCopying(null); }
   }
 
+  async function handleRename(workflow: WorkflowDef, e: React.MouseEvent) {
+    e.stopPropagation();
+    const nextName = prompt('请输入新的工作流名称', workflow.name);
+    if (nextName === null) return;
+
+    const trimmedName = nextName.trim();
+    if (!trimmedName) {
+      alert('工作流名称不能为空');
+      return;
+    }
+    if (trimmedName === workflow.name) return;
+
+    setRenaming(workflow.id);
+    try {
+      const res = await fetch(`/api/workflows/${workflow.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: trimmedName }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      await load();
+    } catch (e) { alert(String(e)); }
+    finally { setRenaming(null); }
+  }
+
   async function handleDelete(id: string, name: string, e: React.MouseEvent) {
     e.stopPropagation();
     if (!confirm(`确认删除工作流「${name}」？`)) return;
     try {
-      await fetch(`/api/workflows/${id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/workflows/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text());
       await load();
     } catch (e) { alert(String(e)); }
   }
@@ -65,12 +94,12 @@ export default function WorkflowsPage() {
       {/* Header */}
       <header className="bg-card border-b border-border px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <a href="/" className="text-xl font-bold text-foreground hover:text-primary transition-colors">doouyin</a>
+          <Link href="/" className="text-xl font-bold text-foreground hover:text-primary transition-colors">doouyin</Link>
           <span className="text-muted-foreground">/</span>
           <h1 className="text-lg font-semibold">工作流管理</h1>
         </div>
         <div className="flex items-center gap-2">
-          <a href="/publish" className="px-3 py-1.5 bg-muted hover:bg-muted/80 text-sm rounded-lg transition-colors">返回发布</a>
+          <Link href="/publish" className="px-3 py-1.5 bg-muted hover:bg-muted/80 text-sm rounded-lg transition-colors">返回发布</Link>
         </div>
       </header>
 
@@ -105,6 +134,12 @@ export default function WorkflowsPage() {
                   <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                     <DropdownMenu
                       items={[
+                        {
+                          label: renaming === wf.id ? '重命名中...' : '重命名',
+                          icon: '✏️',
+                          onClick: (e) => handleRename(wf, e),
+                          disabled: renaming === wf.id,
+                        },
                         {
                           label: copying === wf.id ? '复制中...' : '复制',
                           icon: '📋',
@@ -233,6 +268,7 @@ function NewWorkflowCard({ onCreated }: { onCreated: () => void }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), nodes: [], vars: [] }),
       });
+      if (!res.ok) throw new Error(await res.text());
       const wf = await res.json();
       onCreated();
       router.push(`/workflows/${wf.id}`);

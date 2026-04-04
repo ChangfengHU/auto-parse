@@ -34,6 +34,10 @@ export function getMaterials(): Material[] {
   return readAll().sort((a, b) => b.parsedAt - a.parsedAt);
 }
 
+export function getMaterialById(id: string): Material | null {
+  return readAll().find(m => m.id === id) ?? null;
+}
+
 /** 新增素材（OSS URL 相同则更新 title） */
 export function addMaterial(item: Omit<Material, 'id' | 'parsedAt'>): Material {
   const list = readAll();

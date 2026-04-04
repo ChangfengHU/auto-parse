@@ -49,3 +49,4 @@ next-env.d.ts
 
 # content library (local json storage)
 .content-library.json
+.secrets/

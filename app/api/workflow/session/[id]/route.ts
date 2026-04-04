@@ -21,6 +21,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     currentStep: session.currentStep,
     totalSteps: session.workflow.nodes.length,
     status: session.status,
+    vars: session.vars,
     currentNode: currentNode
       ? { index: session.currentStep, type: currentNode.type, label: currentNode.label }
       : null,

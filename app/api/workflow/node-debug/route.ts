@@ -10,7 +10,7 @@
  */
 
 import { NextRequest } from 'next/server';
-import { getDebugScratchPage, resetDebugScratchPage } from '@/lib/persistent-browser';
+import { getDebugScratchPage, resetDebugScratchPage, setDebugScratchPage } from '@/lib/persistent-browser';
 import { executeNode } from '@/lib/workflow/engine';
 import type { NodeDef, WorkflowContext } from '@/lib/workflow/types';
 
@@ -50,8 +50,9 @@ export async function POST(req: NextRequest) {
 
         const result = await executeNode(page, node, wfCtx);
 
-        for (const line of result.log) {
-          send('log', line);
+        if (result.newPage) {
+          setDebugScratchPage(result.newPage as import('playwright').Page);
+          send('log', `⚠️ [系统接管] (单节点调试) 游标已转移至新环境实例`);
         }
 
         if (result.screenshot) {
@@ -59,7 +60,12 @@ export async function POST(req: NextRequest) {
         }
 
         send('log', result.success ? '✅ 节点执行成功' : `❌ 执行失败：${result.error ?? '未知'}`);
-        send('done', JSON.stringify({ success: result.success, error: result.error }));
+        send('done', JSON.stringify({
+          success: result.success,
+          error: result.error,
+          result: { success: result.success, output: result.output },
+          vars: Object.fromEntries(Object.entries(wfCtx.vars).filter(([key]) => key !== '__pauseToken')),
+        }));
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         send('log', `❌ 执行异常：${msg}`);

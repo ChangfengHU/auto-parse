@@ -6,7 +6,6 @@ import { randomUUID } from 'crypto';
 import type { WorkflowSession } from './types';
 
 declare global {
-  // eslint-disable-next-line no-var
   var __workflowSessions: Map<string, WorkflowSession> | undefined;
 }
 
@@ -50,5 +49,5 @@ export function deleteSession(id: string): boolean {
 }
 
 export function listSessions(): WorkflowSession[] {
-  return Array.from(store().values()).map(s => ({ ...s, _page: undefined }));
+  return Array.from(store().values()).map(s => ({ ...s, _page: undefined, _browser: undefined }));
 }

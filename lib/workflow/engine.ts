@@ -10,7 +10,9 @@ import type { Page } from 'playwright';
 import type { NodeDef, NodeResult, NodeType, WorkflowContext, WorkflowDef } from './types';
 import { resolveParams } from './resolver';
 import { captureScreenshot } from './utils';
+import { getCatalogItem } from './node-catalog';
 
+import { executeMaterial } from './nodes/material';
 import { executeNavigate } from './nodes/navigate';
 import { executeTextInput } from './nodes/text-input';
 import { executeClick } from './nodes/click';
@@ -25,6 +27,8 @@ import { executeExtractImageClipboard } from './nodes/extract-image-clipboard';
 import { executeXhsDownload } from './nodes/xhs-download';
 import { executeLocalhostImageDownload } from './nodes/localhost-image-download';
 import { executeLocalhostImageDownloadDebug } from './nodes/localhost-image-download-debug';
+import { executeMetaAIGenerate } from './nodes/metaai-generate';
+import { executeVertexAI } from './nodes/vertex-ai';
 
 // ── 节点注册表 ────────────────────────────────────────────────────────────────
 
@@ -32,6 +36,7 @@ import { executeLocalhostImageDownloadDebug } from './nodes/localhost-image-down
 type NodeExecutor = (page: Page, params: any, ctx: WorkflowContext) => Promise<NodeResult>;
 
 const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
+  material:              executeMaterial,
   navigate:              executeNavigate,
   text_input:            executeTextInput,
   click:                 executeClick,
@@ -46,6 +51,8 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   xhs_download:          executeXhsDownload,
   localhost_image_download: executeLocalhostImageDownload,
   localhost_image_download_debug: executeLocalhostImageDownloadDebug,
+  metaai_generate:       executeMetaAIGenerate,
+  vertex_ai:             executeVertexAI,
 };
 
 // ── 单步执行 ──────────────────────────────────────────────────────────────────
@@ -60,8 +67,22 @@ export async function executeNode(
     return { success: false, log: [`❌ 未知节点类型: ${node.type}`], error: `unknown node: ${node.type}` };
   }
 
+  const catalog = getCatalogItem(node.type);
+  // 合并默认参数与实例参数，确保 UI 上显示的默认配置（如 AdsPower 分身 ID）在实际执行中能够“打底”生效
+  const baseParams = { ...(catalog?.defaultParams ?? {}), ...node.params };
+  
   // 解析模板变量
-  const resolvedParams = resolveParams(node.params, ctx.vars);
+  const resolvedParams = resolveParams(baseParams, ctx.vars);
+
+  // 兼容旧/误填配置：导航节点如果把 URL 填在了节点级 url，而 params.url 还是默认占位值，则自动兜底到 node.url
+  if (node.type === 'navigate') {
+    const navParams = resolvedParams as Record<string, unknown>;
+    const currentUrl = typeof navParams.url === 'string' ? navParams.url.trim() : '';
+    if ((!currentUrl || currentUrl === 'https://') && node.url) {
+      navParams.url = resolveParams({ url: node.url }, ctx.vars).url;
+      ctx.emit?.('log', `💡 导航节点已自动使用顶部 URL：${String(navParams.url)}`);
+    }
+  }
 
   // ── 节点前置导航（url 字段设置时自动跳转）─────────────────────────────────
   if (node.url) {
@@ -88,15 +109,23 @@ export async function executeNode(
     return { success: false, log: [`❌ 节点异常: ${error}`], error };
   }
 
+  const resultPage = (result.newPage as Page | undefined) ?? page;
+
   // ── 节点后置等待（waitAfter 启用时）────────────────────────────────────────
   if (result.success && node.waitAfter?.enabled) {
     const wa = node.waitAfter;
+    const waitAction = wa.action ?? (wa.selector ? 'appeared' : undefined);
+    const delaySeconds = Math.max(0, wa.delaySeconds ?? 0);
     const timeout = wa.timeout ?? 15_000;
+    if (delaySeconds > 0) {
+      ctx.emit?.('log', `⏱️ 延迟 ${delaySeconds}s 后开始判断后置条件...`);
+      await resultPage.waitForTimeout(delaySeconds * 1000);
+    }
     const start = Date.now();
     ctx.emit?.('log', `⏳ 等待后置条件（最多 ${timeout / 1000}s）...`);
 
     while (Date.now() - start < timeout) {
-      const url = page.url();
+      const url = resultPage.url();
 
       if (wa.urlContains && url.includes(wa.urlContains)) {
         ctx.emit?.('log', `✅ 后置条件满足：URL 包含 "${wa.urlContains}"`);
@@ -104,13 +133,13 @@ export async function executeNode(
       }
 
       if (wa.selector) {
-        const visible = await page.locator(wa.selector).isVisible().catch(() => false);
-        if (wa.action === 'appeared' && visible) { ctx.emit?.('log', `✅ 后置元素出现`); break; }
-        if (wa.action === 'disappeared' && !visible) { ctx.emit?.('log', `✅ 后置元素消失`); break; }
+        const visible = await resultPage.locator(wa.selector).first().isVisible().catch(() => false);
+        if (waitAction === 'appeared' && visible) { ctx.emit?.('log', `✅ 后置元素出现`); break; }
+        if (waitAction === 'disappeared' && !visible) { ctx.emit?.('log', `✅ 后置元素消失`); break; }
       }
 
       if (wa.successKeywords?.length || wa.failKeywords?.length) {
-        const text = await page.evaluate(() => document.body.innerText).catch(() => '');
+        const text = await resultPage.evaluate(() => document.body.innerText).catch(() => '');
         const failWord = wa.failKeywords?.find(k => text.includes(k));
         if (failWord) {
           result = { ...result, success: false, error: `后置检测失败：页面含"${failWord}"` };
@@ -121,13 +150,13 @@ export async function executeNode(
         if (successWord) { ctx.emit?.('log', `✅ 后置关键词满足："${successWord}"`); break; }
       }
 
-      await page.waitForTimeout(500);
+      await resultPage.waitForTimeout(500);
     }
   }
 
   // ── 自动截图（默认开启，除非明确关闭）────────────────────────────────────
   if (node.autoScreenshot !== false && !result.screenshot) {
-    const shot = await captureScreenshot(page).catch(() => undefined);
+    const shot = await captureScreenshot(resultPage).catch(() => undefined);
     if (shot) {
       result = { ...result, screenshot: shot };
       ctx.emit?.('screenshot', shot);
@@ -162,12 +191,19 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunWorkf
   const ctx: WorkflowContext = { vars, outputs: {}, emit };
   const nodes = workflow.nodes;
   let completedSteps = 0;
+  let currentRunningPage = page; // 使用局部变量追踪当前活跃页面，支持中途掉包
 
   for (let i = startFrom; i < nodes.length; i++) {
     const node = nodes[i];
     emit('log', `\n── 步骤 ${i + 1}/${nodes.length}：${node.label ?? node.type} ──`);
 
-    const result = await executeNode(page, node, ctx);
+    const result = await executeNode(currentRunningPage, node, ctx);
+
+    // 【核心黑科技】探测到浏览器接管指令：如果节点（如导航）返回了新页面，则后续步骤全部切换到新环境
+    if (result.newPage) {
+      currentRunningPage = result.newPage as Page;
+      emit('log', `⚠️ [系统接管] 检测到环境热切换，后续步骤已自动迁移至新容器运行`);
+    }
 
     // 把输出合并进 context（后续节点可读取）
     if (result.output) {

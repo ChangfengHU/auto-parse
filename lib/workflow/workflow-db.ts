@@ -2,6 +2,7 @@
  * Workflow CRUD — Supabase REST API
  */
 import type { WorkflowDef } from './types';
+import { normalizeDouyinPublishWorkflow } from './workflows/douyin-publish';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://okkgchwzppghiyfgmrlj.supabase.co';
 const SUPABASE_KEY =
@@ -31,7 +32,13 @@ export interface WorkflowRow {
 }
 
 function rowToDef(row: WorkflowRow): WorkflowDef {
-  return { id: row.id, name: row.name, description: row.description, nodes: row.nodes, vars: row.vars };
+  return normalizeDouyinPublishWorkflow({
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    nodes: row.nodes,
+    vars: row.vars,
+  });
 }
 
 export async function listWorkflows(): Promise<WorkflowRow[]> {

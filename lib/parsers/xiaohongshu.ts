@@ -1,7 +1,12 @@
-import axios from 'axios';
-
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+const FETCH_HEADERS = {
+  'User-Agent': UA,
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'zh-CN,zh;q=0.9',
+  'Referer': 'https://www.xiaohongshu.com/',
+};
 
 export interface XhsParseResult {
   platform: 'xiaohongshu';
@@ -21,13 +26,8 @@ export async function parseXiaohongshu(input: string): Promise<XhsParseResult> {
 
   // 短链先跟随重定向
   if (url.includes('xhslink.com')) {
-    const r = await axios.get(url, {
-      maxRedirects: 0,
-      validateStatus: (s) => s >= 200 && s < 400,
-      headers: { 'User-Agent': UA },
-      timeout: 10000,
-    });
-    url = r.headers['location'] ?? url;
+    const r = await fetch(url, { headers: { 'User-Agent': UA }, redirect: 'follow' });
+    if (r.url) url = r.url;
   }
 
   // /explore/ 会 302 到 /discovery/item/
@@ -41,16 +41,9 @@ export async function parseXiaohongshu(input: string): Promise<XhsParseResult> {
 
   const fetchUrl = `https://www.xiaohongshu.com/discovery/item/${noteId}${xsecToken ? `?xsec_token=${xsecToken}&xsec_source=pc_feed` : ''}`;
 
-  const res = await axios.get(fetchUrl, {
-    headers: {
-      'User-Agent': UA,
-      'Accept-Language': 'zh-CN,zh;q=0.9',
-      Referer: 'https://www.xiaohongshu.com/',
-    },
-    timeout: 15000,
-  });
-
-  const html: string = res.data;
+  const res = await fetch(fetchUrl, { headers: FETCH_HEADERS });
+  if (!res.ok) throw new Error(`请求失败 HTTP ${res.status}`);
+  const html = await res.text();
 
   // 从 __INITIAL_STATE__ 中提取 masterUrl
   const masterUrlMatch = html.match(/"masterUrl":"((?:[^"\\]|\\.)*)"/);

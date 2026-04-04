@@ -1,10 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { WorkflowDef, NodeDef, NodeType, WaitAfterConfig } from '@/lib/workflow/types';
+import type { WorkflowDef, NodeDef, NodeType, VertexAIParams, WaitAfterConfig } from '@/lib/workflow/types';
 import type { HumanOptions } from '@/lib/workflow/human-options';
 import { DEFAULT_HUMAN_OPTIONS } from '@/lib/workflow/human-options';
 import { NODE_CATALOG, getCatalogItem, WORKFLOW_VARS_META, NODE_LEVEL_PARAM_META } from '@/lib/workflow/node-catalog';
+import { VERTEX_CAPABILITY_META, getDefaultVertexPrompt, getVertexModelMeta, getVertexModelsForCapability, isBuiltInVertexPrompt } from '@/lib/workflow/vertex-ai-meta';
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
@@ -12,6 +13,24 @@ type StepStatus = 'pending' | 'running' | 'success' | 'warn' | 'error' | 'skip';
 interface LogEntry { ts: string; text: string; }
 interface DebugCtx { videoUrl: string; title: string; tags: string; clientId: string; }
 interface MaterialItem { id: string; platform?: string; title: string; ossUrl: string; }
+interface ContentImageAsset {
+  id: string;
+  url: string;
+  title: string;
+  postId: string;
+  noteId?: string;
+  sourceLabel: string;
+}
+interface SessionStepDonePayload {
+  result?: { success: boolean; error?: string };
+  vars?: Record<string, string>;
+  executedStep: number;
+  nextStep: number;
+  done: boolean;
+  failed: boolean;
+  skipped?: boolean;
+  relay: boolean;
+}
 
 export interface WorkflowEditorProps {
   workflow: WorkflowDef;
@@ -105,7 +124,11 @@ function ParamEditor({
   compact?: boolean;
 }) {
   const catalog = nodeType ? getCatalogItem(nodeType) : undefined;
-  const entries = Object.entries(params);
+  
+  // 将数据库中已有的参数名与该类型节点最新的所有的默认参数名进行全集并合，以此确保老节点在引入新特性时依然能显示在面板上
+  const defaultKeys = Object.keys(catalog?.defaultParams ?? {});
+  const currentKeys = Object.keys(params);
+  const displayKeys = Array.from(new Set([...currentKeys, ...defaultKeys]));
 
   function setVal(key: string, raw: string) {
     let val: unknown = raw;
@@ -146,10 +169,14 @@ function ParamEditor({
           </div>
         </div>
       )}
-      {entries.map(([k, v]) => {
+      {displayKeys.map((k) => {
+        const v = params[k] ?? catalog?.defaultParams?.[k] ?? '';
         const meta = catalog?.paramMeta[k];
         const isSelector = meta?.type === 'selector' || k.toLowerCase().includes('selector');
         const isTemplate = meta?.type === 'template';
+        const isSelect = meta?.type === 'select' && Array.isArray(meta.options) && meta.options.length > 0;
+        // 当 meta.type 是 boolean，或者当前值就是 boolean 时，渲染为开关
+        const isBoolean = meta?.type === 'boolean' || typeof v === 'boolean';
         return (
           <div key={k} className="space-y-0.5">
             <div className="flex items-center gap-1">
@@ -162,22 +189,714 @@ function ParamEditor({
               {meta && <ParamTooltip text={`${meta.desc}${meta.example ? `\n\n示例：${meta.example}` : ''}`} />}
               {meta?.required && <span className="text-[9px] text-red-400">*</span>}
               <div className="flex-1" />
-              <button onClick={() => removeKey(k)} className="text-[9px] text-muted-foreground hover:text-red-400 transition-colors">✕</button>
+              {/* boolean 类型不显示删除按钮，避免丢失默认配置 */}
+              {!isBoolean && (
+                <button onClick={() => removeKey(k)} className="text-[9px] text-muted-foreground hover:text-red-400 transition-colors">✕</button>
+              )}
             </div>
-            <input
-              value={displayVal(v)}
-              onChange={e => setVal(k, e.target.value)}
-              className={`w-full bg-background border rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary transition-colors ${
-                isSelector ? 'border-orange-400/40 focus:border-orange-400' :
-                isTemplate ? 'border-purple-400/40 focus:border-purple-400' :
-                'border-border'
-              }`}
-              placeholder={meta?.example ?? ''}
-            />
+            {isBoolean ? (
+              /* boolean 参数渲染为 Toggle 开关 */
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <div
+                  className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${v ? 'bg-primary' : 'bg-muted'}`}
+                  onClick={() => onChange({ ...params, [k]: !v })}
+                >
+                  <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${v ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </div>
+                <span className={`text-[10px] font-medium ${v ? 'text-primary' : 'text-muted-foreground'}`}>
+                  {v ? '已开启' : '已关闭'}
+                </span>
+              </label>
+            ) : isSelect ? (
+              <select
+                value={displayVal(v)}
+                onChange={e => setVal(k, e.target.value)}
+                className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] outline-none focus:border-primary transition-colors"
+              >
+                {meta.options?.map(option => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={displayVal(v)}
+                onChange={e => setVal(k, e.target.value)}
+                className={`w-full bg-background border rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary transition-colors ${
+                  isSelector ? 'border-orange-400/40 focus:border-orange-400' :
+                  isTemplate ? 'border-purple-400/40 focus:border-purple-400' :
+                  'border-border'
+                }`}
+                placeholder={meta?.example ?? ''}
+              />
+            )}
           </div>
         );
       })}
       <button onClick={addKey} className="text-[10px] text-primary hover:underline">+ 添加参数</button>
+    </div>
+  );
+}
+
+function MaterialNodeParamEditor({
+  params,
+  onChange,
+  materials,
+}: {
+  params: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+  materials: MaterialItem[];
+}) {
+  const [showPicker, setShowPicker] = useState(false);
+  const materialId = String(params.materialId ?? '');
+  const selectedMaterial = materials.find(m => m.id === materialId) ?? null;
+
+  function setVal(key: 'outputVideoVar' | 'outputTitleVar', value: string) {
+    onChange({ ...params, [key]: value });
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <div className="flex items-center gap-1 mb-1.5">
+          <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">选择素材</h3>
+          <ParamTooltip text="素材节点执行时会从素材库读取所选素材，并把视频地址和标题写入后续节点可用的模板变量。" />
+        </div>
+        <button
+          onClick={() => setShowPicker(v => !v)}
+          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-[11px] transition-colors ${
+            selectedMaterial
+              ? 'border-primary/50 bg-primary/5 text-primary'
+              : 'border-dashed border-border bg-muted/20 text-muted-foreground hover:border-primary/40'
+          }`}
+        >
+          <span className="truncate">
+            {selectedMaterial
+              ? `📦 ${selectedMaterial.title || '（无标题）'}`
+              : `📦 选择素材${materials.length > 0 ? ` (${materials.length})` : ''}`}
+          </span>
+          <span className="shrink-0 ml-1">{showPicker ? '▲' : '▼'}</span>
+        </button>
+        {showPicker && (
+          <div className="mt-1 border border-border rounded-xl overflow-hidden bg-card max-h-56 overflow-y-auto shadow-lg">
+            {materials.length === 0 ? (
+              <p className="text-center text-[10px] text-muted-foreground py-4">素材库为空</p>
+            ) : (
+              materials.map(m => (
+                <button
+                  key={m.id}
+                  onClick={() => {
+                    onChange({ ...params, materialId: m.id });
+                    setShowPicker(false);
+                  }}
+                  className={`w-full text-left px-3 py-2.5 hover:bg-muted flex items-center gap-2 text-[11px] transition-colors ${
+                    selectedMaterial?.id === m.id ? 'bg-primary/10' : ''
+                  }`}
+                >
+                  <span>▶</span>
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{m.title || '（无标题）'}</p>
+                    <p className="truncate text-muted-foreground text-[9px]">{m.ossUrl}</p>
+                  </div>
+                  {selectedMaterial?.id === m.id && <span className="text-primary ml-auto shrink-0">✓</span>}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+        {selectedMaterial && (
+          <div className="mt-2 rounded-lg border border-border bg-muted/20 p-2 space-y-1">
+            <p className="text-[10px] font-medium text-foreground">{selectedMaterial.title || '（无标题）'}</p>
+            <p className="text-[10px] font-mono text-muted-foreground break-all">{selectedMaterial.ossUrl}</p>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-0.5">
+          <label className="text-[10px] text-muted-foreground">视频输出变量</label>
+          <input
+            value={String(params.outputVideoVar ?? 'videoUrl')}
+            onChange={e => setVal('outputVideoVar', e.target.value)}
+            className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary"
+            placeholder="videoUrl"
+          />
+        </div>
+        <div className="space-y-0.5">
+          <label className="text-[10px] text-muted-foreground">标题输出变量</label>
+          <input
+            value={String(params.outputTitleVar ?? 'title')}
+            onChange={e => setVal('outputTitleVar', e.target.value)}
+            className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary"
+            placeholder="title"
+          />
+        </div>
+      </div>
+
+      <div className="bg-primary/5 border border-primary/20 rounded-lg px-2.5 py-2">
+        <p className="text-[9px] text-primary font-semibold mb-1">执行后会输出</p>
+        <div className="space-y-0.5 text-[9px]">
+          <div>
+            <span className="font-mono text-primary">{`{{${String(params.outputVideoVar ?? 'videoUrl')}}}`}</span>
+            <span className="text-muted-foreground ml-1">视频 OSS 地址</span>
+          </div>
+          <div>
+            <span className="font-mono text-primary">{`{{${String(params.outputTitleVar ?? 'title')}}}`}</span>
+            <span className="text-muted-foreground ml-1">素材标题</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function parseReferenceImageUrls(raw: unknown): string[] {
+  const text = String(raw ?? '').trim();
+  if (!text) return [];
+
+  if (text.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return parsed.map(item => String(item).trim()).filter(Boolean);
+      }
+    } catch {
+      // fallback below
+    }
+  }
+
+  return text
+    .split(/[\n,]/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function stringifyReferenceImageUrls(urls: string[]): string {
+  if (urls.length === 0) return '';
+  return JSON.stringify(urls, null, 2);
+}
+
+function flattenContentImageAssets(posts: Array<Record<string, unknown>>): ContentImageAsset[] {
+  const assets: ContentImageAsset[] = [];
+
+  for (const post of posts) {
+    const postId = String(post.id ?? '');
+    const title = String(post.title ?? '未命名作品');
+    const noteId = post.note_id ? String(post.note_id) : undefined;
+    const images = Array.isArray(post.images) ? post.images : [];
+
+    images.forEach((image, index) => {
+      if (!image || typeof image !== 'object') return;
+      const row = image as Record<string, unknown>;
+      const url = String(row.oss_url ?? row.original_url ?? '').trim();
+      if (!url) return;
+      assets.push({
+        id: String(row.id ?? `${postId}-${index}`),
+        url,
+        title,
+        postId,
+        noteId,
+        sourceLabel: `${title}${images.length > 1 ? ` · 图 ${index + 1}` : ''}`,
+      });
+    });
+  }
+
+  return assets;
+}
+
+function VertexNodeParamEditor({
+  params,
+  onChange,
+}: {
+  params: Record<string, unknown>;
+  onChange: (p: Record<string, unknown>) => void;
+}) {
+  const vertexParams = params as unknown as VertexAIParams;
+  const capability = (vertexParams.capability ?? 'image_generate') as VertexAIParams['capability'];
+  const capabilityMeta = VERTEX_CAPABILITY_META[capability];
+  const availableModels = getVertexModelsForCapability(capability);
+  const currentModel = String(vertexParams.model ?? capabilityMeta.defaultModel);
+  const currentModelMeta = getVertexModelMeta(currentModel) ?? availableModels[0];
+  const selectedReferenceUrls = parseReferenceImageUrls(vertexParams.referenceImageUrls);
+
+  const [showReferencePicker, setShowReferencePicker] = useState(false);
+  const [assetQuery, setAssetQuery] = useState('');
+  const [contentAssets, setContentAssets] = useState<ContentImageAsset[]>([]);
+  const [loadingAssets, setLoadingAssets] = useState(false);
+  const [assetsError, setAssetsError] = useState('');
+
+  useEffect(() => {
+    if (capability !== 'image_edit') return;
+    if (contentAssets.length > 0) return;
+    let alive = true;
+
+    async function loadAssets() {
+      setLoadingAssets(true);
+      setAssetsError('');
+      try {
+        const res = await fetch('/api/content/list/xhs?limit=100');
+        const data = await res.json() as { success?: boolean; data?: Array<Record<string, unknown>>; error?: string };
+        if (!alive) return;
+        if (!res.ok || !data.success || !Array.isArray(data.data)) {
+          throw new Error(data.error || '加载作品素材失败');
+        }
+        setContentAssets(flattenContentImageAssets(data.data));
+      } catch (error) {
+        if (!alive) return;
+        setAssetsError(error instanceof Error ? error.message : '加载作品素材失败');
+      } finally {
+        if (alive) setLoadingAssets(false);
+      }
+    }
+
+    void loadAssets();
+    return () => { alive = false; };
+  }, [capability, contentAssets.length]);
+
+  useEffect(() => {
+    const patch: Partial<VertexAIParams> = {};
+    if (!String(vertexParams.model ?? '').trim() || !availableModels.some(item => item.id === currentModel)) {
+      patch.model = capabilityMeta.defaultModel;
+    }
+    if (!String(vertexParams.prompt ?? '').trim()) {
+      patch.prompt = getDefaultVertexPrompt(capability);
+    }
+    if (!String(vertexParams.outputVar ?? '').trim()) {
+      patch.outputVar = capabilityMeta.defaultOutputVar;
+    }
+    if (!String(vertexParams.outputListVar ?? '').trim()) {
+      patch.outputListVar = capabilityMeta.defaultOutputListVar;
+    }
+    if (Object.keys(patch).length > 0) {
+      onChange({ ...params, ...patch });
+    }
+  }, [
+    availableModels,
+    capability,
+    capabilityMeta.defaultModel,
+    capabilityMeta.defaultOutputListVar,
+    capabilityMeta.defaultOutputVar,
+    currentModel,
+    onChange,
+    params,
+    vertexParams.model,
+    vertexParams.outputListVar,
+    vertexParams.outputVar,
+    vertexParams.prompt,
+  ]);
+
+  function patchParams(patch: Partial<VertexAIParams>) {
+    onChange({ ...params, ...patch });
+  }
+
+  function updateCapability(nextCapability: VertexAIParams['capability']) {
+    if (nextCapability === capability) return;
+
+    const nextMeta = VERTEX_CAPABILITY_META[nextCapability];
+    const nextModels = getVertexModelsForCapability(nextCapability);
+    const outputVar = String(vertexParams.outputVar ?? '');
+    const outputListVar = String(vertexParams.outputListVar ?? '');
+    const prompt = String(vertexParams.prompt ?? '');
+    const currentPromptIsBuiltIn = !prompt || isBuiltInVertexPrompt(prompt);
+
+    patchParams({
+      capability: nextCapability,
+      model: nextModels.some(item => item.id === currentModel) ? currentModel : nextMeta.defaultModel,
+      prompt: currentPromptIsBuiltIn ? getDefaultVertexPrompt(nextCapability) : prompt,
+      outputVar: !outputVar || ['imageUrl', 'videoUrl'].includes(outputVar) ? nextMeta.defaultOutputVar : outputVar,
+      outputListVar: !outputListVar || ['imageUrls', 'videoUrls'].includes(outputListVar) ? nextMeta.defaultOutputListVar : outputListVar,
+    });
+  }
+
+  function updatePromptFromTemplate() {
+    patchParams({ prompt: getDefaultVertexPrompt(capability) });
+  }
+
+  function resetCapabilityDefaults() {
+    patchParams({
+      model: capabilityMeta.defaultModel,
+      prompt: getDefaultVertexPrompt(capability),
+      outputVar: capabilityMeta.defaultOutputVar,
+      outputListVar: capabilityMeta.defaultOutputListVar,
+      ...(capability === 'video_generate'
+        ? { durationSeconds: 8, generateAudio: true }
+        : { count: 1, aspectRatio: '1:1', personGeneration: 'allow_adult' }),
+    });
+  }
+
+  function toggleReferenceUrl(url: string) {
+    const next = selectedReferenceUrls.includes(url)
+      ? selectedReferenceUrls.filter(item => item !== url)
+      : [...selectedReferenceUrls, url];
+    patchParams({ referenceImageUrls: stringifyReferenceImageUrls(next) });
+  }
+
+  const filteredAssets = contentAssets.filter(asset => {
+    if (!assetQuery.trim()) return true;
+    const q = assetQuery.trim().toLowerCase();
+    return asset.title.toLowerCase().includes(q)
+      || asset.sourceLabel.toLowerCase().includes(q)
+      || asset.noteId?.toLowerCase().includes(q);
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border border-primary/20 bg-primary/5 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold text-primary">{capabilityMeta.label}</p>
+            <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{capabilityMeta.desc}</p>
+          </div>
+          <span className="text-[9px] rounded-full bg-background/80 border border-primary/20 px-2 py-0.5 text-primary">
+            高级节点
+          </span>
+        </div>
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          {(Object.entries(VERTEX_CAPABILITY_META) as Array<[VertexAIParams['capability'], typeof capabilityMeta]>).map(([key, meta]) => (
+            <button
+              key={key}
+              onClick={() => updateCapability(key)}
+              className={`rounded-xl border px-2.5 py-2 text-left transition-colors ${
+                capability === key
+                  ? 'border-primary bg-primary text-white'
+                  : 'border-border bg-background hover:border-primary/40'
+              }`}
+            >
+              <p className="text-[11px] font-semibold">{meta.label}</p>
+              <p className={`text-[9px] mt-1 leading-relaxed ${capability === key ? 'text-white/80' : 'text-muted-foreground'}`}>
+                {meta.desc}
+              </p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] font-semibold text-muted-foreground">生成提示词</span>
+          <span className="text-[9px] text-muted-foreground font-mono">(prompt)</span>
+          <ParamTooltip text="每种能力都内置了不同的提示词骨架。先用默认模板起稿，再按你的业务加细节会更稳。" />
+          <div className="flex-1" />
+          <button
+            onClick={updatePromptFromTemplate}
+            className="rounded-lg border border-primary/20 bg-primary/5 px-2 py-1 text-[10px] text-primary hover:bg-primary/10"
+          >
+            刷新建议
+          </button>
+          <button
+            onClick={resetCapabilityDefaults}
+            className="rounded-lg border border-border bg-background px-2 py-1 text-[10px] text-muted-foreground hover:text-foreground"
+          >
+            恢复默认
+          </button>
+        </div>
+        <textarea
+          value={String(vertexParams.prompt ?? '')}
+          onChange={e => patchParams({ prompt: e.target.value })}
+          rows={5}
+          className="w-full resize-y bg-background border border-purple-400/40 rounded-xl px-3 py-2 text-[11px] leading-relaxed outline-none focus:border-purple-400"
+          placeholder={getDefaultVertexPrompt(capability)}
+        />
+        <div className="flex flex-wrap gap-1.5">
+          {capabilityMeta.promptScaffold.map(item => (
+            <span key={item} className="rounded-full bg-muted px-2 py-0.5 text-[9px] text-muted-foreground">
+              {item}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-[minmax(0,1fr)_220px] gap-3 items-start">
+        <div className="space-y-1">
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] font-semibold text-muted-foreground">模型</span>
+            <span className="text-[9px] text-muted-foreground font-mono">(model)</span>
+            <ParamTooltip text="模型列表会随能力切换自动过滤。文生图不会再看到 Veo，生视频也不会再看到 Imagen。" />
+          </div>
+          <select
+            value={availableModels.some(item => item.id === currentModel) ? currentModel : capabilityMeta.defaultModel}
+            onChange={e => patchParams({ model: e.target.value })}
+            className="w-full bg-background border border-border rounded-xl px-3 py-2 text-[11px] outline-none focus:border-primary"
+          >
+            {availableModels.map(model => (
+              <option key={model.id} value={model.id}>
+                {model.label} · {model.summary}
+              </option>
+            ))}
+          </select>
+        </div>
+        {currentModelMeta && (
+          <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+            <div>
+              <p className="text-[11px] font-semibold text-foreground">{currentModelMeta.label}</p>
+              <p className="text-[10px] text-muted-foreground mt-1 leading-relaxed">{currentModelMeta.summary}</p>
+            </div>
+            <div className="grid grid-cols-3 gap-1 text-[9px]">
+              <div className="rounded-lg bg-muted/40 px-2 py-1">
+                <p className="text-muted-foreground">成本档位</p>
+                <p className="font-semibold text-foreground">{currentModelMeta.costTier}</p>
+              </div>
+              <div className="rounded-lg bg-muted/40 px-2 py-1">
+                <p className="text-muted-foreground">速度</p>
+                <p className="font-semibold text-foreground">{currentModelMeta.speed}</p>
+              </div>
+              <div className="rounded-lg bg-muted/40 px-2 py-1">
+                <p className="text-muted-foreground">质量</p>
+                <p className="font-semibold text-foreground">{currentModelMeta.quality}</p>
+              </div>
+            </div>
+            <div className="space-y-1">
+              {currentModelMeta.strengths.map(item => (
+                <p key={item} className="text-[9px] text-muted-foreground">• {item}</p>
+              ))}
+            </div>
+            {currentModelMeta.note && (
+              <p className="text-[9px] text-amber-500">{currentModelMeta.note}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {capability !== 'video_generate' && (
+        <div className="grid grid-cols-3 gap-2">
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">生成数量</label>
+            <input
+              type="number"
+              min={1}
+              max={4}
+              value={String(vertexParams.count ?? 1)}
+              onChange={e => patchParams({ count: Math.min(4, Math.max(1, Number(e.target.value) || 1)) })}
+              className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] outline-none focus:border-primary"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">长宽比</label>
+            <select
+              value={String(vertexParams.aspectRatio ?? '1:1')}
+              onChange={e => patchParams({ aspectRatio: e.target.value })}
+              className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] outline-none focus:border-primary"
+            >
+              {['1:1', '3:4', '4:3', '9:16', '16:9', '2:3', '3:2', '4:5', '5:4', '21:9'].map(ratio => (
+                <option key={ratio} value={ratio}>{ratio}</option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">人物生成策略</label>
+            <select
+              value={String(vertexParams.personGeneration ?? 'allow_adult')}
+              onChange={e => patchParams({ personGeneration: e.target.value })}
+              className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] outline-none focus:border-primary"
+            >
+              {[
+                { label: 'allow_adult', value: 'allow_adult' },
+                { label: 'allow_all', value: 'allow_all' },
+                { label: 'dont_allow', value: 'dont_allow' },
+              ].map(item => (
+                <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {capability === 'image_edit' && (
+        <div className="space-y-2 rounded-xl border border-border bg-card p-3">
+          <div className="flex items-center gap-1">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">参考图素材</p>
+            <ParamTooltip text="这里优先从作品素材库里选图，内部会自动写入 referenceImageUrls。你也可以在下面直接编辑原始 URL 列表。" />
+            <div className="flex-1" />
+            <button
+              onClick={() => setShowReferencePicker(v => !v)}
+              className="rounded-lg border border-primary/20 bg-primary/5 px-2 py-1 text-[10px] text-primary hover:bg-primary/10"
+            >
+              {showReferencePicker ? '收起素材库' : `选择参考图${selectedReferenceUrls.length ? ` (${selectedReferenceUrls.length})` : ''}`}
+            </button>
+          </div>
+
+          {showReferencePicker && (
+            <div className="space-y-2 rounded-xl border border-border bg-background p-2">
+              <div className="flex items-center gap-2">
+                <input
+                  value={assetQuery}
+                  onChange={e => setAssetQuery(e.target.value)}
+                  placeholder="搜索标题 / note_id"
+                  className="flex-1 bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] outline-none focus:border-primary"
+                />
+                <span className="text-[10px] text-muted-foreground">{filteredAssets.length} 张</span>
+              </div>
+
+              {loadingAssets && <p className="text-[10px] text-muted-foreground">加载作品素材中...</p>}
+              {!loadingAssets && assetsError && <p className="text-[10px] text-red-400">{assetsError}</p>}
+
+              {!loadingAssets && !assetsError && (
+                <div className="grid grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                  {filteredAssets.length === 0 && (
+                    <p className="text-[10px] text-muted-foreground col-span-2 text-center py-8">没有匹配到可用图片</p>
+                  )}
+                  {filteredAssets.map(asset => {
+                    const selected = selectedReferenceUrls.includes(asset.url);
+                    return (
+                      <button
+                        key={`${asset.postId}-${asset.id}`}
+                        onClick={() => toggleReferenceUrl(asset.url)}
+                        className={`rounded-xl border overflow-hidden text-left transition-colors ${
+                          selected ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'
+                        }`}
+                      >
+                        <div className="aspect-[4/3] bg-muted/30">
+                          <img src={asset.url} alt={asset.title} className="w-full h-full object-cover" />
+                        </div>
+                        <div className="p-2 space-y-1">
+                          <div className="flex items-start gap-2">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[10px] font-medium text-foreground truncate">{asset.sourceLabel}</p>
+                              <p className="text-[9px] text-muted-foreground font-mono truncate">#{asset.postId.slice(-6)}</p>
+                            </div>
+                            {selected && <span className="text-[10px] text-primary">✓</span>}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {selectedReferenceUrls.length > 0 && (
+            <div className="grid grid-cols-3 gap-2">
+              {selectedReferenceUrls.map(url => (
+                <div key={url} className="rounded-xl border border-border overflow-hidden bg-background">
+                  <div className="aspect-[4/3] bg-muted/30">
+                    <img src={url} alt="reference" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="p-2 flex items-start gap-2">
+                    <p className="flex-1 text-[9px] text-muted-foreground font-mono truncate">{url}</p>
+                    <button
+                      onClick={() => toggleReferenceUrl(url)}
+                      className="text-[9px] text-red-400 hover:underline"
+                    >
+                      移除
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">原始参考图 URL 列表</label>
+            <textarea
+              value={String(vertexParams.referenceImageUrls ?? '')}
+              onChange={e => patchParams({ referenceImageUrls: e.target.value })}
+              rows={4}
+              className="w-full resize-y bg-background border border-border rounded-xl px-3 py-2 text-[11px] font-mono outline-none focus:border-primary"
+              placeholder='["https://.../1.png", "https://.../2.png"]'
+            />
+          </div>
+        </div>
+      )}
+
+      {capability === 'video_generate' && (
+        <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">视频参数</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-[10px] text-muted-foreground">视频时长（秒）</label>
+              <select
+                value={String(vertexParams.durationSeconds ?? 8)}
+                onChange={e => patchParams({ durationSeconds: Number(e.target.value) })}
+                className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] outline-none focus:border-primary"
+              >
+                {[4, 5, 6, 7, 8].map(value => (
+                  <option key={value} value={value}>{value}s</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-muted-foreground">生成音频</label>
+              <label className="flex items-center gap-2 cursor-pointer pt-1">
+                <div
+                  className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${vertexParams.generateAudio !== false ? 'bg-primary' : 'bg-muted'}`}
+                  onClick={() => patchParams({ generateAudio: !(vertexParams.generateAudio !== false) })}
+                >
+                  <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${vertexParams.generateAudio !== false ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </div>
+                <span className={`text-[10px] font-medium ${vertexParams.generateAudio !== false ? 'text-primary' : 'text-muted-foreground'}`}>
+                  {vertexParams.generateAudio !== false ? '已开启' : '已关闭'}
+                </span>
+              </label>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">源图 GCS URI</label>
+            <input
+              value={String(vertexParams.sourceImageGcsUri ?? '')}
+              onChange={e => patchParams({ sourceImageGcsUri: e.target.value })}
+              className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary"
+              placeholder="gs://bucket/path/to/frame.png"
+            />
+            <p className="text-[9px] text-muted-foreground">做图生视频时填写。纯文生视频可以留空。</p>
+          </div>
+        </div>
+      )}
+
+      <div className="rounded-xl border border-border bg-card p-3 space-y-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">输出与存储</p>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">首个结果变量</label>
+            <input
+              value={String(vertexParams.outputVar ?? capabilityMeta.defaultOutputVar)}
+              onChange={e => patchParams({ outputVar: e.target.value })}
+              className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary"
+              placeholder={capabilityMeta.defaultOutputVar}
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">结果数组变量</label>
+            <input
+              value={String(vertexParams.outputListVar ?? capabilityMeta.defaultOutputListVar)}
+              onChange={e => patchParams({ outputListVar: e.target.value })}
+              className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary"
+              placeholder={capabilityMeta.defaultOutputListVar}
+            />
+          </div>
+        </div>
+        <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-2 items-start">
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">上传到 OSS</label>
+            <label className="flex items-center gap-2 cursor-pointer pt-1">
+              <div
+                className={`w-8 h-4 rounded-full transition-colors relative flex-shrink-0 ${vertexParams.uploadToOSS !== false ? 'bg-primary' : 'bg-muted'}`}
+                onClick={() => patchParams({ uploadToOSS: !(vertexParams.uploadToOSS !== false) })}
+              >
+                <div className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${vertexParams.uploadToOSS !== false ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </div>
+              <span className={`text-[10px] font-medium ${vertexParams.uploadToOSS !== false ? 'text-primary' : 'text-muted-foreground'}`}>
+                {vertexParams.uploadToOSS !== false ? '已开启' : '已关闭'}
+              </span>
+            </label>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[10px] text-muted-foreground">OSS 存储路径</label>
+            <input
+              value={String(vertexParams.ossPath ?? 'vertex-assets/{{timestamp}}-{{index}}')}
+              onChange={e => patchParams({ ossPath: e.target.value })}
+              className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary"
+              placeholder="vertex-assets/{{timestamp}}-{{index}}"
+            />
+          </div>
+        </div>
+        <div className="rounded-lg border border-primary/20 bg-primary/5 px-2.5 py-2 text-[9px] space-y-0.5">
+          <p className="font-semibold text-primary">当前输出</p>
+          <p><span className="font-mono text-primary">{`{{${String(vertexParams.outputVar ?? capabilityMeta.defaultOutputVar)}}}`}</span><span className="ml-1 text-muted-foreground">首个结果地址</span></p>
+          <p><span className="font-mono text-primary">{`{{${String(vertexParams.outputListVar ?? capabilityMeta.defaultOutputListVar)}}}`}</span><span className="ml-1 text-muted-foreground">全部结果 JSON 数组</span></p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -209,6 +928,16 @@ function WaitAfterEditor({
       </label>
       {enabled && (
         <div className="pl-3 space-y-2 border-l-2 border-primary/30">
+          <div className="space-y-0.5">
+            <label className="text-[10px] text-muted-foreground">延迟判断 (秒)</label>
+            <input
+              type="number"
+              min={0}
+              value={wa.delaySeconds ?? 0}
+              onChange={e => set({ delaySeconds: Math.max(0, Number(e.target.value) || 0) })}
+              className="w-full bg-background border border-border rounded-lg px-2.5 py-1.5 text-[11px] outline-none focus:border-primary"
+            />
+          </div>
           {[
             { key: 'urlContains', label: 'URL 包含', placeholder: '/content/manage' },
             { key: 'selector',    label: '等待元素', placeholder: '.publish-success' },
@@ -256,6 +985,8 @@ function WaitAfterEditor({
 function NodeDetailPanel({
   node, idx, total, onChange, onClose,
   sessionId, vars,
+  materials,
+  onVarsChange,
   onStepStatusChange,
 }: {
   node: NodeDef;
@@ -265,6 +996,8 @@ function NodeDetailPanel({
   onClose: () => void;
   sessionId: string | null;
   vars: Record<string, string>;
+  materials: MaterialItem[];
+  onVarsChange?: (vars: Record<string, string>) => void;
   onStepStatusChange?: (idx: number, status: 'success' | 'error' | 'running') => void;
 }) {
   const catalog = getCatalogItem(node.type);
@@ -370,11 +1103,11 @@ function NodeDetailPanel({
     try {
       let res: Response;
       if (sessionId) {
-        // 通过 session 执行（接力浏览器状态）
+        // 通过 session 执行（接力浏览器状态），并带上当前面板的完整节点配置以实现实时覆盖
         res = await fetch(`/api/workflow/session/${sessionId}/step`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stepIndex: idx }),
+          body: JSON.stringify({ stepIndex: idx, node }),
         });
       } else {
         // 无 session：用 node-debug 开临时页面执行
@@ -407,7 +1140,12 @@ function NodeDetailPanel({
             }
             if (evt.type === 'done') {
               setPauseState(null);
-              const d = JSON.parse(evt.payload) as { success?: boolean; result?: { success: boolean } };
+              const d = JSON.parse(evt.payload) as {
+                success?: boolean;
+                vars?: Record<string, string>;
+                result?: { success: boolean };
+              };
+              if (d.vars) onVarsChange?.(d.vars);
               const ok = d.success ?? d.result?.success ?? false;
               setExecResult({ success: ok });
               onStepStatusChange?.(idx, ok ? 'success' : 'error');
@@ -567,6 +1305,7 @@ function NodeDetailPanel({
         <div className="w-[52%] border-r border-border overflow-y-auto p-4 space-y-4 flex-shrink-0">
 
           {/* 前置导航 URL */}
+          {node.type !== 'material' && node.type !== 'navigate' && (
           <section>
             <div className="flex items-center gap-1 mb-1.5">
               <h3 className="text-[10px] font-semibold text-blue-400 uppercase tracking-wide">前置导航 URL</h3>
@@ -579,19 +1318,34 @@ function NodeDetailPanel({
               placeholder="https://... （留空则不自动导航）"
             />
           </section>
+          )}
 
           {/* 节点参数 */}
           <section>
             <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">节点参数</h3>
-            <ParamEditor
-              params={node.params as Record<string, unknown>}
-              onChange={p => onChange({ params: p })}
-              nodeType={node.type}
-              showVarsHint={node.type === 'text_input' || node.type === 'file_upload'}
-            />
+            {node.type === 'material' ? (
+              <MaterialNodeParamEditor
+                params={node.params as Record<string, unknown>}
+                onChange={p => onChange({ params: p })}
+                materials={materials}
+              />
+            ) : node.type === 'vertex_ai' ? (
+              <VertexNodeParamEditor
+                params={node.params as Record<string, unknown>}
+                onChange={p => onChange({ params: p })}
+              />
+            ) : (
+              <ParamEditor
+                params={node.params as Record<string, unknown>}
+                onChange={p => onChange({ params: p })}
+                nodeType={node.type}
+                showVarsHint={node.type === 'text_input' || node.type === 'file_upload'}
+              />
+            )}
           </section>
 
           {/* 后置等待 */}
+          {node.type !== 'material' && (
           <section>
             <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">后置等待</h3>
             <WaitAfterEditor
@@ -599,6 +1353,7 @@ function NodeDetailPanel({
               onChange={wa => onChange({ waitAfter: wa })}
             />
           </section>
+          )}
 
           {/* 其他选项 */}
           <section>
@@ -930,8 +1685,6 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   const [isDebugScreenshotFullscreen, setIsDebugScreenshotFullscreen] = useState(false);
 
   // ── 素材 ───────────────────────────────────────────────────────────────────
-  const [showMaterialPicker, setShowMaterialPicker] = useState(false);
-  const [selectedMaterial, setSelectedMaterial] = useState<MaterialItem | null>(null);
   const [materials, setMaterials] = useState<MaterialItem[]>([]);
   const [ctx, setCtx] = useState<DebugCtx>({
     videoUrl: initialContext?.videoUrl ?? '',
@@ -1011,8 +1764,102 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   function onDragEnd() { dragIdx.current = null; }
 
   // ── Debug Session ──────────────────────────────────────────────────────────
-  async function createSession() {
-    if (!ctx.videoUrl || !ctx.title) { appendLog('❌ 请先填写视频地址和标题'); return; }
+  async function executeSessionStep(activeSessionId: string, idx: number, options?: { skip?: boolean; manageRunning?: boolean }) {
+    const manageRunning = options?.manageRunning ?? true;
+    if (manageRunning) setRunning(true);
+    setCurrentStep(idx);
+    setStepStatus(prev => { const n = [...prev]; n[idx] = 'running'; return n; });
+
+    try {
+      const body = options?.skip ? { skip: true, stepIndex: idx } : { stepIndex: idx };
+      const res = await fetch(`/api/workflow/session/${activeSessionId}/step`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.body) throw new Error('No body');
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      let donePayload: SessionStepDonePayload | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const parts = buf.split('\n\n');
+        buf = parts.pop() ?? '';
+
+        for (const part of parts) {
+          const line = part.replace(/^data:\s*/m, '').trim();
+          if (!line) continue;
+          try {
+            const evt = JSON.parse(line) as { type: string; payload: string };
+            if (evt.type === 'log') appendLog(evt.payload);
+            if (evt.type === 'screenshot') setScreenshot(evt.payload);
+            if (evt.type === 'qrcode') {
+              setQrcode(evt.payload);
+              appendLog('📱 二维码已显示');
+            }
+            if (evt.type === 'done') {
+              donePayload = JSON.parse(evt.payload) as SessionStepDonePayload;
+              if (donePayload.vars) {
+                setCtx(prev => ({ ...prev, ...donePayload!.vars }));
+              }
+              const st: StepStatus = donePayload.skipped
+                ? 'skip'
+                : donePayload.failed
+                ? 'error'
+                : donePayload.result?.success
+                ? 'success'
+                : 'warn';
+              setStepStatus(prev => { const n = [...prev]; n[idx] = st; return n; });
+              setLastExecutedStep(donePayload.executedStep ?? idx);
+              if (donePayload.done) {
+                setCurrentStep(nodes.length);
+                appendLog('\n🎉 工作流完成！');
+              } else {
+                setCurrentStep(donePayload.nextStep);
+              }
+              if (donePayload.result?.error) appendLog(`❌ ${donePayload.result.error}`);
+            }
+            if (evt.type === 'error') {
+              appendLog(`❌ ${evt.payload}`);
+              setStepStatus(prev => { const n = [...prev]; n[idx] = 'error'; return n; });
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+
+      return donePayload;
+    } catch (e) {
+      appendLog(`❌ ${e}`);
+      setStepStatus(prev => { const n = [...prev]; n[idx] = 'error'; return n; });
+      return null;
+    } finally {
+      if (manageRunning) setRunning(false);
+    }
+  }
+
+  async function runSessionSequentially(activeSessionId: string, startIndex = 0) {
+    setRunning(true);
+    try {
+      let nextIndex = startIndex;
+      while (nextIndex < nodes.length) {
+        const payload = await executeSessionStep(activeSessionId, nextIndex, { manageRunning: false });
+        if (!payload) break;
+        if (payload.done || payload.failed) break;
+        nextIndex = payload.nextStep;
+      }
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function createSession(autoRun = false) {
     try {
       appendLog('🚀 创建 Debug 会话...');
       const vars: Record<string, string> = {};
@@ -1036,7 +1883,13 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
       setLastExecutedStep(null);
       setStepStatus(nodes.map(() => 'pending'));
       setEditingIdx(null);
-      appendLog(`✅ 会话已创建（${data.totalSteps} 步）— 点击任意节点 ▶ 执行`);
+      appendLog(autoRun
+        ? `✅ 会话已创建（${data.totalSteps} 步）— 开始顺序执行`
+        : `✅ 会话已创建（${data.totalSteps} 步）— 点击任意节点 ▶ 执行`
+      );
+      if (autoRun) {
+        await runSessionSequentially(data.sessionId, 0);
+      }
     } catch (e) { appendLog(`❌ ${e}`); }
   }
 
@@ -1044,68 +1897,10 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
     if (!sessionId) return;
     await fetch(`/api/workflow/session/${sessionId}`, { method: 'DELETE' }).catch(() => {});
     setSessionId(null);
+    setRunning(false);
     setLastExecutedStep(null);
     appendLog('🗑️ 会话已关闭');
   }
-
-  const executeStep = useCallback(async (idx: number, skip = false) => {
-    if (!sessionId || running) return;
-    setRunning(true);
-    setCurrentStep(idx);
-    setStepStatus(prev => { const n = [...prev]; n[idx] = 'running'; return n; });
-    try {
-      const body = skip ? { skip: true, stepIndex: idx } : { stepIndex: idx };
-      const res = await fetch(`/api/workflow/session/${sessionId}/step`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!res.body) throw new Error('No body');
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const parts = buf.split('\n\n'); buf = parts.pop() ?? '';
-        for (const part of parts) {
-          const line = part.replace(/^data:\s*/m, '').trim();
-          if (!line) continue;
-          try {
-            const evt = JSON.parse(line) as { type: string; payload: string };
-            if (evt.type === 'log') appendLog(evt.payload);
-            if (evt.type === 'screenshot') setScreenshot(evt.payload);
-            if (evt.type === 'qrcode') { setQrcode(evt.payload); appendLog('📱 二维码已显示'); }
-            if (evt.type === 'done') {
-              const d = JSON.parse(evt.payload) as {
-                result?: { success: boolean; error?: string };
-                executedStep: number;
-                nextStep: number;
-                done: boolean;
-                failed: boolean;
-                skipped?: boolean;
-                relay: boolean;
-              };
-              const st: StepStatus = d.skipped ? 'skip' : d.failed ? 'error' : d.result?.success ? 'success' : 'warn';
-              setStepStatus(prev => { const n = [...prev]; n[idx] = st; return n; });
-              setLastExecutedStep(d.executedStep ?? idx);
-              if (d.done) { setCurrentStep(nodes.length); appendLog('\n🎉 工作流完成！'); }
-              else setCurrentStep(d.nextStep);
-              if (d.result?.error) appendLog(`❌ ${d.result.error}`);
-            }
-            if (evt.type === 'error') {
-              appendLog(`❌ ${evt.payload}`);
-              setStepStatus(prev => { const n = [...prev]; n[idx] = 'error'; return n; });
-            }
-          } catch { /* ignore */ }
-        }
-      }
-    } catch (e) {
-      appendLog(`❌ ${e}`);
-      setStepStatus(prev => { const n = [...prev]; n[idx] = 'error'; return n; });
-    } finally { setRunning(false); }
-  }, [sessionId, running, nodes, appendLog]);
 
   async function refreshScreenshot() {
     if (!sessionId) return;
@@ -1154,21 +1949,6 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
 
         {/* 节点列表 */}
         <div className="flex-1 overflow-y-auto p-2 space-y-1">
-
-          {/* 预节点：显示工作流变量 */}
-          <div className="rounded-lg border border-dashed border-primary/30 bg-primary/3 px-2.5 py-2 mb-2">
-            <p className="text-[9px] uppercase tracking-wide text-primary/70 font-semibold mb-1.5">输入变量</p>
-            <div className="space-y-0.5">
-              {initialWorkflow.vars.map(v => (
-                <div key={v} className="flex items-center gap-1.5 text-[10px]">
-                  <span className="font-mono text-muted-foreground w-16 truncate shrink-0">{v}</span>
-                  <span className="text-primary/50">→</span>
-                  <span className="font-mono text-primary">{`{{${v}}}`}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
           {/* 节点卡片 */}
           {nodes.map((node, i) => {
             const status = stepStatus[i] ?? 'pending';
@@ -1187,8 +1967,8 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                   onDragStart={e => onDragStart(e, i)}
                   onDragOver={e => onDragOver(e, i)}
                   onDragEnd={onDragEnd}
-                  onDoubleClick={() => !sessionId && setEditingIdx(isSelected ? null : i)}
-                  onClick={() => !sessionId && setEditingIdx(isSelected ? null : i)}
+                  onDoubleClick={() => setEditingIdx(isSelected ? null : i)}
+                  onClick={() => setEditingIdx(isSelected ? null : i)}
                   onContextMenu={e => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, nodeIdx: i }); }}
                   className={`rounded-lg border transition-all select-none ${
                     isCurrent ? 'border-primary bg-primary/5' :
@@ -1286,10 +2066,22 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
 
           {/* Session 按钮 */}
           {!sessionId ? (
-            <button onClick={() => void createSession()}
-              className="w-full py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary/90">
-              🚀 开始 Debug 会话
-            </button>
+            <div className="space-y-1.5">
+              <button
+                onClick={() => void createSession(true)}
+                disabled={running}
+                className="w-full py-1.5 text-xs bg-primary text-white rounded-lg hover:bg-primary/90 disabled:opacity-50"
+              >
+                🚀 开始 Debug 执行
+              </button>
+              <button
+                onClick={() => void createSession(false)}
+                disabled={running}
+                className="w-full py-1.5 text-xs bg-muted text-foreground rounded-lg hover:bg-muted/70 disabled:opacity-50"
+              >
+                仅创建会话
+              </button>
+            </div>
           ) : (
             <div className="flex gap-1.5">
               <div className="flex-1 flex flex-col gap-1">
@@ -1339,7 +2131,18 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
             onClose={() => setEditingIdx(null)}
             sessionId={sessionId}
             vars={Object.fromEntries(Object.entries(ctx).filter(([, v]) => v))}
+            materials={materials}
+            onVarsChange={(nextVars) => {
+              setCtx(prev => ({
+                ...prev,
+                videoUrl: nextVars.videoUrl ?? prev.videoUrl,
+                title: nextVars.title ?? prev.title,
+                tags: nextVars.tags ?? prev.tags,
+                clientId: nextVars.clientId ?? prev.clientId,
+              }));
+            }}
             onStepStatusChange={(i, status) => {
+              setRunning(status === 'running');
               setStepStatus(prev => {
                 const n = [...prev];
                 n[i] = status;
@@ -1353,62 +2156,36 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
         {/* ── 空闲模式：发布参数填写 ── */}
         {rightPanelMode === 'idle' && (
           <div className="flex-1 overflow-y-auto p-4">
-            <div className="max-w-md">
-              <p className="text-sm font-semibold mb-1">发布参数</p>
-              <p className="text-[11px] text-muted-foreground mb-4">填写后点击「开始 Debug」启动调试会话，或点击左侧节点查看/编辑参数</p>
-
-              {/* 素材选择器 */}
-              <div className="mb-3">
-                <label className="text-[10px] text-muted-foreground block mb-1">从素材库选择</label>
-                <button onClick={() => setShowMaterialPicker(p => !p)}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-xl border text-[11px] transition-colors ${selectedMaterial ? 'border-primary/50 bg-primary/5 text-primary' : 'border-dashed border-border bg-muted/20 text-muted-foreground hover:border-primary/40'}`}>
-                  <span className="truncate">{selectedMaterial ? `📦 ${selectedMaterial.title || '（无标题）'}` : `📦 选择素材${materials.length > 0 ? ` (${materials.length})` : ''}`}</span>
-                  <span className="shrink-0 ml-1">{showMaterialPicker ? '▲' : '▼'}</span>
-                </button>
-                {showMaterialPicker && (
-                  <div className="mt-1 border border-border rounded-xl overflow-hidden bg-card max-h-48 overflow-y-auto shadow-lg">
-                    {materials.length === 0
-                      ? <p className="text-center text-[10px] text-muted-foreground py-4">素材库为空</p>
-                      : materials.map(m => (
-                        <button key={m.id} onClick={() => {
-                          setCtx(p => ({ ...p, videoUrl: m.ossUrl, title: m.title || p.title }));
-                          setSelectedMaterial(m); setShowMaterialPicker(false);
-                          appendLog(`📦 已选择素材：${m.title}`);
-                        }}
-                          className={`w-full text-left px-3 py-2.5 hover:bg-muted flex items-center gap-2 text-[11px] transition-colors ${selectedMaterial?.id === m.id ? 'bg-primary/10' : ''}`}>
-                          <span>▶</span>
-                          <div className="min-w-0">
-                            <p className="truncate font-medium">{m.title || '（无标题）'}</p>
-                            <p className="truncate text-muted-foreground text-[9px]">{m.ossUrl}</p>
-                          </div>
-                          {selectedMaterial?.id === m.id && <span className="text-primary ml-auto shrink-0">✓</span>}
-                        </button>
-                      ))}
-                  </div>
-                )}
+            <div className="max-w-lg space-y-4">
+              <div>
+                <p className="text-sm font-semibold mb-1">工作流参数</p>
+                <p className="text-[11px] text-muted-foreground">
+                  素材选择已经做成正式节点。先点左侧第 1 个“素材节点”选择素材，执行后会输出 `videoUrl` 和 `title`，后面的上传和标题节点会直接复用。
+                </p>
               </div>
 
-              <div className="space-y-3">
-                {([
-                  { key: 'videoUrl', label: '视频地址', ph: 'https://...mp4' },
-                  { key: 'title',    label: '标题',     ph: '输入标题' },
-                  { key: 'tags',     label: '话题标签', ph: '情感,治愈（可选）' },
-                  { key: 'clientId', label: '账号ID',   ph: 'dy_...' },
-                ] as { key: keyof DebugCtx; label: string; ph: string }[]).map(({ key, label, ph }) => (
-                  <div key={key}>
-                    <label className="text-[10px] text-muted-foreground block mb-1">{label}</label>
-                    <input value={ctx[key]} onChange={e => setCtx(p => ({ ...p, [key]: e.target.value }))}
-                      className="w-full bg-muted border border-border rounded-xl px-3 py-2 text-[11px] outline-none focus:border-primary transition-colors"
-                      placeholder={ph} />
-                  </div>
-                ))}
-              </div>
-
-              {nodes.length > 0 && (
-                <div className="mt-6 p-3 bg-muted/30 rounded-xl border border-dashed border-border">
-                  <p className="text-[10px] text-muted-foreground">💡 点击左侧节点可查看和编辑参数，双击也可编辑</p>
+              <div className="rounded-xl border border-border bg-card p-3">
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">当前运行时变量</p>
+                <div className="space-y-1.5">
+                  {([
+                    { key: 'videoUrl', label: '视频地址' },
+                    { key: 'title', label: '标题' },
+                    { key: 'tags', label: '话题标签' },
+                    { key: 'clientId', label: '账号 ID' },
+                  ] as { key: keyof DebugCtx; label: string }[]).map(({ key, label }) => (
+                    <div key={key}>
+                      <label className="text-[9px] text-muted-foreground block mb-0.5">{label}</label>
+                      <p className="text-[11px] font-mono text-foreground/80 break-all bg-muted/30 rounded px-2 py-1 min-h-7">
+                        {ctx[key] || '—'}
+                      </p>
+                    </div>
+                  ))}
                 </div>
-              )}
+              </div>
+
+              <div className="p-3 bg-muted/30 rounded-xl border border-dashed border-border">
+                <p className="text-[10px] text-muted-foreground">💡 点击左侧节点可查看和编辑参数，双击也可编辑。开始 Debug 后，建议先执行素材节点。</p>
+              </div>
             </div>
           </div>
         )}

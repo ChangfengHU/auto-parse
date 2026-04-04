@@ -14,6 +14,7 @@
     "@types/ws": "^8.18.1",
     "ali-oss": "^6.23.0",
     "axios": "^1.13.6",
+    "google-auth-library": "^10.6.2",
     "next": "16.1.7",
     "playwright": "^1.58.2",
     "playwright-core": "^1.58.2",

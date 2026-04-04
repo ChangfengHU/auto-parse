@@ -6,9 +6,10 @@ import type { NodeType } from './types';
 export interface ParamMeta {
   label: string       // 显示名称
   desc: string        // 悬浮说明
-  type: 'string' | 'number' | 'boolean' | 'selector' | 'url' | 'template' | 'array'
+  type: 'string' | 'number' | 'boolean' | 'selector' | 'url' | 'template' | 'array' | 'select'
   required?: boolean
   example?: string
+  options?: Array<{ label: string; value: string }>
 }
 
 export interface NodeCatalogItem {
@@ -51,12 +52,56 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
   // ── 基础节点 ──────────────────────────────────────────────────────────────
 
   {
+    type: 'material',
+    label: '素材节点',
+    icon: '📦',
+    category: 'basic',
+    desc: '从素材库选择一条素材，输出视频地址和标题两个变量供后续节点使用',
+    defaultParams: {
+      materialId: '',
+      outputVideoVar: 'videoUrl',
+      outputTitleVar: 'title',
+    },
+    paramMeta: {
+      materialId: {
+        label: '素材 ID',
+        desc: '从素材库中选中的素材唯一 ID。通常通过右侧素材选择器设置，无需手填',
+        type: 'string',
+        required: true,
+        example: '1710000000000-abcd',
+      },
+      outputVideoVar: {
+        label: '视频变量名',
+        desc: '执行后把素材的 OSS 视频地址写入这个变量名，供上传节点使用',
+        type: 'string',
+        required: true,
+        example: 'videoUrl',
+      },
+      outputTitleVar: {
+        label: '标题变量名',
+        desc: '执行后把素材标题写入这个变量名，供标题输入节点使用',
+        type: 'string',
+        required: true,
+        example: 'title',
+      },
+    },
+  },
+
+  {
     type: 'navigate',
     label: '导航',
     icon: '🌐',
     category: 'basic',
-    desc: '跳转到指定 URL，等待页面加载完成',
-    defaultParams: { url: 'https://', waitUntil: 'domcontentloaded' },
+    desc: '跳转到指定 URL，等待页面加载完成；支持通过 AdsPower 分身进行高匿访问',
+    defaultParams: { 
+      url: 'https://', 
+      waitUntil: 'domcontentloaded', 
+      useAdsPower: false, 
+      adsProfileId: 'k1aomp3q', 
+      adsApiKey: '74f06f7e8e8e83ccafd060d7942cb9530087279d8cf923d4', 
+      adsApiUrl: 'http://local.adspower.net:50325',
+      adsManualCdpUrl: ''
+    },
     paramMeta: {
       url: { ...URL_META, required: true },
       waitUntil: {
@@ -65,9 +110,36 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         type: 'string',
         example: 'domcontentloaded',
       },
+      useAdsPower: {
+        label: '🛡 启用 AdsPower 隔离容器',
+        desc: '开启后，该节点及后续所有交互都将在指定的 AdsPower 高匿浏览器分身中运行。',
+        type: 'boolean',
+      },
+      adsProfileId: {
+        label: '分身编号 (Profile ID)',
+        desc: 'AdsPower 分身环境编号，如 k1aomp3q。开启上方开关后生效。',
+        type: 'string',
+        example: 'k1aomp3q',
+      },
+      adsApiKey: {
+        label: 'API 密钥 (API Key)',
+        desc: '选填。AdsPower 客户端设置页面中的 Local API Key。',
+        type: 'string',
+      },
+      adsApiUrl: {
+        label: 'API 地址',
+        desc: 'AdsPower 本地服务地址，默认 http://local.adspower.net:50325。',
+        type: 'string',
+      },
+      adsManualCdpUrl: { 
+        label: '手动 CDP 地址 (直连方案/终极退路)', 
+        desc: '💡 终极方案：如果 API 直连一直报 Require api-key，请手动填入已打开浏览器的 CDP 调试链接（形如 ws://127.0.0.1:xxxx/devtools/browser/...）。',
+        type: 'string'
+      },
       timeout: TIMEOUT_META,
     },
   },
+
 
   {
     type: 'click',
@@ -75,8 +147,13 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
     icon: '👆',
     category: 'basic',
     desc: '点击页面上的按钮或链接。优先用 text（文字定位），其次用 selector',
-    defaultParams: { text: '' },
+    defaultParams: { text: '', selector: '', useSelector: false },
     paramMeta: {
+      useSelector: {
+        label: '使用选择器模式',
+        desc: '关闭时按按钮文字点击；开启后按 selector 选择器点击元素',
+        type: 'boolean',
+      },
       text: {
         label: '按钮文字',
         desc: '按钮/链接的文字内容，用于精准定位元素（推荐）。与 selector 二选一，text 优先',
@@ -86,7 +163,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       selector: {
         ...SELECTOR_META,
         required: false,
-        desc: '元素的 CSS 选择器或 XPath，当 text 无法唯一定位时使用',
+        desc: '元素的 CSS 选择器或 XPath。开启“选择器模式”后，点击时使用这个字段定位元素',
       },
       nth: {
         label: '第几个匹配',
@@ -590,6 +667,174 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         desc: '调试结果保存的变量名',
         type: 'string',
         example: 'debugImageUrls',
+      },
+    },
+  },
+
+  // ─────────────────── AIGC：Meta AI 独立执行引擎 ───────────────────
+  {
+    type: 'metaai_generate',
+    label: 'Meta AI 智能生视频',
+    icon: '🤖',
+    category: 'advanced',
+    desc: '自动唤起 AdsPower 浏览器，访问 Meta AI 并通过您的大段提示词生成短片，等待渲染结束后提取出本地高质量视频并全自动存入阿里云 OSS 提供直链。',
+    defaultParams: {
+      prompt: 'A cinematic video of...',
+      outputVar: 'metaaiVideos',
+    },
+    paramMeta: {
+      prompt: {
+        label: '生成提示词',
+        desc: '支持英文长短文本或包含 {{变量}}。越细致的提示词生成的视频（或图片）质量越高。',
+        type: 'string',
+        required: true,
+        example: 'A cinematic video of a cyberpunk city...',
+      },
+      outputVar: {
+        label: '数组输出变量名',
+        desc: '执行结束后，会自动向系统变量注入这个名称的 JSON 数组（包含 4 个 OSS 永久视频链接），供发送抖音节点使用。',
+        type: 'string',
+        example: 'metaaiVideos',
+      },
+    },
+  },
+
+  // ─────────────────── AIGC：Vertex AI 聚合节点 ───────────────────
+  {
+    type: 'vertex_ai',
+    label: 'Vertex AI',
+    icon: '🖼️',
+    category: 'advanced',
+    desc: '聚合 Vertex AI 的图片生成、参考图编辑、视频生成能力，统一通过服务账号直连。',
+    defaultParams: {
+      capability: 'image_generate',
+      prompt: 'A cinematic product photo of...',
+      model: 'vertex:imagen-4.0-generate-001',
+      count: 1,
+      aspectRatio: '1:1',
+      personGeneration: 'allow_adult',
+      referenceImageUrls: '',
+      sourceImageGcsUri: '',
+      durationSeconds: 8,
+      generateAudio: true,
+      uploadToOSS: true,
+      ossPath: 'vertex-assets/{{timestamp}}-{{index}}',
+      outputVar: 'imageUrl',
+      outputListVar: 'imageUrls',
+    },
+    paramMeta: {
+      capability: {
+        label: '能力类型',
+        desc: '选择当前 Vertex 节点要执行的能力。',
+        type: 'select',
+        required: true,
+        options: [
+          { label: '文生图', value: 'image_generate' },
+          { label: '参考图编辑', value: 'image_edit' },
+          { label: '生视频', value: 'video_generate' },
+        ],
+      },
+      prompt: {
+        label: '生成提示词',
+        desc: '支持 {{变量}} 模板。不同能力下分别作为文生图、参考图编辑、生视频的提示词。',
+        type: 'template',
+        required: true,
+        example: 'A luxury skincare bottle on a marble table, soft daylight, premium ad shot',
+      },
+      model: {
+        label: '模型',
+        desc: '选择 Vertex Imagen 模型。当前节点只支持 Vertex 直连。',
+        type: 'select',
+        required: true,
+        options: [
+          { label: 'Vertex · imagen-3.0-generate-002', value: 'vertex:imagen-3.0-generate-002' },
+          { label: 'Vertex · imagen-3.0-capability-001', value: 'vertex:imagen-3.0-capability-001' },
+          { label: 'Vertex · imagen-4.0-generate-001', value: 'vertex:imagen-4.0-generate-001' },
+          { label: 'Vertex · imagen-4.0-fast-generate-001', value: 'vertex:imagen-4.0-fast-generate-001' },
+          { label: 'Vertex · veo-3.1-generate-001', value: 'vertex:veo-3.1-generate-001' },
+          { label: 'Vertex · veo-3.0-generate-001', value: 'vertex:veo-3.0-generate-001' },
+          { label: 'Vertex · veo-3.0-fast-generate-001', value: 'vertex:veo-3.0-fast-generate-001' },
+          { label: 'Vertex · veo-2.0-generate-001', value: 'vertex:veo-2.0-generate-001' },
+        ],
+      },
+      count: {
+        label: '生成数量',
+        desc: '图片能力下最多 4 张。视频能力固定按单条处理。',
+        type: 'number',
+        example: '1',
+      },
+      aspectRatio: {
+        label: '长宽比',
+        desc: 'Vertex Imagen 使用的输出比例。',
+        type: 'select',
+        options: [
+          { label: '1:1', value: '1:1' },
+          { label: '3:4', value: '3:4' },
+          { label: '4:3', value: '4:3' },
+          { label: '9:16', value: '9:16' },
+          { label: '16:9', value: '16:9' },
+          { label: '2:3', value: '2:3' },
+          { label: '3:2', value: '3:2' },
+          { label: '4:5', value: '4:5' },
+          { label: '5:4', value: '5:4' },
+          { label: '21:9', value: '21:9' },
+        ],
+      },
+      referenceImageUrls: {
+        label: '参考图 URL 列表',
+        desc: '用于参考图编辑。支持 JSON 数组，或多行/逗号分隔的 URL 列表。',
+        type: 'template',
+        example: '["https://.../1.png"]',
+      },
+      sourceImageGcsUri: {
+        label: '源图 GCS URI',
+        desc: '用于生视频时的首帧图。当前需传 gs://bucket/path.png 形式的 GCS 路径。',
+        type: 'string',
+        example: 'gs://my-bucket/input/frame.png',
+      },
+      durationSeconds: {
+        label: '视频时长（秒）',
+        desc: '用于生视频，当前建议 4-8 秒。',
+        type: 'number',
+        example: '8',
+      },
+      generateAudio: {
+        label: '生成音频',
+        desc: '用于生视频时是否同时生成音频轨。',
+        type: 'boolean',
+      },
+      personGeneration: {
+        label: '人物生成策略',
+        desc: 'Vertex Imagen 的人物生成策略。',
+        type: 'select',
+        options: [
+          { label: 'allow_adult', value: 'allow_adult' },
+          { label: 'allow_all', value: 'allow_all' },
+          { label: 'dont_allow', value: 'dont_allow' },
+        ],
+      },
+      uploadToOSS: {
+        label: '上传到 OSS',
+        desc: '开启后自动上传到阿里云 OSS，并输出永久地址。',
+        type: 'boolean',
+      },
+      ossPath: {
+        label: 'OSS 存储路径',
+        desc: '支持 {{timestamp}} 与 {{index}} 模板，用于多图场景命名。',
+        type: 'string',
+        example: 'ai-images/{{timestamp}}-{{index}}.png',
+      },
+      outputVar: {
+        label: '首个结果变量名',
+        desc: '首张图片或首个视频地址写入这个变量名，便于后续节点直接使用。',
+        type: 'string',
+        example: 'imageUrl',
+      },
+      outputListVar: {
+        label: '结果数组变量名',
+        desc: '所有结果地址会以 JSON 数组写入这个变量名。',
+        type: 'string',
+        example: 'imageUrls',
       },
     },
   },

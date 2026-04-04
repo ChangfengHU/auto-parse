@@ -16,7 +16,14 @@ import { getPersistentContext } from '@/lib/persistent-browser';
 import { getWorkflow } from '@/lib/workflow/workflow-db';
 import { DEFAULT_HUMAN_OPTIONS } from '@/lib/workflow/human-options';
 import { IdleSimulator } from '@/lib/workflow/idle-simulator';
-import type { WorkflowDef } from '@/lib/workflow/types';
+import type { NavigateParams, WorkflowDef } from '@/lib/workflow/types';
+
+function shouldDeferNativePage(workflow: WorkflowDef): boolean {
+  const firstNode = workflow.nodes[0];
+  if (!firstNode || firstNode.type !== 'navigate') return false;
+  const params = (firstNode.params ?? {}) as Partial<NavigateParams>;
+  return !!params.useAdsPower;
+}
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
@@ -42,11 +49,6 @@ export async function POST(req: Request) {
   // 2. 变量校验（仅警告，不阻断 — 允许空变量进行单节点调试）
   const mergedHumanOptions = { ...DEFAULT_HUMAN_OPTIONS, ...(humanOptions ?? {}) };
 
-  // 3. 在持久化浏览器中开新 Tab
-  const ctx = await getPersistentContext();
-  const page = await ctx.newPage();
-  page.on('dialog', d => d.accept());
-
   const session = createSession({ 
     workflowId: workflow.id, 
     workflow, 
@@ -54,13 +56,20 @@ export async function POST(req: Request) {
     humanOptions: mergedHumanOptions,
     lastExecutedStep: null 
   });
-  updateSession(session.id, { _page: page } as Partial<typeof session>);
 
-  // 4. 空闲模拟
-  if (mergedHumanOptions.idleSimulation) {
-    const idleSim = new IdleSimulator();
-    idleSim.start(page);
-    updateSession(session.id, { _idleSim: idleSim } as Partial<typeof session>);
+  // 3. 如果首步就是 AdsPower 导航，则延迟创建本地浏览器页，避免先弹出 Google Chrome 草稿页
+  if (!shouldDeferNativePage(workflow)) {
+    const ctx = await getPersistentContext();
+    const page = await ctx.newPage();
+    page.on('dialog', d => d.accept());
+    updateSession(session.id, { _page: page } as Partial<typeof session>);
+
+    // 4. 空闲模拟
+    if (mergedHumanOptions.idleSimulation) {
+      const idleSim = new IdleSimulator();
+      idleSim.start(page);
+      updateSession(session.id, { _idleSim: idleSim } as Partial<typeof session>);
+    }
   }
 
   return NextResponse.json({

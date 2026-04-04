@@ -6,7 +6,6 @@
 
 import { NextResponse } from 'next/server';
 import { fetchXhsPost } from '@/lib/analysis/xhs-fetch';
-import { hasXhsCookie } from '@/lib/analysis/xhs-cookie';
 
 export async function POST(req: Request) {
   const { url } = await req.json() as { url?: string };
@@ -15,8 +14,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: '请输入链接' }, { status: 400 });
   }
 
-  if (!hasXhsCookie()) {
-    return NextResponse.json({ error: '请先设置小红书 Cookie' }, { status: 401 });
+  const isXhsLink = url.includes('xiaohongshu.com') || url.includes('xhslink.com');
+  if (!isXhsLink) {
+    return NextResponse.json({ 
+      error: '该输入似乎不是有效的小红书链接。如果您想搜索内容，请使用“全网搜爆款”功能。',
+      suggestion: 'search'
+    }, { status: 400 });
   }
 
   try {

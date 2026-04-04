@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://okkgchwzppghiyfgmrlj.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 
@@ -8,7 +8,7 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
  * POST /api/database/create-tables
  * 创建数据库表结构
  */
-export async function POST(req: NextRequest) {
+export async function POST() {
   try {
     const tables = [
       {
@@ -60,6 +60,31 @@ export async function POST(req: NextRequest) {
         );`
       },
       {
+        name: 'rpa_videos',
+        sql: `CREATE TABLE IF NOT EXISTS rpa_videos (
+          id TEXT PRIMARY KEY,
+          original_url TEXT,
+          oss_url TEXT,
+          local_path TEXT,
+          filename TEXT,
+          file_size BIGINT,
+          duration INTEGER,
+          width INTEGER,
+          height INTEGER,
+          format TEXT,
+          bitrate INTEGER,
+          fps INTEGER,
+          has_watermark BOOLEAN DEFAULT FALSE,
+          source_platform TEXT,
+          source_post_type TEXT,
+          source_post_id TEXT,
+          upload_status TEXT DEFAULT 'pending',
+          upload_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
+        );`
+      },
+      {
         name: 'rpa_post_images',
         sql: `CREATE TABLE IF NOT EXISTS rpa_post_images (
           id TEXT PRIMARY KEY,
@@ -69,6 +94,23 @@ export async function POST(req: NextRequest) {
           image_order INTEGER,
           created_at TIMESTAMPTZ DEFAULT NOW(),
           FOREIGN KEY (image_id) REFERENCES rpa_images(id) ON DELETE CASCADE
+        );`
+      },
+      {
+        name: 'rpa_xhs_comments',
+        sql: `CREATE TABLE IF NOT EXISTS rpa_xhs_comments (
+          id TEXT PRIMARY KEY,
+          post_id TEXT NOT NULL,
+          note_id TEXT,
+          xhs_comment_id TEXT,
+          nickname TEXT,
+          avatar TEXT,
+          content TEXT,
+          like_count INTEGER DEFAULT 0,
+          sub_comment_count INTEGER DEFAULT 0,
+          comment_index INTEGER DEFAULT 0,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          updated_at TIMESTAMPTZ DEFAULT NOW()
         );`
       }
     ];

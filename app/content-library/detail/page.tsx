@@ -22,6 +22,17 @@ interface SavedXhsPost {
   publish_time?: string;
   saved_at?: string;
   images?: { id?: string; original_url: string; oss_url?: string }[];
+  video?: { id?: string; original_url: string; oss_url?: string };
+  comments?: {
+    id: string;
+    comment_id?: string;
+    nickname: string;
+    avatar?: string;
+    content: string;
+    like_count?: number;
+    sub_comment_count?: number;
+    comment_index?: number;
+  }[];
 }
 
 function proxyImg(url: string) {
@@ -36,6 +47,10 @@ function formatPublishTime(t?: string | number | null) {
   const d = isNaN(n) ? new Date(t) : new Date(n);
   if (isNaN(d.getTime())) return String(t);
   return d.toLocaleString('zh-CN');
+}
+
+function normalizeTagLabel(tag: string): string {
+  return tag;
 }
 
 function StatBadge({ icon, value, label }: { icon: string; value: number; label: string }) {
@@ -149,6 +164,8 @@ function DetailPageContent() {
   }
 
   const images = post.images ?? [];
+  const comments = post.comments ?? [];
+  const videoUrl = post.video?.oss_url || post.video?.original_url || '';
   const lightboxSrc = lightboxIdx !== null ? (images[lightboxIdx].oss_url || proxyImg(images[lightboxIdx].original_url)) : '';
 
   return (
@@ -219,13 +236,13 @@ function DetailPageContent() {
               <div className="text-xs text-muted-foreground">话题标签</div>
               <div className="flex flex-wrap gap-1">
                 {post.tags.map(t => {
-                  const tag = typeof t === 'string' ? t : (t as any)?.name || String(t);
+                  const tag = normalizeTagLabel(t);
                   return (
                     <span key={tag} className="px-2 py-0.5 bg-primary/10 text-primary text-xs rounded-full">#{tag}</span>
                   );
                 })}
               </div>
-              <button onClick={() => copy(post.tags!.map(t => `#${typeof t === 'string' ? t : (t as any)?.name || t}`).join(' '), 'tags')}
+              <button onClick={() => copy(post.tags!.map(t => `#${normalizeTagLabel(t)}`).join(' '), 'tags')}
                 className="px-2.5 py-1 text-xs rounded border border-border hover:bg-muted transition-colors">
                 {copiedKey === 'tags' ? '✓ 已复制' : '复制标签'}
               </button>
@@ -246,6 +263,22 @@ function DetailPageContent() {
 
         {/* 右栏：图片网格 */}
         <div className="space-y-4">
+          {videoUrl && (
+            <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-foreground">视频素材</h2>
+                {post.video?.oss_url && (
+                  <span className="text-[11px] rounded-full bg-green-100 px-2 py-0.5 text-green-700 dark:bg-green-950/30 dark:text-green-300">
+                    OSS
+                  </span>
+                )}
+              </div>
+              <div className="rounded-lg overflow-hidden border border-border bg-black">
+                <video src={videoUrl} controls className="w-full" preload="metadata" />
+              </div>
+            </div>
+          )}
+
           <span className="px-2.5 py-1 text-xs font-medium rounded-full border bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-300">
             🖼️ 图文 · {images.length} 张
           </span>
@@ -273,6 +306,49 @@ function DetailPageContent() {
               暂无图片
             </div>
           )}
+
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-foreground">评论详情</h2>
+              <span className="text-xs text-muted-foreground">{comments.length} 条</span>
+            </div>
+
+            {comments.length === 0 ? (
+              <div className="rounded-lg bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
+                暂无已保存评论
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {comments.map((comment, idx) => (
+                  <div key={comment.id || `${comment.nickname}-${idx}`} className="rounded-lg border border-border bg-background p-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-full overflow-hidden bg-muted flex-shrink-0">
+                        {comment.avatar ? (
+                          <img
+                            src={proxyImg(comment.avatar)}
+                            alt={comment.nickname}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : null}
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-sm font-medium truncate">{comment.nickname}</div>
+                          <div className="text-[11px] text-muted-foreground whitespace-nowrap">
+                            👍 {comment.like_count ?? 0}
+                            {(comment.sub_comment_count ?? 0) > 0 ? ` · 回复 ${comment.sub_comment_count}` : ''}
+                          </div>
+                        </div>
+                        <div className="text-sm leading-relaxed whitespace-pre-line text-muted-foreground">
+                          {comment.content || '（空评论）'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

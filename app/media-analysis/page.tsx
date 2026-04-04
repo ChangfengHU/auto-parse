@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+
+type CookieStatusMap = Record<string, boolean>;
 
 interface Platform {
   id: string;
@@ -32,42 +34,75 @@ const platforms: Platform[] = [
   }
 ];
 
+let initialCookieStatusCache: CookieStatusMap | null = null;
+let initialCookieStatusPromise: Promise<CookieStatusMap> | null = null;
+
+async function requestAllCookieStatus(): Promise<CookieStatusMap> {
+  const entries = await Promise.all(
+    platforms.map(async (platform) => {
+      if (!platform.cookieApi) return [platform.id, true] as const;
+
+      try {
+        const res = await fetch(platform.cookieApi);
+        const data = await res.json();
+        return [platform.id, Boolean(data.set ?? data.valid)] as const;
+      } catch {
+        return [platform.id, false] as const;
+      }
+    })
+  );
+
+  return Object.fromEntries(entries);
+}
+
 export default function MediaAnalysisPage() {
   const router = useRouter();
   const [cookieStatus, setCookieStatus] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    checkAllCookieStatus();
+  const checkAllCookieStatus = useCallback(async (options?: { force?: boolean }) => {
+    setLoading(true);
+
+    try {
+      const status = await (async () => {
+        if (options?.force) {
+          const nextStatus = await requestAllCookieStatus();
+          initialCookieStatusCache = nextStatus;
+          return nextStatus;
+        }
+
+        if (initialCookieStatusCache) return initialCookieStatusCache;
+
+        if (!initialCookieStatusPromise) {
+          initialCookieStatusPromise = requestAllCookieStatus()
+            .then((nextStatus) => {
+              initialCookieStatusCache = nextStatus;
+              return nextStatus;
+            })
+            .finally(() => {
+              initialCookieStatusPromise = null;
+            });
+        }
+
+        return initialCookieStatusPromise;
+      })();
+
+      setCookieStatus(status);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const checkAllCookieStatus = async () => {
-    const status: Record<string, boolean> = {};
-    
-    for (const platform of platforms) {
-      if (platform.cookieApi) {
-        try {
-          const res = await fetch(platform.cookieApi);
-          const data = await res.json();
-          status[platform.id] = data.set || false;
-        } catch {
-          status[platform.id] = false;
-        }
-      } else {
-        status[platform.id] = true; // 假设不需要cookie的平台总是可用
-      }
-    }
-    
-    setCookieStatus(status);
-    setLoading(false);
-  };
+  useEffect(() => {
+    void checkAllCookieStatus();
+  }, [checkAllCookieStatus]);
 
   const clearCookie = async (platform: Platform) => {
     if (!platform.cookieApi) return;
     
     try {
       await fetch(platform.cookieApi, { method: 'DELETE' });
-      await checkAllCookieStatus();
+      await checkAllCookieStatus({ force: true });
     } catch {
       // 静默处理错误
     }
@@ -91,10 +126,10 @@ export default function MediaAnalysisPage() {
                 📚 作品库
               </Link>
               <button
-                onClick={() => window.location.reload()}
+                onClick={() => void checkAllCookieStatus({ force: true })}
                 className="px-4 py-2 bg-muted border border-border rounded-lg text-sm hover:bg-border/50 transition-colors"
               >
-                🔄 刷新状态
+                {loading ? '检查中...' : '🔄 刷新状态'}
               </button>
             </div>
           </div>

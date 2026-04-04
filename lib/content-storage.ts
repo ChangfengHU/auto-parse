@@ -28,6 +28,102 @@ export interface SavedXhsPost {
     width?: number;
     height?: number;
   }>;
+  video?: {
+    id?: string;
+    original_url: string;
+    oss_url?: string;
+  };
+  comments?: XhsStoredComment[];
+}
+
+export interface XhsStoredComment {
+  id: string;
+  comment_id?: string;
+  nickname: string;
+  avatar?: string;
+  content: string;
+  like_count?: number;
+  sub_comment_count?: number;
+  comment_index?: number;
+}
+
+type RawTag = string;
+
+type RawImage = {
+  previewUrl?: string;
+  originalUrl?: string;
+  urlDefault?: string;
+  url?: string;
+  original_url?: string;
+  oss_url?: string;
+  width?: number;
+  height?: number;
+};
+
+type RawVideo = {
+  url?: string;
+  original_url?: string;
+  oss_url?: string;
+};
+
+type RawNoteData = {
+  noteId?: string;
+  note_id?: string;
+  title?: string;
+  desc?: string;
+  content?: string;
+  author?: { name?: string; id?: string; avatar?: string };
+  user?: { nickname?: string; userId?: string; avatar?: string };
+  tags?: RawTag[];
+  tagList?: RawTag[];
+  stats?: { likes?: number; comments?: number; shares?: number; collects?: number };
+  interactInfo?: { likedCount?: string; commentCount?: string; shareCount?: string; collectedCount?: string };
+  like_count?: number | string;
+  comment_count?: number | string;
+  share_count?: number | string;
+  collect_count?: number | string;
+  ipLocation?: string;
+  location?: string;
+  publishTime?: string;
+  time?: string;
+  images?: RawImage[];
+  imageList?: RawImage[];
+  postUrl?: string;
+  original_url?: string;
+  video?: RawVideo;
+  comments?: unknown;
+};
+
+function normalizeComments(comments: unknown): XhsStoredComment[] {
+  if (!Array.isArray(comments)) return [];
+  return comments.map((comment, index) => {
+    const item = (comment ?? {}) as Record<string, unknown>;
+    return {
+      id: String(item.id || `${Date.now()}-comment-${index}`),
+      comment_id: item.comment_id ? String(item.comment_id) : undefined,
+      nickname: String(item.nickname || '匿名用户'),
+      avatar: item.avatar ? String(item.avatar) : undefined,
+      content: String(item.content || ''),
+      like_count: Number(item.like_count ?? item.likeCount ?? 0) || 0,
+      sub_comment_count: Number(item.sub_comment_count ?? item.subCommentCount ?? 0) || 0,
+      comment_index: Number(item.comment_index ?? item.commentIndex ?? index) || index,
+    };
+  });
+}
+
+function normalizeOriginalPostUrl(postData: RawNoteData, originalUrl?: string): string {
+  return originalUrl || postData.postUrl || postData.original_url || '';
+}
+
+function normalizeVideo(video: RawVideo | undefined): SavedXhsPost['video'] {
+  if (!video) return undefined;
+  const originalUrl = video.original_url || video.url || '';
+  const ossUrl = video.oss_url;
+  if (!originalUrl && !ossUrl) return undefined;
+  return {
+    original_url: originalUrl,
+    oss_url: ossUrl || undefined,
+  };
 }
 
 function readAll(): SavedXhsPost[] {
@@ -49,7 +145,7 @@ export function getAllXhsPosts(): SavedXhsPost[] {
 }
 
 /** 保存内容到本地 JSON */
-export function saveXhsPost(postData: any, originalUrl?: string): SavedXhsPost {
+export function saveXhsPost(postData: RawNoteData, originalUrl?: string): SavedXhsPost {
   const list = readAll();
   
   // 检查是否已存在（根据note_id）
@@ -71,11 +167,13 @@ export function saveXhsPost(postData: any, originalUrl?: string): SavedXhsPost {
       share_count: postData.stats?.shares || parseInt(postData.interactInfo?.shareCount || postData.share_count || '0'),
       collect_count: postData.stats?.collects || parseInt(postData.interactInfo?.collectedCount || postData.collect_count || '0'),
       location: postData.ipLocation || postData.location || existing.location,
-      original_url: originalUrl || existing.original_url,
+      original_url: normalizeOriginalPostUrl(postData, originalUrl) || existing.original_url,
       saved_at: new Date().toISOString(),
-      images: (postData.images || postData.imageList || []).map((img: any, index: number) => ({
+      video: normalizeVideo(postData.video) || existing.video,
+      comments: normalizeComments(postData.comments).length > 0 ? normalizeComments(postData.comments) : existing.comments,
+      images: (postData.images || postData.imageList || []).map((img, index) => ({
         id: `${Date.now()}-img-${index}`,
-        original_url: img.oss_url || '',
+        original_url: img.originalUrl || img.previewUrl || img.urlDefault || img.url || img.original_url || '',
         oss_url: img.oss_url || undefined,
         width: img.width,
         height: img.height
@@ -102,14 +200,16 @@ export function saveXhsPost(postData: any, originalUrl?: string): SavedXhsPost {
     comment_count: postData.stats?.comments || parseInt(postData.interactInfo?.commentCount || '0'),
     share_count: postData.stats?.shares || parseInt(postData.interactInfo?.shareCount || '0'),
     collect_count: postData.stats?.collects || parseInt(postData.interactInfo?.collectedCount || '0'),
-    original_url: originalUrl || '',
+    original_url: normalizeOriginalPostUrl(postData, originalUrl),
     location: postData.ipLocation || '',
     publish_time: postData.publishTime || (postData.time ? new Date(parseInt(postData.time)).toISOString() : undefined),
     saved_at: new Date().toISOString(),
     parsed_at: new Date().toISOString(),
-    images: (postData.images || postData.imageList || []).map((img: any, index: number) => ({
+    video: normalizeVideo(postData.video),
+    comments: normalizeComments(postData.comments),
+    images: (postData.images || postData.imageList || []).map((img, index) => ({
       id: `${Date.now()}-img-${index}`,
-      original_url: img.oss_url || '',
+      original_url: img.originalUrl || img.previewUrl || img.urlDefault || img.url || img.original_url || '',
       oss_url: img.oss_url || undefined,
       width: img.width,
       height: img.height

@@ -10,11 +10,12 @@
 
 import vm from 'vm';
 import { getXhsCookie } from './xhs-cookie';
+import { exportXhsCookieStr } from '@/lib/persistent-browser';
 
 // ── 常量（来自 static.py）─────────────────────────────────────────────────────
 
 const USER_AGENT =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
 const BASE_HEADERS: Record<string, string> = {
   accept:
@@ -75,33 +76,50 @@ const toNum = (v: unknown) => parseInt(String(v ?? '0')) || 0;
 // ── request.py 移植：fetchHtml ─────────────────────────────────────────────────
 
 /**
- * 解析短链 / 确保最终拿到完整的 explore URL
- * xhslink.com 等短链会重定向到真实地址
+ * 将任意 XHS 链接规范化为 /discovery/item/{noteId}?xsec_token=... 格式
+ * 这个格式不需要 Cookie 也能访问，/explore/ 则会被 403
  */
 export async function resolveUrl(url: string): Promise<string> {
   if (!url.startsWith('http')) url = `https://${url}`;
-  const cookie = getXhsCookie();
+
+  // 短链先跟随重定向拿到真实 URL
+  if (url.includes('xhslink.com')) {
+    const cookie = getXhsCookie();
+    const headers: Record<string, string> = { ...BASE_HEADERS };
+    if (cookie) headers['cookie'] = cookie;
+    const res = await fetch(url, { method: 'HEAD', headers, redirect: 'follow' }).catch(() => null);
+    if (res?.url) url = res.url;
+  }
+
+  // 提取 noteId
+  const noteIdMatch = url.match(/(?:explore|discovery\/item)\/([a-f0-9]+)/);
+  if (!noteIdMatch) return url; // 无法识别则原样返回
+
+  const noteId = noteIdMatch[1];
+  const tokenMatch = url.match(/xsec_token=([^&\s]+)/);
+  const xsecToken = tokenMatch ? tokenMatch[1] : '';
+
+  return `https://www.xiaohongshu.com/discovery/item/${noteId}${xsecToken ? `?xsec_token=${xsecToken}&xsec_source=pc_feed` : ''}`;
+}
+
+/** 获取 XHS Cookie：优先手动配置，其次从持久化浏览器提取 */
+async function resolveCookie(): Promise<string | null> {
+  const manual = getXhsCookie();
+  if (manual) return manual;
+  return exportXhsCookieStr().catch(() => null);
+}
+
+/** 获取 XHS 页面 HTML，自动从浏览器或手动配置里取 Cookie */
+async function fetchHtml(url: string): Promise<string> {
+  const cookie = await resolveCookie();
   const headers: Record<string, string> = { ...BASE_HEADERS };
   if (cookie) headers['cookie'] = cookie;
 
-  const res = await fetch(url, {
-    method: 'HEAD',
-    headers,
-    redirect: 'follow',
-  }).catch(() => null);
-
-  return res?.url ?? url;
-}
-
-/** 带 Cookie 获取 XHS 页面 HTML */
-async function fetchHtml(url: string): Promise<string> {
-  const cookie = getXhsCookie();
-  if (!cookie) throw new Error('未设置小红书 Cookie，请先在页面顶部输入 Cookie');
-
-  const headers: Record<string, string> = { ...BASE_HEADERS, cookie };
-
   const res = await fetch(url, { headers, redirect: 'follow' });
-  if (!res.ok) throw new Error(`请求失败 HTTP ${res.status}，Cookie 可能已失效`);
+  if (!res.ok) {
+    const hint = cookie ? '，Cookie 可能已失效' : '，请先在浏览器中登录小红书';
+    throw new Error(`请求失败 HTTP ${res.status}${hint}`);
+  }
   return res.text();
 }
 

@@ -20,13 +20,36 @@
  */
 import { getSession, updateSession } from '@/lib/workflow/session-store';
 import { executeNode } from '@/lib/workflow/engine';
-import type { WorkflowContext, StepHistory } from '@/lib/workflow/types';
+import { getPersistentContext } from '@/lib/persistent-browser';
+import type { NavigateParams, NodeDef, WorkflowContext, StepHistory } from '@/lib/workflow/types';
+import { chromium, type Browser, type Page } from 'playwright';
+
+async function ensureSessionPage(session: ReturnType<typeof getSession>, node: NodeDef) {
+  if (!session) return { page: null as Page | null, tempBrowser: undefined as Browser | undefined };
+  if (session._page) return { page: session._page, tempBrowser: undefined as Browser | undefined };
+
+  const isAdsPowerNavigate = node.type === 'navigate' && !!((node.params ?? {}) as Partial<NavigateParams>).useAdsPower;
+  if (isAdsPowerNavigate) {
+    const tempBrowser = await chromium.launch({ headless: true });
+    const page = await tempBrowser.newPage();
+    return { page, tempBrowser };
+  }
+
+  const ctx = await getPersistentContext();
+  const page = await ctx.newPage();
+  page.on('dialog', d => d.accept());
+  session._page = page;
+  updateSession(session.id, { _page: page });
+  return { page, tempBrowser: undefined as Browser | undefined };
+}
 
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: sessionId } = await params;
   const body = await req.json().catch(() => ({})) as {
     skip?: boolean;
     stepIndex?: number;
+    params?: Record<string, unknown>;
+    node?: Partial<NodeDef>;
   };
 
   const encoder = new TextEncoder();
@@ -42,7 +65,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       try {
         const session = getSession(sessionId);
         if (!session) { send('error', 'session not found'); return; }
-        if (!session._page) { send('error', '浏览器 Tab 未初始化'); return; }
 
         // ── 确定要执行的步骤 ──────────────────────────────────────────────────
         const requestedIndex = body.stepIndex ?? session.currentStep;
@@ -85,8 +107,6 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         }
 
         session._idleSim?.stop();
-        send('log', `▶️ 步骤 ${requestedIndex + 1}/${session.workflow.nodes.length}：${node.label ?? node.type}`);
-
         const ctx: WorkflowContext = {
           vars: { ...session.vars, __pauseToken: sessionId },
           outputs: session.history.reduce((acc, h) => ({ ...acc, ...(h.result.output ?? {}) }), {}),
@@ -94,7 +114,68 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           humanOptions: session.humanOptions,
         };
 
-        const result = await executeNode(session._page, node, ctx);
+        send('log', `▶️ 步骤 ${requestedIndex + 1}/${session.workflow.nodes.length}：${node.label ?? node.type}`);
+        
+        // 优先使用请求体传来的完整节点配置（用于调试时的即时改动），没有则退回旧的 params 覆盖逻辑
+        const activeNode: NodeDef = body.node
+          ? {
+              ...node,
+              ...body.node,
+              params: body.node.params ?? node.params,
+              waitAfter: body.node.waitAfter ?? node.waitAfter,
+            }
+          : { ...node, params: body.params ?? node.params };
+
+        if (body.node) {
+          send('log', `💡 调试模式：已注入完整节点配置`);
+          if ((body.node.params?.useAdsPower ?? activeNode.params.useAdsPower) !== undefined) {
+            const params = (activeNode.params ?? {}) as Record<string, unknown>;
+            send('log', `ℹ️ 实时开关状态: useAdsPower=${params.useAdsPower}, profileId=${params.adsProfileId}`);
+          }
+        } else if (body.params && Object.keys(body.params).length > 0) {
+          send('log', `💡 调试模式：已注入 ${Object.keys(body.params).length} 个实时覆盖参数`);
+          // 额外的调试日志，帮助确定到底传的是啥，特别是 useAdsPower
+          if (body.params.useAdsPower !== undefined) {
+            send('log', `ℹ️ 实时开关状态: useAdsPower=${body.params.useAdsPower}, profileId=${body.params.adsProfileId}`);
+          }
+        }
+
+        const { page: runtimePage, tempBrowser } = await ensureSessionPage(session, activeNode);
+        if (!runtimePage) {
+          send('error', '浏览器 Tab 未初始化');
+          return;
+        }
+
+        if (tempBrowser) {
+          send('log', `🫥 首步为 AdsPower 导航，已跳过本地可见浏览器预热`);
+        }
+
+        send('log', `🌐 当前页面：${runtimePage.url() || '(空白)'}`);
+
+        const result = await executeNode(runtimePage, activeNode, ctx);
+        const nextVars = Object.fromEntries(
+          Object.entries(ctx.vars).filter(([key]) => key !== '__pauseToken')
+        );
+        
+        // 检测接管逻辑：如果该节点开启了外部高匿容器（如 AdsPower），它会返回一个新的 page 对象
+        // 此时我们直接把整个工作流系统的游标进行“掉包”，后续所有的点击/回车节点全都在安全的隔离沙盒内运行
+        if (result.newPage) {
+          const nextPage = result.newPage as Page;
+          const nextBrowser = result.newBrowser as Browser | undefined;
+          updateSession(sessionId, { _page: nextPage, _browser: nextBrowser });
+          session._page = nextPage;
+          if (result.newBrowser) {
+            session._browser = nextBrowser;
+          }
+          send('log', `⚠️ [系统接管] 工作流游标引擎已成功转移至独立物理隔离防挂分身`);
+          send('log', `🌐 接管后页面：${nextPage.url() || '(空白)'}`);
+          if (tempBrowser) {
+            await tempBrowser.close().catch(() => {});
+          }
+        } else if (tempBrowser) {
+          session._page = runtimePage;
+          updateSession(sessionId, { _page: runtimePage });
+        }
 
         // ── 更新 session ──────────────────────────────────────────────────────
         const historyEntry: StepHistory = {
@@ -110,6 +191,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         const failed = !result.success && !node.continueOnError;
 
         updateSession(sessionId, {
+          vars: nextVars,
           currentStep: failed ? requestedIndex : nextStep,
           lastExecutedStep: requestedIndex,
           status: failed ? 'error' : done ? 'done' : 'paused',
@@ -124,6 +206,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
         send('done', JSON.stringify({
           result: { success: result.success, log: result.log, error: result.error, output: result.output },
+          vars: nextVars,
           executedStep: requestedIndex,
           nextStep: failed ? requestedIndex : nextStep,
           done: done && !failed,

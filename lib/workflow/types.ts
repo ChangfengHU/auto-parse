@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type NodeType =
+  | 'material'        // 业务：从素材库选择素材并输出变量
   | 'navigate'        // 基础：导航到 URL
   | 'text_input'      // 基础：文本填入
   | 'click'           // 基础：点击元素
@@ -17,12 +18,15 @@ export type NodeType =
   | 'xhs_download'   // 高级：小红书帖子图片/视频批量下载 → 上传 OSS
   | 'localhost_image_download' // 高级：本地解析页面图片批量下载 → 上传 OSS
   | 'localhost_image_download_debug' // 调试：本地图片批量下载调试版本
+  | 'metaai_generate' // 高级：调用外部 Python 脚本执行 Meta AI 生成视频并上传 OSS
+  | 'vertex_ai' // 高级：Vertex AI 聚合节点，封装生图/参考图编辑/生视频等能力
 
 // ── 节点定义 ──────────────────────────────────────────────────────────────────
 
 /** 节点执行完成后的等待条件（每个节点都可配置，默认关闭） */
 export interface WaitAfterConfig {
   enabled?: boolean             // 是否启用（默认 false）
+  delaySeconds?: number         // 延迟多少秒后再开始判断，默认 0
   urlContains?: string          // 等待 URL 包含此字符串
   selector?: string             // 等待元素出现/消失（CSS 或 XPath）
   action?: 'appeared' | 'disappeared' | 'url_match'
@@ -48,6 +52,17 @@ export interface NavigateParams {
   url: string
   waitUntil?: 'load' | 'domcontentloaded' | 'networkidle'
   timeout?: number
+  useAdsPower?: boolean            // 是否开启 AdsPower 模式（UI 渲染为开关）
+  adsProfileId?: string            // AdsPower 分身编号，如 k1aomp3q
+  adsApiKey?: string               // AdsPower API 密钥（Local API Key）
+  adsApiUrl?: string               // AdsPower 本地接口地址，默认 http://127.0.0.1:50325
+  adsManualCdpUrl?: string         // 终极方案：手动填入已打开浏览器的 CDP 地址 (ws://...)
+}
+
+export interface MaterialParams {
+  materialId?: string
+  outputVideoVar?: string
+  outputTitleVar?: string
 }
 
 export interface TextInputParams {
@@ -58,6 +73,7 @@ export interface TextInputParams {
 }
 
 export interface ClickParams {
+  useSelector?: boolean
   selector?: string
   text?: string     // 按文字找按钮（优先于 selector）
   nth?: number      // 第几个匹配（默认 last）
@@ -177,6 +193,28 @@ export interface LocalhostImageDownloadDebugParams {
   outputVar?: string             // 输出变量名
 }
 
+export interface MetaAIGenerateParams {
+  prompt: string                 // 提示词
+  outputVar?: string             // 输出的 OSS 连接数组变量名，默认为 'metaaiVideos'
+}
+
+export interface VertexAIParams {
+  capability: 'image_generate' | 'image_edit' | 'video_generate'
+  prompt: string
+  model: string
+  count?: number
+  aspectRatio?: string
+  personGeneration?: string
+  referenceImageUrls?: string
+  sourceImageGcsUri?: string
+  durationSeconds?: number
+  generateAudio?: boolean
+  uploadToOSS?: boolean
+  ossPath?: string
+  outputVar?: string
+  outputListVar?: string
+}
+
 // ── 工作流定义 ────────────────────────────────────────────────────────────────
 
 export interface WorkflowDef {
@@ -195,6 +233,8 @@ export interface NodeResult {
   screenshot?: string              // base64 data URL
   output?: Record<string, unknown> // 传递给后续节点的数据（如 cookies、进度值）
   error?: string
+  newPage?: unknown                // 可选：用于工作流中途强制替换浏览器页面的游标引用
+  newBrowser?: unknown             // 可选：用于存放伴随的新浏览器实例
 }
 
 export interface WorkflowContext {
@@ -227,5 +267,6 @@ export interface WorkflowSession {
   humanOptions: import('./human-options').HumanOptions
   // 运行时引用（不序列化）
   _page?: import('playwright').Page
+  _browser?: import('playwright').Browser
   _idleSim?: import('./idle-simulator').IdleSimulator
 }

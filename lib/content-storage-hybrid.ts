@@ -1,4 +1,4 @@
-import { SavedXhsPost } from './content-storage';
+import { SavedXhsPost, XhsStoredComment } from './content-storage';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://okkgchwzppghiyfgmrlj.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 
@@ -7,6 +7,81 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+function pickCount(...values: unknown[]): number {
+  for (const value of values) {
+    const num = Number(value);
+    if (Number.isFinite(num) && num > 0) return num;
+  }
+  return 0;
+}
+
+function normalizeComments(comments: unknown): XhsStoredComment[] {
+  if (!Array.isArray(comments)) return [];
+  return comments.map((comment, index) => {
+    const item = (comment ?? {}) as Record<string, unknown>;
+    return {
+      id: String(item.id || generateId()),
+      comment_id: item.comment_id ? String(item.comment_id) : undefined,
+      nickname: String(item.nickname || '匿名用户'),
+      avatar: item.avatar ? String(item.avatar) : undefined,
+      content: String(item.content || ''),
+      like_count: Number(item.like_count ?? item.likeCount ?? 0) || 0,
+      sub_comment_count: Number(item.sub_comment_count ?? item.subCommentCount ?? 0) || 0,
+      comment_index: Number(item.comment_index ?? item.commentIndex ?? index) || index,
+    };
+  });
+}
+
+type RawTag = string;
+
+type RawImage = {
+  previewUrl?: string;
+  originalUrl?: string;
+  urlDefault?: string;
+  url?: string;
+  original_url?: string;
+  oss_url?: string;
+  width?: number;
+  height?: number;
+};
+
+type RawVideo = {
+  url?: string;
+  original_url?: string;
+  oss_url?: string;
+};
+
+type RawNoteData = {
+  original_url?: string;
+  note_id?: string;
+  noteId?: string;
+  title?: string;
+  content?: string;
+  desc?: string;
+  author?: { name?: string; id?: string; avatar?: string };
+  author_name?: string;
+  author_id?: string;
+  author_avatar?: string;
+  tags?: RawTag[];
+  stats?: { likes?: number; comments?: number; shares?: number; collects?: number };
+  like_count?: number | string;
+  likedCount?: number | string;
+  comment_count?: number | string;
+  commentCount?: number | string;
+  share_count?: number | string;
+  shareCount?: number | string;
+  collect_count?: number | string;
+  collectCount?: number | string;
+  location?: string;
+  publish_time?: string;
+  time?: string | null;
+  postUrl?: string;
+  comments?: unknown;
+  imageList?: RawImage[];
+  images?: RawImage[];
+  video?: RawVideo;
+};
 
 /**
  * 根据帖子ID查询关联的图片
@@ -37,13 +112,103 @@ async function getImagesByPostId(postId: string): Promise<Array<{
   }
 }
 
+async function getCommentsByPostId(postId: string): Promise<XhsStoredComment[]> {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/rpa_xhs_comments?post_id=eq.${encodeURIComponent(postId)}&select=id,xhs_comment_id,nickname,avatar,content,like_count,sub_comment_count,comment_index&order=comment_index.asc`,
+      {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+        }
+      }
+    );
+    if (!res.ok) return [];
+
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows.map((row: Record<string, unknown>, index: number) => ({
+      id: String(row.id || generateId()),
+      comment_id: row.xhs_comment_id ? String(row.xhs_comment_id) : undefined,
+      nickname: String(row.nickname || '匿名用户'),
+      avatar: row.avatar ? String(row.avatar) : undefined,
+      content: String(row.content || ''),
+      like_count: Number(row.like_count ?? 0) || 0,
+      sub_comment_count: Number(row.sub_comment_count ?? 0) || 0,
+      comment_index: Number(row.comment_index ?? index) || index,
+    })) : [];
+  } catch (error) {
+    console.warn('查询评论失败:', error);
+    return [];
+  }
+}
+
+async function getVideoByPostId(postId: string): Promise<SavedXhsPost['video']> {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/rpa_videos?source_post_id=eq.${encodeURIComponent(postId)}&source_post_type=eq.xhs_post&select=id,original_url,oss_url&order=created_at.asc&limit=1`,
+      {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+        }
+      }
+    );
+    if (!res.ok) return undefined;
+
+    const rows = await res.json();
+    const row = Array.isArray(rows) ? rows[0] : null;
+    if (!row) return undefined;
+    return {
+      id: String(row.id || ''),
+      original_url: String(row.original_url || ''),
+      oss_url: row.oss_url ? String(row.oss_url) : undefined,
+    };
+  } catch (error) {
+    console.warn('查询视频失败:', error);
+    return undefined;
+  }
+}
+
+function normalizeOriginalPostUrl(postData: RawNoteData): string {
+  return postData.original_url || postData.postUrl || '';
+}
+
+function normalizeVideo(video: RawVideo | undefined): SavedXhsPost['video'] {
+  if (!video) return undefined;
+  const originalUrl = video.original_url || video.url || '';
+  const ossUrl = video.oss_url;
+  if (!originalUrl && !ossUrl) return undefined;
+  return {
+    original_url: originalUrl,
+    oss_url: ossUrl || undefined,
+  };
+}
+
 /**
  * 保存小红书帖子到Supabase，如果失败则回退到本地存储
  */
-export async function saveXhsPost(postData: any): Promise<SavedXhsPost> {
+export async function saveXhsPost(postData: RawNoteData): Promise<SavedXhsPost> {
   try {
-    const postId = generateId();
+    // 1. 检查是否存在相同 URL 的记录
+    const checkRes = await fetch(
+      `${SUPABASE_URL}/rest/v1/rpa_xhs_posts?original_url=eq.${encodeURIComponent(postData.original_url || '')}&select=id`,
+      {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+        }
+      }
+    );
+    
+    let existingId = null;
+    if (checkRes.ok) {
+      const existing = await checkRes.json();
+      if (existing.length > 0) existingId = existing[0].id;
+    }
+
+    const postId = existingId || generateId();
     const now = new Date().toISOString();
+    const normalizedComments = normalizeComments(postData.comments);
     
     // 准备要保存的数据
     const record = {
@@ -54,14 +219,12 @@ export async function saveXhsPost(postData: any): Promise<SavedXhsPost> {
       author_name: postData.author?.name || postData.author_name || '',
       author_id: postData.author?.id || postData.author_id || '',
       author_avatar: postData.author?.avatar || postData.author_avatar || '',
-      tags: Array.isArray(postData.tags) ? postData.tags.map((tag: any) => 
-        typeof tag === 'string' ? tag : (tag?.name || String(tag))
-      ) : [],
-      like_count: Number(postData.like_count || postData.likedCount) || 0,
-      comment_count: Number(postData.comment_count || postData.commentCount) || 0,
-      share_count: Number(postData.share_count || postData.shareCount) || 0,
-      collect_count: Number(postData.collect_count || postData.collectCount) || 0,
-      original_url: postData.original_url || '',
+      tags: Array.isArray(postData.tags) ? postData.tags.map((tag) => String(tag)) : [],
+      like_count: pickCount(postData.like_count, postData.likedCount, postData.stats?.likes),
+      comment_count: pickCount(postData.comment_count, postData.commentCount, postData.stats?.comments, normalizedComments.length),
+      share_count: pickCount(postData.share_count, postData.shareCount, postData.stats?.shares),
+      collect_count: pickCount(postData.collect_count, postData.collectCount, postData.stats?.collects),
+      original_url: normalizeOriginalPostUrl(postData),
       location: postData.location || '',
       publish_time: postData.publish_time || postData.time || null,
       parsed_at: now,
@@ -69,23 +232,50 @@ export async function saveXhsPost(postData: any): Promise<SavedXhsPost> {
       updated_at: now
     };
 
-    // 直接尝试插入数据
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/rpa_xhs_posts`, {
+    // 2. 使用 Upsert 方式保存 (带 on_conflict)
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/rpa_xhs_posts?on_conflict=id`, {
       method: 'POST',
       headers: {
         'apikey': SUPABASE_KEY,
         'Authorization': `Bearer ${SUPABASE_KEY}`,
         'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
+        'Prefer': 'resolution=merge-duplicates,return=representation'
       },
       body: JSON.stringify(record)
     });
 
     if (response.ok) {
-      const [savedRecord] = await response.json();
-      console.log('✅ 成功保存到Supabase:', postId);
+      const respJson = await response.json();
+      const savedRecord = respJson[0];
+      console.log(existingId ? '✅ 成功更新到Supabase:' : '✅ 成功保存到Supabase:', postId);
       
-      // 处理图片
+      // 3. 处理图片：先清理旧图片记录（如果是更新），再重新保存
+      if (existingId) {
+        await fetch(`${SUPABASE_URL}/rest/v1/rpa_images?source_post_id=eq.${encodeURIComponent(postId)}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+          }
+        });
+
+        await fetch(`${SUPABASE_URL}/rest/v1/rpa_xhs_comments?post_id=eq.${encodeURIComponent(postId)}`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+          }
+        });
+
+        await fetch(`${SUPABASE_URL}/rest/v1/rpa_videos?source_post_id=eq.${encodeURIComponent(postId)}&source_post_type=eq.xhs_post`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+          }
+        });
+      }
+
       const images: Array<{
         id: string;
         original_url: string;
@@ -93,7 +283,6 @@ export async function saveXhsPost(postData: any): Promise<SavedXhsPost> {
         width?: number;
         height?: number;
       }> = [];
-
       const imageList = postData.imageList || postData.images || [];
       for (let i = 0; i < imageList.length; i++) {
         const imageData = imageList[i];
@@ -135,6 +324,78 @@ export async function saveXhsPost(postData: any): Promise<SavedXhsPost> {
         }
       }
 
+      const savedVideo = normalizeVideo(postData.video);
+      if (savedVideo) {
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/rpa_videos`, {
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              id: generateId(),
+              original_url: savedVideo.original_url,
+              oss_url: savedVideo.oss_url || null,
+              source_platform: 'xiaohongshu',
+              source_post_type: 'xhs_post',
+              source_post_id: postId,
+              format: 'mp4',
+              upload_status: savedVideo.oss_url ? 'completed' : 'pending',
+              upload_at: savedVideo.oss_url ? now : null,
+              created_at: now,
+              updated_at: now,
+            }),
+          });
+        } catch (err) {
+          console.warn('保存视频失败:', err);
+        }
+      }
+
+      const comments: XhsStoredComment[] = [];
+      for (let i = 0; i < normalizedComments.length; i++) {
+        const comment = normalizedComments[i];
+        const commentRow = {
+          id: generateId(),
+          post_id: postId,
+          note_id: savedRecord.note_id || '',
+          xhs_comment_id: comment.comment_id || comment.id,
+          nickname: comment.nickname,
+          avatar: comment.avatar || null,
+          content: comment.content,
+          like_count: comment.like_count || 0,
+          sub_comment_count: comment.sub_comment_count || 0,
+          comment_index: comment.comment_index ?? i,
+          created_at: now,
+          updated_at: now,
+        };
+
+        try {
+          await fetch(`${SUPABASE_URL}/rest/v1/rpa_xhs_comments`, {
+            method: 'POST',
+            headers: {
+              'apikey': SUPABASE_KEY,
+              'Authorization': `Bearer ${SUPABASE_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(commentRow),
+          });
+          comments.push({
+            id: commentRow.id,
+            comment_id: commentRow.xhs_comment_id,
+            nickname: comment.nickname,
+            avatar: comment.avatar,
+            content: comment.content,
+            like_count: comment.like_count || 0,
+            sub_comment_count: comment.sub_comment_count || 0,
+            comment_index: comment.comment_index ?? i,
+          });
+        } catch (err) {
+          console.warn('保存评论失败:', err);
+        }
+      }
+
       return {
         id: savedRecord.id,
         note_id: savedRecord.note_id,
@@ -153,7 +414,9 @@ export async function saveXhsPost(postData: any): Promise<SavedXhsPost> {
         publish_time: savedRecord.publish_time,
         saved_at: savedRecord.saved_at,
         parsed_at: savedRecord.parsed_at,
-        images
+        images,
+        video: savedVideo,
+        comments
       };
     } else {
       const error = await response.text();
@@ -187,7 +450,7 @@ export async function getAllXhsPosts(): Promise<SavedXhsPost[]> {
       const posts = await response.json();
       
       // 为每个帖子查询关联的图片
-      const postsWithImages = await Promise.all(posts.map(async (post: any) => {
+      const postsWithImages = await Promise.all((posts as Array<Record<string, unknown>>).map(async (post) => {
         const images = await getImagesByPostId(post.id);
         return {
           id: post.id,
@@ -243,6 +506,8 @@ export async function getXhsPostById(id: string): Promise<SavedXhsPost | null> {
       
       const post = posts[0];
       const images = await getImagesByPostId(post.id);
+      const comments = await getCommentsByPostId(post.id);
+      const video = await getVideoByPostId(post.id);
       
       return {
         id: post.id,
@@ -262,7 +527,9 @@ export async function getXhsPostById(id: string): Promise<SavedXhsPost | null> {
         publish_time: post.publish_time,
         saved_at: post.saved_at,
         parsed_at: post.parsed_at,
-        images
+        images,
+        video,
+        comments
       };
     } else {
       throw new Error(`HTTP ${response.status}`);
@@ -280,6 +547,28 @@ export async function getXhsPostById(id: string): Promise<SavedXhsPost | null> {
  */
 export async function deleteXhsPost(id: string): Promise<void> {
   try {
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/rpa_xhs_comments?post_id=eq.${encodeURIComponent(id)}`,
+      {
+        method: 'DELETE',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+        }
+      }
+    );
+
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/rpa_videos?source_post_id=eq.${encodeURIComponent(id)}&source_post_type=eq.xhs_post`,
+      {
+        method: 'DELETE',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+        }
+      }
+    );
+
     const response = await fetch(
       `${SUPABASE_URL}/rest/v1/rpa_xhs_posts?id=eq.${encodeURIComponent(id)}`,
       {

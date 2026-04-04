@@ -13,14 +13,21 @@ export async function executeClick(
 
   try {
     let locator;
+    const useSelector = params.useSelector || (!params.text && !!params.selector);
 
-    if (params.text) {
-      log.push(`🖱️ 点击按钮文字：${params.text}`);
-      locator = page.getByRole('button', { name: params.text });
+    if (useSelector) {
+      if (!params.selector) {
+        throw new Error('选择器模式下缺少 selector');
+      }
+      log.push(`🖱️ 点击元素：${params.selector}`);
+      locator = page.locator(params.selector);
       locator = params.nth !== undefined ? locator.nth(params.nth) : locator.last();
     } else {
-      log.push(`🖱️ 点击元素：${params.selector}`);
-      locator = page.locator(params.selector!);
+      if (!params.text) {
+        throw new Error('文字模式下缺少 text');
+      }
+      log.push(`🖱️ 点击按钮文字：${params.text}`);
+      locator = page.getByRole('button', { name: params.text });
       locator = params.nth !== undefined ? locator.nth(params.nth) : locator.last();
     }
 

@@ -130,7 +130,7 @@ export async function executeWaitCondition(
 
     // ── 条件3：元素出现/消失 ─────────────────────────────────────────
     if (params.selector && (params.condition === 'appeared' || params.condition === 'disappeared')) {
-      const visible = await page.locator(params.selector).isVisible().catch(() => false);
+      const visible = await page.locator(params.selector).first().isVisible().catch(() => false);
       if (params.condition === 'appeared' && visible) {
         emit(`✅ 元素出现 (${elapsed}s)`);
         const screenshot = await captureScreenshot(page);

@@ -1,5 +1,29 @@
 import type { WorkflowDef } from '../types';
 
+export function createDouyinMaterialNode() {
+  return {
+    type: 'material' as const,
+    label: '素材节点',
+    params: {
+      materialId: '',
+      outputVideoVar: 'videoUrl',
+      outputTitleVar: 'title',
+    },
+  };
+}
+
+export function normalizeDouyinPublishWorkflow(workflow: WorkflowDef): WorkflowDef {
+  if (workflow.id !== 'douyin-publish') return workflow;
+  if (workflow.nodes[0]?.type === 'material') {
+    return { ...workflow, vars: [] };
+  }
+  return {
+    ...workflow,
+    vars: [],
+    nodes: [createDouyinMaterialNode(), ...workflow.nodes],
+  };
+}
+
 /**
  * 抖音视频发布工作流
  *
@@ -24,9 +48,12 @@ export const douyinPublishWorkflow: WorkflowDef = {
   id: 'douyin-publish',
   name: '抖音视频发布',
   description: '上传视频到抖音创作者平台并发布',
-  vars: ['videoUrl', 'title'],
+  vars: [],
 
   nodes: [
+    {
+      ...createDouyinMaterialNode(),
+    },
     // ── Step 1：打开创作者首页 ───────────────────────────────────────────
     {
       type: 'navigate',

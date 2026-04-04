@@ -19,6 +19,7 @@ function DouyinCookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean
   const [input, setInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [showInput, setShowInput] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -26,6 +27,7 @@ function DouyinCookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean
       const d = await res.json();
       setStatus({ set: d.valid, valid: d.valid, updatedAt: d.updatedAt });
       onStatusChange(d.valid);
+      if (d.valid) setShowInput(false);
     } catch {
       setStatus({ set: false, valid: false });
       onStatusChange(false);
@@ -81,61 +83,76 @@ function DouyinCookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean
             </p>
           )}
         </div>
-        <span className={`text-xs px-3 py-1 rounded-full font-medium ${
-          status?.valid
-            ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-            : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
-        }`}>
-          {status === null ? '检查中...' : status.valid ? '✅ 已设置' : '⚠️ 未设置'}
-        </span>
+        <div className="flex items-center gap-3">
+          {status?.valid && (
+            <button 
+              onClick={() => setShowInput(!showInput)} 
+              className="text-xs text-primary hover:underline font-medium"
+            >
+              {showInput ? '取消修改' : '重新设置'}
+            </button>
+          )}
+          <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+            status?.valid
+              ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+              : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
+          }`}>
+            {status === null ? '检查中...' : status.valid ? '✅ 已设置' : '⚠️ 未设置'}
+          </span>
+        </div>
       </div>
 
-      {/* 使用插件引导 */}
-      <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-4">
-        <div className="flex items-start gap-3">
-          <span className="text-2xl flex-shrink-0">🔌</span>
-          <div className="flex-1 space-y-2">
-            <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
-              推荐：使用浏览器插件自动获取 Cookie
+      {(!status?.valid || showInput) && (
+        <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+          {/* 使用插件引导 */}
+          <div className="rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 p-4">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl flex-shrink-0">🔌</span>
+              <div className="flex-1 space-y-2">
+                <p className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                  推荐：使用浏览器插件自动获取 Cookie
+                </p>
+                <p className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
+                  1. 安装浏览器插件 "vyibc-auto-parse"<br />
+                  2. 登录抖音网页版（www.douyin.com）<br />
+                  3. 点击插件图标，选择"一键读取抖音登录信息"<br />
+                  4. 点击"复制"后粘贴到下方输入框，或直接点击插件中的"同步"按钮
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 手动输入 */}
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              或手动获取：在抖音网页版登录后，打开 Chrome 开发者工具 → Application → Cookies → www.douyin.com，
+              复制所有 cookie 内容（至少包含 <code className="bg-muted px-1 rounded text-xs">sessionid</code>）粘贴到下方：
             </p>
-            <p className="text-xs text-blue-700 dark:text-blue-300 leading-relaxed">
-              1. 安装浏览器插件 "vyibc-auto-parse"<br />
-              2. 登录抖音网页版（www.douyin.com）<br />
-              3. 点击插件图标，选择"一键读取抖音登录信息"<br />
-              4. 点击"复制"后粘贴到下方输入框，或直接点击插件中的"同步"按钮
-            </p>
+            <div className="flex gap-2">
+              <input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && save()}
+                placeholder="粘贴 Cookie 字符串（如：sessionid=xxx; uid_tt=xxx; ...）"
+                className="flex-1 px-3 py-2.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
+                autoFocus={showInput}
+              />
+              <button
+                onClick={save}
+                disabled={saving || !input.trim()}
+                className="px-5 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity"
+              >
+                {saving ? '保存中...' : '保存'}
+              </button>
+            </div>
+            {msg && (
+              <p className={`text-xs ${msg.startsWith('✅') ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                {msg}
+              </p>
+            )}
           </div>
         </div>
-      </div>
-
-      {/* 手动输入 */}
-      <div className="space-y-3">
-        <p className="text-xs text-muted-foreground">
-          或手动获取：在抖音网页版登录后，打开 Chrome 开发者工具 → Application → Cookies → www.douyin.com，
-          复制所有 cookie 内容（至少包含 <code className="bg-muted px-1 rounded text-xs">sessionid</code>）粘贴到下方：
-        </p>
-        <div className="flex gap-2">
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && save()}
-            placeholder="粘贴 Cookie 字符串（如：sessionid=xxx; uid_tt=xxx; ...）"
-            className="flex-1 px-3 py-2.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
-          />
-          <button
-            onClick={save}
-            disabled={saving || !input.trim()}
-            className="px-5 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity"
-          >
-            {saving ? '保存中...' : '保存'}
-          </button>
-        </div>
-        {msg && (
-          <p className={`text-xs ${msg.startsWith('✅') ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-            {msg}
-          </p>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -146,6 +163,7 @@ function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: bool
   const [input, setInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
+  const [showInput, setShowInput] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -153,6 +171,7 @@ function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: bool
       const d = await res.json();
       setStatus(d);
       onStatusChange(d.set);
+      if (d.set) setShowInput(false);
     } catch {
       setStatus({ set: false });
       onStatusChange(false);
@@ -200,71 +219,86 @@ function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: bool
     <div className="rounded-xl border border-border bg-card p-5 space-y-4">
       <div className="flex items-center justify-between">
         <span className="text-base font-semibold text-foreground">小红书 Cookie 设置</span>
-        <span className={`text-xs px-3 py-1 rounded-full font-medium ${
-          status?.set
-            ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-            : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
-        }`}>
-          {status === null ? '检查中...' : status.set ? '✅ 已设置' : '⚠️ 未设置'}
-        </span>
+        <div className="flex items-center gap-3">
+          {status?.set && (
+            <button 
+              onClick={() => setShowInput(!showInput)} 
+              className="text-xs text-primary hover:underline font-medium"
+            >
+              {showInput ? '取消修改' : '重新设置'}
+            </button>
+          )}
+          <span className={`text-xs px-3 py-1 rounded-full font-medium ${
+            status?.set
+              ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
+              : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
+          }`}>
+            {status === null ? '检查中...' : status.set ? '✅ 已设置' : '⚠️ 未设置'}
+          </span>
+        </div>
       </div>
 
-      {status?.set && status.preview && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono bg-muted px-2 py-1 rounded flex-1 truncate">{status.preview}</span>
+      {status?.set && status.preview && !showInput && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground p-2 bg-muted/30 rounded-lg border border-dashed border-border">
+          <span className="font-mono flex-1 truncate opacity-70 italic">{status.preview}</span>
           <button onClick={clear} className="text-red-500 hover:text-red-600 shrink-0 font-medium">
             清除
           </button>
         </div>
       )}
 
-      {/* 使用插件引导 */}
-      <div className="rounded-lg bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-800 p-4">
-        <div className="flex items-start gap-3">
-          <span className="text-2xl flex-shrink-0">🔌</span>
-          <div className="flex-1 space-y-2">
-            <p className="text-sm font-medium text-pink-900 dark:text-pink-200">
-              推荐：使用浏览器插件自动获取 Cookie
+      {(!status?.set || showInput) && (
+        <div className="space-y-4 animate-in fade-in slide-in-from-top-1 duration-200">
+          {/* 使用插件引导 */}
+          <div className="rounded-lg bg-pink-50 dark:bg-pink-950/30 border border-pink-200 dark:border-pink-800 p-4">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl flex-shrink-0">🔌</span>
+              <div className="flex-1 space-y-2">
+                <p className="text-sm font-medium text-pink-900 dark:text-pink-200">
+                  推荐：使用浏览器插件自动获取 Cookie
+                </p>
+                <p className="text-xs text-pink-700 dark:text-pink-300 leading-relaxed">
+                  1. 安装浏览器插件 "vyibc-auto-parse"<br />
+                  2. 登录小红书网页版（www.xiaohongshu.com）<br />
+                  3. 点击插件图标，选择"小红书"标签页<br />
+                  4. 点击"一键读取小红书登录信息"<br />
+                  5. 点击"复制"后粘贴到下方输入框，或直接点击插件中的"同步"按钮
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 手动输入 */}
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              或手动获取：在小红书网页版登录后，打开 Chrome 开发者工具 → Application → Cookies → www.xiaohongshu.com，
+              复制 <code className="bg-muted px-1 rounded text-xs">web_session</code> 的值粘贴到下方：
             </p>
-            <p className="text-xs text-pink-700 dark:text-pink-300 leading-relaxed">
-              1. 安装浏览器插件 "vyibc-auto-parse"<br />
-              2. 登录小红书网页版（www.xiaohongshu.com）<br />
-              3. 点击插件图标，选择"小红书"标签页<br />
-              4. 点击"一键读取小红书登录信息"<br />
-              5. 点击"复制"后粘贴到下方输入框，或直接点击插件中的"同步"按钮
-            </p>
+            <div className="flex gap-2">
+              <input
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && save()}
+                placeholder="粘贴 web_session 值或完整 Cookie 字符串"
+                className="flex-1 px-3 py-2.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
+                autoFocus={showInput}
+              />
+              <button
+                onClick={save}
+                disabled={saving || !input.trim()}
+                className="px-5 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity"
+              >
+                {saving ? '保存中...' : '保存'}
+              </button>
+            </div>
+            {msg && (
+              <p className={`text-xs ${msg.startsWith('✅') ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                {msg}
+              </p>
+            )}
           </div>
         </div>
-      </div>
-
-      {/* 手动输入 */}
-      <div className="space-y-3">
-        <p className="text-xs text-muted-foreground">
-          或手动获取：在小红书网页版登录后，打开 Chrome 开发者工具 → Application → Cookies → www.xiaohongshu.com，
-          复制 <code className="bg-muted px-1 rounded text-xs">web_session</code> 的值粘贴到下方：
-        </p>
-        <div className="flex gap-2">
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && save()}
-            placeholder="粘贴 web_session 值或完整 Cookie 字符串"
-            className="flex-1 px-3 py-2.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
-          />
-          <button
-            onClick={save}
-            disabled={saving || !input.trim()}
-            className="px-5 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity"
-          >
-            {saving ? '保存中...' : '保存'}
-          </button>
-        </div>
-        {msg && (
-          <p className={`text-xs ${msg.startsWith('✅') ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-            {msg}
-          </p>
-        )}
-      </div>
+      )}
     </div>
   );
 }

@@ -2,10 +2,6 @@ import type { Page } from 'playwright';
 import type { NodeResult, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
 import { uploadBuffer } from '../../oss';
-import { execSync } from 'child_process';
-import os from 'os';
-import path from 'path';
-import fs from 'fs';
 
 /** 节点参数 */
 export interface ExtractImageClipboardParams {
@@ -22,31 +18,56 @@ export interface ExtractImageClipboardParams {
 }
 
 /**
- * 将剪贴板中的图片数据（PNG 格式）保存到临时文件
- * 使用 macOS 原生 AppleScript 读取系统剪贴板
+ * 在浏览器上下文内通过 Clipboard API 读取图片数据
+ * 支持两种写入方式：
+ *   1. image/png 二进制（标准）
+ *   2. text/html 内嵌 <img src="blob:...">（Gemini 等平台）
  */
-function saveClipboardImage(outputPath: string): void {
-  // 通过 osascript 读取剪贴板的 PNG 原始二进制数据并写入文件
-  const script = [
-    'try',
-    '  set theData to the clipboard as «class PNGf»',
-    `  set outFile to open for access POSIX file "${outputPath}" with write permission`,
-    '  write theData to outFile',
-    '  close access outFile',
-    `  return "${outputPath}"`,
-    'on error errMsg',
-    '  return "error: " & errMsg',
-    'end try',
-  ].join('\n');
+async function readImageFromBrowserClipboard(page: Page): Promise<{ data: number[]; mimeType: string }> {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
 
-  const result = execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
-    encoding: 'utf8',
-    timeout: 15_000,
-  }).trim();
+  const result = await page.evaluate(async (): Promise<{ data: number[]; mimeType: string } | { error: string }> => {
+    try {
+      const items = await navigator.clipboard.read();
+      const allTypes = items.flatMap(i => i.types);
 
-  if (result.startsWith('error:')) {
-    throw new Error(`剪贴板读取失败: ${result}`);
-  }
+      // 方式 1：直接 image/* 二进制
+      for (const item of items) {
+        const imgType = item.types.includes('image/png')
+          ? 'image/png'
+          : item.types.find(t => t.startsWith('image/'));
+        if (!imgType) continue;
+        const blob = await item.getType(imgType);
+        const buf = await blob.arrayBuffer();
+        return { data: Array.from(new Uint8Array(buf)), mimeType: imgType };
+      }
+
+      // 方式 2：text/html 中内嵌 <img src="blob:..."> 或 <img src="data:...">（Gemini 等）
+      for (const item of items) {
+        if (!item.types.includes('text/html')) continue;
+        const htmlBlob = await item.getType('text/html');
+        const html = await htmlBlob.text();
+        const match = html.match(/src="((?:blob|data|https?)[^"]+)"/i);
+        if (!match) continue;
+        const src = match[1];
+        try {
+          const res = await fetch(src);
+          const buf = await res.arrayBuffer();
+          const mimeType = res.headers.get('content-type')?.split(';')[0] || 'image/png';
+          return { data: Array.from(new Uint8Array(buf)), mimeType };
+        } catch {
+          continue;
+        }
+      }
+
+      return { error: `剪贴板中未找到图片数据（支持的类型：${allTypes.join(', ')}）` };
+    } catch (e: unknown) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  if ('error' in result) throw new Error(result.error);
+  return result;
 }
 
 /**
@@ -64,7 +85,6 @@ export async function executeExtractImageClipboard(
   ctx: WorkflowContext
 ): Promise<NodeResult> {
   const log: string[] = [];
-  let tmpFile = '';
 
   try {
     // 解析参数
@@ -90,24 +110,19 @@ export async function executeExtractImageClipboard(
     ctx.emit?.('log', `⏳ 等待剪贴板就绪...`);
     await page.waitForTimeout(waitAfterCopy);
 
-    // ── 步骤 3：通过 osascript 从剪贴板读取 PNG 原始数据 ──────────────
-    tmpFile = path.join(os.tmpdir(), `gemini-clipboard-${Date.now()}.png`);
-    log.push(`💾 正在从剪贴板保存图片到临时文件...`);
-    ctx.emit?.('log', `💾 从剪贴板读取图片数据...`);
+    // ── 步骤 3：通过浏览器 Clipboard API 读取图片数据 ─────────────────
+    log.push(`💾 正在从浏览器剪贴板读取图片数据...`);
+    ctx.emit?.('log', `💾 从浏览器剪贴板读取图片数据...`);
 
-    saveClipboardImage(tmpFile);
-
-    if (!fs.existsSync(tmpFile)) {
-      throw new Error('剪贴板图片保存失败：临时文件不存在');
-    }
-
-    const imageBuffer = fs.readFileSync(tmpFile);
+    const { data: imageDataArray, mimeType } = await readImageFromBrowserClipboard(page);
+    const imageBuffer = Buffer.from(imageDataArray);
     const sizeKB = (imageBuffer.length / 1024).toFixed(2);
+    log.push(`✅ 读取成功（格式: ${mimeType}）`);
     log.push(`✅ 图片提取成功：${sizeKB} KB（原始分辨率）`);
     ctx.emit?.('log', `✅ 图片 ${sizeKB} KB`);
 
     // ── 步骤 4：上传到 OSS ────────────────────────────────────────────
-    let imageUrl: string = tmpFile;
+    let imageUrl = '';
 
     if (uploadToOSS) {
       log.push(`☁️ 正在上传到 OSS：${ossPath}`);
@@ -115,11 +130,13 @@ export async function executeExtractImageClipboard(
 
       imageUrl = await uploadBuffer(imageBuffer, ossPath, 'image/png');
       log.push(`✅ 上传成功：${imageUrl}`);
+      ctx.emit?.('log', `✅ 图片地址：${imageUrl}`);
     }
 
     // 写入上下文变量供后续节点使用
     if (ctx.vars) {
       ctx.vars[outputVar] = imageUrl;
+      ctx.emit?.('log', `🧩 输出变量 ${outputVar} = ${imageUrl}`);
     }
 
     const screenshot = await captureScreenshot(page);
@@ -139,12 +156,5 @@ export async function executeExtractImageClipboard(
     log.push(`❌ 剪贴板图片提取失败: ${error}`);
     const screenshot = await captureScreenshot(page).catch(() => undefined);
     return { success: false, log, error, screenshot };
-  } finally {
-    // 延迟清理临时文件
-    if (tmpFile && fs.existsSync(tmpFile)) {
-      setTimeout(() => {
-        try { fs.unlinkSync(tmpFile); } catch { /* 忽略 */ }
-      }, 60_000);
-    }
   }
 }

@@ -23,12 +23,13 @@ function createClient() {
 export async function uploadVideoFromUrl(videoUrl: string, key: string): Promise<string> {
   const client = createClient();
 
+  const isXhs = videoUrl.includes('xhscdn.com') || videoUrl.includes('xiaohongshu.com');
   const response = await axios.get(videoUrl, {
-    responseType: 'stream',  // 改为流式传输
-    timeout: 600000,  // 10分钟超时
+    responseType: 'stream',
+    timeout: 600000,
     headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible)',
-      Referer: 'https://www.douyin.com/',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      Referer: isXhs ? 'https://www.xiaohongshu.com/' : 'https://www.douyin.com/',
     },
   });
 

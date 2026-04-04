@@ -23,8 +23,12 @@ export async function PUT(req: Request, { params }: Ctx) {
   const { id } = await params;
   try {
     const body = await req.json();
+    const name = typeof body.name === 'string' ? body.name.trim() : undefined;
+    if ('name' in body && !name) {
+      return NextResponse.json({ error: '工作流名称不能为空' }, { status: 400 });
+    }
     const def = await updateWorkflow(id, {
-      name: body.name,
+      name,
       description: body.description,
       nodes: body.nodes,
       vars: body.vars,

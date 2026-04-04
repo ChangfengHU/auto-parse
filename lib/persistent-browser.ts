@@ -25,7 +25,7 @@ const ANTI_BOT_SCRIPT = () => {
   Object.defineProperty(navigator, 'webdriver', { get: () => false });
   
   // 模拟 Chrome 特色属性
-  // @ts-ignore
+  // @ts-expect-error injected for anti-bot compatibility
   window.chrome = {
     runtime: {},
     loadTimes: function() {},
@@ -48,7 +48,7 @@ const ANTI_BOT_SCRIPT = () => {
 
   // 修复权限查询
   const oq = window.navigator.permissions.query.bind(window.navigator.permissions);
-  // @ts-ignore
+  // @ts-expect-error override permission query for anti-bot compatibility
   window.navigator.permissions.query = (p: PermissionDescriptor) =>
     p.name === 'notifications'
       ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
@@ -65,11 +65,8 @@ const ANTI_BOT_SCRIPT = () => {
 
 // 用 global 跨热重载保持实例
 declare global {
-  // eslint-disable-next-line no-var
   var __douyinBrowserCtx: BrowserContext | undefined;
-  // eslint-disable-next-line no-var
   var __browserIdleSim: IdleSimulator | undefined;
-  // eslint-disable-next-line no-var
   var __debugScratchPage: import('playwright').Page | undefined;
 }
 
@@ -230,6 +227,15 @@ export async function getDebugScratchPage(): Promise<import('playwright').Page> 
   page.on('close', () => { global.__debugScratchPage = undefined; });
   global.__debugScratchPage = page;
   return page;
+}
+
+export function setDebugScratchPage(page: import('playwright').Page): void {
+  global.__debugScratchPage = page;
+  page.on('close', () => {
+    if (global.__debugScratchPage === page) {
+      global.__debugScratchPage = undefined;
+    }
+  });
 }
 
 export async function resetDebugScratchPage(): Promise<void> {

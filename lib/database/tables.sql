@@ -129,6 +129,22 @@ CREATE TABLE IF NOT EXISTS rpa_post_images (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 7. 小红书评论表
+CREATE TABLE IF NOT EXISTS rpa_xhs_comments (
+  id VARCHAR(50) PRIMARY KEY,
+  post_id VARCHAR(50) NOT NULL,
+  note_id VARCHAR(50),
+  xhs_comment_id VARCHAR(50),
+  nickname VARCHAR(100),
+  avatar VARCHAR(500),
+  content TEXT,
+  like_count INTEGER DEFAULT 0,
+  sub_comment_count INTEGER DEFAULT 0,
+  comment_index INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- 创建索引
 -- 小红书作品表索引
 CREATE INDEX IF NOT EXISTS idx_xhs_posts_author_id ON rpa_xhs_posts(author_id);
@@ -156,3 +172,7 @@ CREATE INDEX IF NOT EXISTS idx_videos_oss_url ON rpa_videos(oss_url);
 -- 图片关联表索引
 CREATE INDEX IF NOT EXISTS idx_post_images_post ON rpa_post_images(post_type, post_id);
 CREATE INDEX IF NOT EXISTS idx_post_images_image ON rpa_post_images(image_id);
+
+-- 小红书评论表索引
+CREATE INDEX IF NOT EXISTS idx_xhs_comments_post_id ON rpa_xhs_comments(post_id);
+CREATE INDEX IF NOT EXISTS idx_xhs_comments_note_id ON rpa_xhs_comments(note_id);

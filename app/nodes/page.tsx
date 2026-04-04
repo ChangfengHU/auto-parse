@@ -15,6 +15,7 @@ const TYPE_STYLE: Record<ParamMeta['type'], string> = {
   number:   'bg-green-500/15 text-green-400 border-green-400/30',
   boolean:  'bg-yellow-500/15 text-yellow-400 border-yellow-400/30',
   array:    'bg-cyan-500/15 text-cyan-400 border-cyan-400/30',
+  select:   'bg-indigo-500/15 text-indigo-400 border-indigo-400/30',
 };
 
 // ── 单参数行 ──────────────────────────────────────────────────────────────────
@@ -171,6 +172,7 @@ function NodeDebugPanel({ item }: { item: NodeCatalogItem }) {
                 const meta = item.paramMeta[k];
                 const isSelector = meta?.type === 'selector' || k.toLowerCase().includes('selector');
                 const isTemplate = meta?.type === 'template';
+                const isSelect = meta?.type === 'select' && Array.isArray(meta.options) && meta.options.length > 0;
                 return (
                   <div key={k} className="space-y-0.5">
                     <div className="flex items-center gap-1.5">
@@ -180,17 +182,32 @@ function NodeDebugPanel({ item }: { item: NodeCatalogItem }) {
                       <span className="text-[9px] text-muted-foreground font-mono">({k})</span>
                       {meta?.required && <span className="text-[9px] text-red-400">*</span>}
                     </div>
-                    <input
-                      value={displayVal(v)}
-                      onChange={e => setVal(k, e.target.value)}
-                      disabled={running}
-                      placeholder={meta?.example ?? ''}
-                      className={`w-full bg-muted/30 border rounded-xl px-3 py-1.5 text-[11px] font-mono outline-none focus:border-primary disabled:opacity-50 transition-colors ${
-                        isSelector ? 'border-orange-400/30 focus:border-orange-400' :
-                        isTemplate ? 'border-purple-400/30 focus:border-purple-400' :
-                        'border-border/60'
-                      }`}
-                    />
+                    {isSelect ? (
+                      <select
+                        value={displayVal(v)}
+                        onChange={e => setVal(k, e.target.value)}
+                        disabled={running}
+                        className="w-full bg-muted/30 border border-border/60 rounded-xl px-3 py-1.5 text-[11px] outline-none focus:border-primary disabled:opacity-50 transition-colors"
+                      >
+                        {meta.options?.map(option => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        value={displayVal(v)}
+                        onChange={e => setVal(k, e.target.value)}
+                        disabled={running}
+                        placeholder={meta?.example ?? ''}
+                        className={`w-full bg-muted/30 border rounded-xl px-3 py-1.5 text-[11px] font-mono outline-none focus:border-primary disabled:opacity-50 transition-colors ${
+                          isSelector ? 'border-orange-400/30 focus:border-orange-400' :
+                          isTemplate ? 'border-purple-400/30 focus:border-purple-400' :
+                          'border-border/60'
+                        }`}
+                      />
+                    )}
                   </div>
                 );
               })}
