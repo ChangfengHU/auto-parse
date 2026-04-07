@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { DEFAULT_HUMAN_OPTIONS } from '@/lib/workflow/human-options';
 import { getPersistentContext } from '@/lib/persistent-browser';
 import { executeNode } from '@/lib/workflow/engine';
-import { createSession, getSession, updateSession } from '@/lib/workflow/session-store';
+import { createSession, deleteSession, getSession, updateSession } from '@/lib/workflow/session-store';
 import type {
   NavigateParams,
   StepHistory,
@@ -42,6 +42,7 @@ export interface GeminiWebImageTask {
   startedAt?: string;
   endedAt?: string;
   cancelRequested: boolean;
+  autoCloseTab: boolean;
   checkpoints: TaskCheckpoint[];
   result?: TaskResult;
 }
@@ -116,11 +117,12 @@ async function runTask(taskId: string) {
   if (!task) return;
   const session = getSession(task.sessionId);
   if (!session) {
-    updateTask(taskId, {
+    const final = updateTask(taskId, {
       status: 'failed',
       error: 'Session not found',
       endedAt: new Date().toISOString(),
     });
+    if (final?.autoCloseTab) deleteSession(task.sessionId);
     return;
   }
 
@@ -147,6 +149,10 @@ async function runTask(taskId: string) {
         message: '任务已取消',
         timestamp: new Date().toISOString(),
       });
+      if (freshTask.autoCloseTab && session._page) {
+        await session._page.close().catch(() => {});
+        deleteSession(session.id);
+      }
       return;
     }
 
@@ -220,21 +226,27 @@ async function runTask(taskId: string) {
         error: result.error ?? '节点执行失败',
         endedAt: new Date().toISOString(),
       });
+      const failedTask = taskStore().get(taskId);
+      if (failedTask?.autoCloseTab && session._page) {
+        await session._page.close().catch(() => {});
+        deleteSession(session.id);
+      }
       return;
     }
   }
 
   const finalSession = getSession(task.sessionId);
   if (!finalSession) {
-    updateTask(taskId, {
+    const final = updateTask(taskId, {
       status: 'failed',
       error: 'Session lost after execution',
       endedAt: new Date().toISOString(),
     });
+    if (final?.autoCloseTab) deleteSession(task.sessionId);
     return;
   }
   const imageUrls = collectImageUrls(finalSession);
-  updateTask(taskId, {
+  const doneTask = updateTask(taskId, {
     status: 'success',
     endedAt: new Date().toISOString(),
     result: {
@@ -245,12 +257,17 @@ async function runTask(taskId: string) {
       sessionId: finalSession.id,
     },
   });
+  if (doneTask?.autoCloseTab && finalSession._page) {
+    await finalSession._page.close().catch(() => {});
+    deleteSession(finalSession.id);
+  }
 }
 
 export async function createGeminiWebImageTask(input: {
   workflow: WorkflowDef;
   vars: Record<string, string>;
   prompt: string;
+  autoCloseTab?: boolean;
 }): Promise<GeminiWebImageTask> {
   const session = createSession({
     workflowId: input.workflow.id,
@@ -276,6 +293,7 @@ export async function createGeminiWebImageTask(input: {
     status: 'queued',
     createdAt: new Date().toISOString(),
     cancelRequested: false,
+    autoCloseTab: input.autoCloseTab !== false,
     checkpoints: [],
   };
   taskStore().set(task.id, task);

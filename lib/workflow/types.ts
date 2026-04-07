@@ -57,6 +57,7 @@ export interface NavigateParams {
   adsApiKey?: string               // AdsPower API 密钥（Local API Key）
   adsApiUrl?: string               // AdsPower 本地接口地址，默认 http://127.0.0.1:50325
   adsManualCdpUrl?: string         // 终极方案：手动填入已打开浏览器的 CDP 地址 (ws://...)
+  adsProxyServer?: string          // 选填：强制透传 --proxy-server（例：http://host:port）
 }
 
 export interface MaterialParams {

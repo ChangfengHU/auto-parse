@@ -284,6 +284,7 @@ print(data['ossUrl'])   # OSS 永久地址
   "prompt": "赛博朋克夜景，霓虹雨夜，电影感",
   "workflowId": "79d9e71f-1afe-4040-a93d-f360fc55978a",
   "promptVarName": "prompt",
+  "keepTabOpen": false,
   "vars": {
     "style": "cinematic"
   }
@@ -295,6 +296,7 @@ print(data['ossUrl'])   # OSS 永久地址
 | `prompt` | string | ✅ | 生图提示词 |
 | `workflowId` | string | ❌ | 指定工作流 ID；不传则使用服务端默认 Gemini 生图流程 |
 | `promptVarName` | string | ❌ | 将 prompt 注入到哪个工作流变量，默认自动推断 |
+| `keepTabOpen` | boolean | ❌ | 默认 `false`，任务完成后自动关闭本次新建 tab。设为 `true` 可保留 |
 | `vars` | object | ❌ | 额外变量，会与 `prompt` 合并后传给 workflow |
 
 **成功 200**

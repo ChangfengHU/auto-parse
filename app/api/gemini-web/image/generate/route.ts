@@ -35,6 +35,8 @@ export async function POST(req: NextRequest) {
       workflowId?: string;
       vars?: Record<string, string>;
       promptVarName?: string;
+      keepTabOpen?: boolean;
+      autoCloseTab?: boolean;
     };
 
     if (!prompt?.trim()) {
@@ -62,6 +64,7 @@ export async function POST(req: NextRequest) {
       workflow,
       vars: mergedVars,
       prompt: prompt.trim(),
+      autoCloseTab: body.autoCloseTab ?? !body.keepTabOpen,
     });
 
     return NextResponse.json({
@@ -76,4 +79,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

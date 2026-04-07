@@ -3,19 +3,22 @@ set -euo pipefail
 
 PROMPT="${1:-}"
 WORKFLOW_ID="${2:-}"
+KEEP_TAB_OPEN="${3:-false}"
 BASE_URL="${VYIBC_BASE_URL:-https://parse.vyibc.com}"
 GENERATE_API="${BASE_URL}/api/gemini-web/image/generate"
 
 if [[ -z "$PROMPT" ]]; then
-  echo "[ERROR] 用法: bash scripts/generate.sh \"<prompt>\" \"<workflowId可选>\""
+  echo "[ERROR] 用法: bash scripts/generate.sh \"<prompt>\" \"<workflowId可选>\" \"<keepTabOpen:true|false可选>\""
   exit 1
 fi
 
-BODY=$(python3 - "$PROMPT" "$WORKFLOW_ID" <<'PYEOF'
+BODY=$(python3 - "$PROMPT" "$WORKFLOW_ID" "$KEEP_TAB_OPEN" <<'PYEOF'
 import json, sys
 payload = {"prompt": sys.argv[1]}
 if sys.argv[2]:
     payload["workflowId"] = sys.argv[2]
+keep = (sys.argv[3] or "false").strip().lower()
+payload["keepTabOpen"] = keep in ("1", "true", "yes", "y", "on")
 print(json.dumps(payload, ensure_ascii=False))
 PYEOF
 )
@@ -104,4 +107,3 @@ PYEOF
   fi
   sleep 5
 done
-

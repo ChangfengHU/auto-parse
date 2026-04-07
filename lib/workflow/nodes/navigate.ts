@@ -28,6 +28,55 @@ export async function executeNavigate(
       'http://local.adspower.net:50325',
       'http://127.0.0.1:50325',
     ].filter(Boolean) as string[]));
+    const explicitProxyServer = params.adsProxyServer?.trim() || process.env.ADS_FORCE_PROXY_SERVER?.trim() || '';
+    const defaultLaunchArgs = ['--no-sandbox', '--disable-dev-shm-usage'];
+    let effectiveProxyServer = explicitProxyServer;
+
+    if (params.useAdsPower && !effectiveProxyServer) {
+      const profileId = (params.adsProfileId || '').trim();
+      if (profileId) {
+        for (const apiUrl of apiUrls) {
+          try {
+            const urlObj = new URL(`${apiUrl}/api/v1/user/list`);
+            urlObj.searchParams.set('user_id', profileId);
+            if (apiKey) {
+              urlObj.searchParams.set('apikey', apiKey);
+              urlObj.searchParams.set('api_key', apiKey);
+            }
+            const headers: Record<string, string> = apiKey
+              ? { Authorization: `Bearer ${apiKey}`, 'api-key': apiKey }
+              : {};
+            const res = await fetch(urlObj.toString(), {
+              method: 'GET',
+              headers,
+              signal: AbortSignal.timeout(5000),
+            });
+            if (!res.ok) continue;
+            const data = await res.json() as {
+              code?: number;
+              data?: { list?: Array<{ user_proxy_config?: Record<string, unknown> }> };
+            };
+            if (data.code !== 0) continue;
+            const cfg = data.data?.list?.[0]?.user_proxy_config;
+            const host = typeof cfg?.proxy_host === 'string' ? cfg.proxy_host.trim() : '';
+            const port = typeof cfg?.proxy_port === 'string' ? cfg.proxy_port.trim() : '';
+            const proxyType = typeof cfg?.proxy_type === 'string' ? cfg.proxy_type.trim().toLowerCase() : '';
+            if (host && port) {
+              const scheme = proxyType === 'socks5' ? 'socks5' : 'http';
+              effectiveProxyServer = `${scheme}://${host}:${port}`;
+              emit(`🧭 已从分身配置推导代理: ${effectiveProxyServer}`);
+              break;
+            }
+          } catch {
+            // ignore inference failure and continue with next API URL
+          }
+        }
+      }
+    }
+
+    const startLaunchArgs = effectiveProxyServer
+      ? [...defaultLaunchArgs, `--proxy-server=${effectiveProxyServer}`]
+      : defaultLaunchArgs;
     
     // 0. 特性：手动 CDP 直连方案（最高优先级，用于绕过 API 鉴权报错）
     if (params.useAdsPower && params.adsManualCdpUrl) {
@@ -56,11 +105,28 @@ export async function executeNavigate(
       if (!profileId) throw new Error('未提供 AdsPower 分身编号 (adsProfileId)');
 
       let connected = false;
+      const endpointOrder = effectiveProxyServer
+        ? ['/api/v1/browser/start', '/api/v1/browser/active']
+        : ['/api/v1/browser/active', '/api/v1/browser/start'];
       for (const apiUrl of apiUrls) {
         emit(`🔍 正在探测 AdsPower API 地址: ${apiUrl}`);
-        for (const endpoint of ['/api/v1/browser/active', '/api/v1/browser/start']) {
+        for (const endpoint of endpointOrder) {
           const urlObj = new URL(`${apiUrl}${endpoint}`);
           urlObj.searchParams.set('user_id', profileId);
+          if (endpoint === '/api/v1/browser/start') {
+            if (effectiveProxyServer) {
+              try {
+                const stopUrl = new URL(`${apiUrl}/api/v1/browser/stop`);
+                stopUrl.searchParams.set('user_id', profileId);
+                await fetch(stopUrl.toString(), { method: 'GET', signal: AbortSignal.timeout(5000) });
+                emit(`🔁 已尝试重启分身以应用代理参数`);
+              } catch {
+                emit(`⚠️ 重启分身失败，继续尝试直接启动`);
+              }
+            }
+            urlObj.searchParams.set('launch_args', JSON.stringify(startLaunchArgs));
+            emit(`⚙️ 启动参数: ${startLaunchArgs.join(' ')}`);
+          }
           if (apiKey) {
             urlObj.searchParams.set('apikey', apiKey);
             urlObj.searchParams.set('api_key', apiKey);

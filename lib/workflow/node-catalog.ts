@@ -100,7 +100,8 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       adsProfileId: 'k1aomp3q', 
       adsApiKey: '74f06f7e8e8e83ccafd060d7942cb9530087279d8cf923d4', 
       adsApiUrl: 'http://local.adspower.net:50325',
-      adsManualCdpUrl: ''
+      adsManualCdpUrl: '',
+      adsProxyServer: ''
     },
     paramMeta: {
       url: { ...URL_META, required: true },
@@ -135,6 +136,12 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         label: '手动 CDP 地址 (直连方案/终极退路)', 
         desc: '💡 终极方案：如果 API 直连一直报 Require api-key，请手动填入已打开浏览器的 CDP 调试链接（形如 ws://127.0.0.1:xxxx/devtools/browser/...）。',
         type: 'string'
+      },
+      adsProxyServer: {
+        label: '强制代理地址 (可选)',
+        desc: '用于 AdsPower 启动时透传 --proxy-server，示例：http://direct.miyaip.online:8001。留空则仅使用分身自身代理配置。',
+        type: 'string',
+        example: 'http://direct.miyaip.online:8001',
       },
       timeout: TIMEOUT_META,
     },
