@@ -79,6 +79,25 @@ bash <(curl -fsSL https://skills.vyibc.com/install-vyibc-publish-status.sh)
 
 ---
 
+### vyibc-gemini-web-image · Gemini 网页生图
+
+通过已登录的 Gemini 网页会话执行自动化流程生成图片，返回可追踪任务 ID 与图片 URL。
+
+**安装：**
+
+```bash
+bash <(curl -fsSL https://skills.vyibc.com/install-vyibc-gemini-web-image.sh)
+```
+
+**触发：** 说“用 Gemini 生成图片”“页面自动化生图”“按这个提示词出图”
+
+**示例：**
+```
+帮我用 Gemini 生成图片：赛博朋克夜景，霓虹雨夜，电影感
+```
+
+---
+
 ## API 文档
 
 详见 [API.md](./API.md)
