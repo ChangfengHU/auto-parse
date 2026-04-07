@@ -13,6 +13,9 @@
 | `POST /api/parse` (小红书链接)         | 小红书视频解析 + OSS上传 | ~5s  |
 | `POST /api/parse` (TikTok链接)        | TikTok无水印解析 + OSS上传 | ~15s |
 | `POST /api/publish` (SSE)             | 一键发布视频到抖音账号 | ~2-3min |
+| `POST /api/gemini-web/image/generate` | 创建 Gemini 网页生图任务 | <1s |
+| `GET /api/gemini-web/image/tasks/:id` | 查询 Gemini 生图任务状态 | <1s |
+| `POST /api/gemini-web/image/tasks/:id/cancel` | 取消 Gemini 生图任务 | <1s |
 
 ---
 
@@ -263,3 +266,97 @@ print(data['ossUrl'])   # OSS 永久地址
 2. **OSS 地址**为永久公开地址，推荐优先使用
 3. **小红书**固定无水印，无需 Cookie
 4. 接口无鉴权，建议部署时自行加上 IP 白名单或 Token
+
+---
+
+## Gemini 网页生图 API（Workflow 驱动）
+
+使用已登录的持久化浏览器会话执行 `gemini流程管理`（或你指定的 workflowId）生成图片。接口为异步任务模型，适合 Agent 调用。
+
+### 1) POST /api/gemini-web/image/generate
+
+创建生图任务并立即返回 taskId。
+
+**Body**
+
+```json
+{
+  "prompt": "赛博朋克夜景，霓虹雨夜，电影感",
+  "workflowId": "79d9e71f-1afe-4040-a93d-f360fc55978a",
+  "promptVarName": "prompt",
+  "vars": {
+    "style": "cinematic"
+  }
+}
+```
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `prompt` | string | ✅ | 生图提示词 |
+| `workflowId` | string | ❌ | 指定工作流 ID；不传则使用服务端默认 Gemini 生图流程 |
+| `promptVarName` | string | ❌ | 将 prompt 注入到哪个工作流变量，默认自动推断 |
+| `vars` | object | ❌ | 额外变量，会与 `prompt` 合并后传给 workflow |
+
+**成功 200**
+
+```json
+{
+  "taskId": "5ad8f4ec-7ab7-4fa0-8fd9-5ecfcc51f90b",
+  "status": "queued",
+  "workflow": {
+    "id": "79d9e71f-1afe-4040-a93d-f360fc55978a",
+    "name": "gemini流程管理"
+  },
+  "sessionId": "0c5b4ab5-ea91-4c7e-a4ef-7f3f69c4fd2e",
+  "message": "任务已创建，使用 /api/gemini-web/image/tasks/:id 查询进度"
+}
+```
+
+### 2) GET /api/gemini-web/image/tasks/:id
+
+查询任务详情、步骤 checkpoint、最终图片地址。
+
+**成功 200（示例）**
+
+```json
+{
+  "id": "5ad8f4ec-7ab7-4fa0-8fd9-5ecfcc51f90b",
+  "status": "success",
+  "checkpoints": [
+    {
+      "stepIndex": 0,
+      "name": "打开 Gemini",
+      "status": "ok",
+      "message": "步骤完成",
+      "timestamp": "2026-04-07T09:30:11.000Z"
+    }
+  ],
+  "result": {
+    "imageUrls": [
+      "https://articel.oss-cn-hangzhou.aliyuncs.com/gemini/2026xxx.png"
+    ],
+    "primaryImageUrl": "https://articel.oss-cn-hangzhou.aliyuncs.com/gemini/2026xxx.png",
+    "outputs": {},
+    "vars": {
+      "prompt": "赛博朋克夜景，霓虹雨夜，电影感"
+    },
+    "sessionId": "0c5b4ab5-ea91-4c7e-a4ef-7f3f69c4fd2e"
+  }
+}
+```
+
+`status` 枚举：`queued` / `running` / `success` / `failed` / `cancelled`
+
+### 3) POST /api/gemini-web/image/tasks/:id/cancel
+
+请求取消任务（任务可能在当前步骤结束后停止）。
+
+**成功 200**
+
+```json
+{
+  "taskId": "5ad8f4ec-7ab7-4fa0-8fd9-5ecfcc51f90b",
+  "status": "running",
+  "cancelRequested": true
+}
+```
