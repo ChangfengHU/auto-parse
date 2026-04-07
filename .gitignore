@@ -46,7 +46,18 @@ next-env.d.ts
 
 # xhs cookie (local storage for persistence)
 .xhs-cookie
+.xhs-cookie.bak
 
 # content library (local json storage)
 .content-library.json
 .secrets/
+
+# Python & venv
+.venv/
+python/.venv/
+__pycache__/
+*.pyc
+
+# Runtime & Temp
+.runtime/
+temp/
