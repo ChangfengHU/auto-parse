@@ -44,10 +44,13 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const session = getSession(id);
   if (!session) return NextResponse.json({ error: 'session not found' }, { status: 404 });
 
-  if (session._page && process.env.KEEP_BROWSER_OPEN !== 'true') {
+  const reqUrl = new URL(_req.url);
+  const keepPage = reqUrl.searchParams.get('keepPage') === '1' || process.env.KEEP_BROWSER_OPEN === 'true';
+
+  if (session._page && !keepPage) {
     await session._page.close().catch(() => {});
   }
   deleteSession(id);
 
-  return NextResponse.json({ ok: true, message: `Session ${id} 已关闭` });
+  return NextResponse.json({ ok: true, keepPage, message: `Session ${id} 已关闭` });
 }

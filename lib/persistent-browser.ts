@@ -127,6 +127,10 @@ export async function getPersistentContext(): Promise<BrowserContext> {
     const ctx = await chromium.launchPersistentContext(BROWSER_DATA_DIR, {
       channel,
       headless: IS_HEADLESS,
+      env: {
+        ...process.env,
+        DISPLAY: process.env.DISPLAY || ':99',
+      },
       userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
       locale: 'zh-CN',
       viewport: { width: 1280, height: 800 },
@@ -140,6 +144,9 @@ export async function getPersistentContext(): Promise<BrowserContext> {
         '--ignore-certificate-errors',
         '--deny-permission-prompts',
         '--disable-notifications',
+        // 启用远程调试端口
+        '--remote-debugging-port=1009',
+        '--remote-debugging-address=0.0.0.0',
       ],
     });
 

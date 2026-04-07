@@ -50,6 +50,7 @@ const STATUS_STYLE: Record<StepStatus, string> = {
 const STATUS_LABEL: Record<StepStatus, string> = {
   pending:'待执行', running:'执行中', success:'✓ 成功', warn:'⚠ 警告', error:'✗ 失败', skip:'跳过',
 };
+const DEBUG_VNC_URL = process.env.NEXT_PUBLIC_DEBUG_VNC_URL?.trim() ?? '';
 function ts() { return new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
 
 // ── 参数说明 Tooltip ──────────────────────────────────────────────────────────
@@ -1678,6 +1679,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   const [lastExecutedStep, setLastExecutedStep] = useState<number | null>(null); // 接力追踪
   const [stepStatus, setStepStatus] = useState<StepStatus[]>(initialWorkflow.nodes.map(() => 'pending'));
   const [humanOptions, setHumanOptions] = useState<HumanOptions>({ ...DEFAULT_HUMAN_OPTIONS });
+  const [keepBrowserPage, setKeepBrowserPage] = useState(true);
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [screenshot, setScreenshot] = useState<string | null>(null);
@@ -1699,6 +1701,17 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   useEffect(() => {
     fetch('/api/materials').then(r => r.json()).then(d => { if (Array.isArray(d)) setMaterials(d); }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = window.localStorage.getItem('workflow.keepBrowserPage');
+    if (saved === '0') setKeepBrowserPage(false);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('workflow.keepBrowserPage', keepBrowserPage ? '1' : '0');
+  }, [keepBrowserPage]);
 
   const appendLog = useCallback((text: string) => {
     setLogs(prev => [...prev, { ts: ts(), text }]);
@@ -1895,7 +1908,8 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
 
   async function closeSession() {
     if (!sessionId) return;
-    await fetch(`/api/workflow/session/${sessionId}`, { method: 'DELETE' }).catch(() => {});
+    const qs = keepBrowserPage ? '?keepPage=1' : '';
+    await fetch(`/api/workflow/session/${sessionId}${qs}`, { method: 'DELETE' }).catch(() => {});
     setSessionId(null);
     setRunning(false);
     setLastExecutedStep(null);
@@ -2035,8 +2049,8 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
           )}
         </div>
 
-        {/* 底部操作 */}
-        <div className="border-t border-border p-2 space-y-2">
+          {/* 底部操作 */}
+          <div className="border-t border-border p-2 space-y-2">
           {/* 人工模拟（折叠） */}
           <div>
             <button onClick={() => setShowHumanOptions(p => !p)}
@@ -2064,9 +2078,30 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
             )}
           </div>
 
+          <label className="flex items-center justify-between rounded px-1 py-1 text-[10px] text-muted-foreground hover:bg-muted/40">
+            <span>🧷 关闭会话时保留浏览器页面（推荐）</span>
+            <input
+              type="checkbox"
+              checked={keepBrowserPage}
+              onChange={e => setKeepBrowserPage(e.target.checked)}
+              className="accent-primary"
+            />
+          </label>
+
           {/* Session 按钮 */}
           {!sessionId ? (
             <div className="space-y-1.5">
+              {DEBUG_VNC_URL && (
+                <a
+                  href={DEBUG_VNC_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block w-full py-1.5 text-center text-xs bg-blue-500 text-white rounded-lg hover:bg-blue-400"
+                  title="打开实时远程浏览器（noVNC）"
+                >
+                  🖥 打开实时浏览器
+                </a>
+              )}
               <button
                 onClick={() => void createSession(true)}
                 disabled={running}
@@ -2086,6 +2121,17 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
             <div className="flex gap-1.5">
               <div className="flex-1 flex flex-col gap-1">
                 <p className="text-[9px] text-muted-foreground text-center">点击左侧节点查看参数并执行</p>
+                {DEBUG_VNC_URL && (
+                  <a
+                    href={DEBUG_VNC_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full py-1.5 text-xs text-center bg-blue-500 text-white rounded-lg hover:bg-blue-400"
+                    title="打开实时远程浏览器（noVNC）"
+                  >
+                    🖥 打开实时浏览器
+                  </a>
+                )}
                 <button onClick={() => void closeSession()}
                   className="w-full py-1.5 text-xs bg-muted text-foreground rounded-lg hover:bg-muted/70">
                   🗑 关闭会话

@@ -8,6 +8,13 @@ npm run dev
 
 服务地址：`http://localhost:1007`
 
+可选：配置实时远程浏览器入口（用于 Debug 页面一键打开 noVNC）
+
+```bash
+# .env.local
+NEXT_PUBLIC_DEBUG_VNC_URL=https://parseweb.vyibc.com/vnc_lite.html?path=websockify&autoconnect=1&reconnect=1
+```
+
 ## 核心页面
 
 - 发布页：`http://localhost:1007/publish`
@@ -20,6 +27,7 @@ npm run dev
 3. 进入 `/workflows` 后：
    - 可点击任意步骤执行
    - 或点击 `执行下一步` 按顺序推进
+   - 可点击 `🖥 打开实时浏览器` 直接进入 noVNC 手动操作页面
    - 在右侧查看实时日志
 
 ## 调试 API
@@ -50,4 +58,3 @@ curl -s -X POST http://localhost:1007/api/workflow/browser \
 
 - 自动发布（原流程）仍在 `/publish`，不受影响
 - Debug 发布用于手动推进步骤，便于稳定性排障
-
