@@ -1,7 +1,12 @@
 const SERVER = 'https://parse.vyibc.com';
 
 // ── 全局状态 ───────────────────────────────────────────────
-let currentPlatform = 'douyin'; // 'douyin' | 'xhs'
+let currentPlatform = 'douyin'; // 'douyin' | 'xhs' | 'gemini'
+const CLIENT_ID_KEYS = {
+  douyin: 'douyinClientId',
+  xhs: 'xhsClientId',
+  gemini: 'geminiClientId',
+};
 
 // uid_tt 是登录后才会出现的用户 ID cookie，用于判断是否真实登录
 const DOUYIN_COOKIE_KEYS = [
@@ -14,6 +19,29 @@ const DOUYIN_COOKIE_KEYS = [
 const XHS_COOKIE_KEYS = [
   'a1', 'web_session', 'gid', 'id_token', 'xsecappid', 'webId', 'websectiga', 'webBuild'
 ];
+
+const GEMINI_COOKIE_KEYS = [
+  'SID', 'HSID', 'SSID', 'APISID', 'SAPISID',
+  '__Secure-1PSID', '__Secure-3PSID',
+];
+
+function getPlatformName(platform) {
+  if (platform === 'xhs') return '小红书';
+  if (platform === 'gemini') return 'Gemini';
+  return '抖音';
+}
+
+function getCookieApiUrl(platform) {
+  if (platform === 'xhs') return `${SERVER}/api/analysis/xhs/cookie`;
+  if (platform === 'gemini') return `${SERVER}/api/analysis/gemini/cookie`;
+  return `${SERVER}/api/cookie`;
+}
+
+async function getCurrentClientId(platform) {
+  const key = CLIENT_ID_KEYS[platform] || CLIENT_ID_KEYS.douyin;
+  const result = await chrome.storage.local.get([key, 'clientId']);
+  return result[key] || (platform === 'douyin' ? result.clientId : null);
+}
 
 // ── Toast ──────────────────────────────────────────────
 function showToast(msg, duration = 2500) {
@@ -102,6 +130,22 @@ async function getXhsCookies() {
   return allResults;
 }
 
+// ── 从浏览器读取 Gemini / Google cookies ───────────────────
+async function getGeminiCookies() {
+  const results = {};
+  await Promise.all(
+    GEMINI_COOKIE_KEYS.map(name =>
+      new Promise(resolve => {
+        chrome.cookies.get({ url: 'https://gemini.google.com', name }, cookie => {
+          if (cookie) results[name] = cookie.value;
+          resolve();
+        });
+      })
+    )
+  );
+  return results;
+}
+
 // cookie 对象 → 字符串
 function cookiesToString(cookieObj) {
   return Object.entries(cookieObj)
@@ -137,11 +181,18 @@ async function readCookiesToBox() {
         showToast('未读取到抖音 Cookie，请先登录抖音网页版');
         return;
       }
-    } else {
+    } else if (currentPlatform === 'xhs') {
       cookies = await getXhsCookies();
       str = cookiesToString(cookies);
       if (!str || str.length === 0) {
         showToast('未读取到小红书 Cookie，请先登录小红书网页版');
+        return;
+      }
+    } else {
+      cookies = await getGeminiCookies();
+      str = cookiesToString(cookies);
+      if (!str || str.length === 0) {
+        showToast('未读取到 Gemini 登录信息，请先登录 Gemini 网页版');
         return;
       }
     }
@@ -154,7 +205,7 @@ async function readCookiesToBox() {
   } finally {
     btn.disabled = false;
     icon.textContent = '📋';
-    const platformName = currentPlatform === 'douyin' ? '抖音' : '小红书';
+    const platformName = getPlatformName(currentPlatform);
     text.textContent = `一键读取${platformName}登录信息`;
   }
 }
@@ -170,12 +221,15 @@ async function debugShowCookies() {
     if (currentPlatform === 'douyin') {
       cookies = await getDouyinCookies();
       cookieStr = cookiesToString(cookies);
-    } else {
+    } else if (currentPlatform === 'xhs') {
       cookies = await getXhsCookies();
+      cookieStr = cookiesToString(cookies);
+    } else {
+      cookies = await getGeminiCookies();
       cookieStr = cookiesToString(cookies);
     }
 
-    const platformName = currentPlatform === 'douyin' ? '抖音' : '小红书';
+    const platformName = getPlatformName(currentPlatform);
     
     // 显示详细信息
     console.log(`=== ${platformName} Cookie 调试信息 ===`);
@@ -235,6 +289,19 @@ async function checkLoginStatus() {
     const cookies = await getXhsCookies();
     const cookieStr = cookiesToString(cookies);
     const hasSession = !!(cookieStr && cookieStr.length > 0);
+    if (hasSession) {
+      el.className = 'badge badge-green';
+      el.innerHTML = '<span class="dot dot-green"></span> 已登录';
+    } else {
+      el.className = 'badge badge-red';
+      el.innerHTML = '<span class="dot dot-red"></span> 未登录';
+    }
+    return hasSession;
+  }
+
+  if (currentPlatform === 'gemini') {
+    const cookies = await getGeminiCookies();
+    const hasSession = !!(cookies.SID || cookies['__Secure-1PSID'] || cookies['__Secure-3PSID']);
     if (hasSession) {
       el.className = 'badge badge-green';
       el.innerHTML = '<span class="dot dot-green"></span> 已登录';
@@ -320,18 +387,20 @@ async function initKeepAliveToggle() {
 
 // ── 显示 clientId ──────────────────────────────────────
 async function loadClientId() {
-  const { clientId } = await chrome.storage.local.get('clientId');
+  const key = CLIENT_ID_KEYS[currentPlatform] || CLIENT_ID_KEYS.douyin;
+  const result = await chrome.storage.local.get([key, 'clientId']);
+  const clientId = result[key] || (currentPlatform === 'douyin' ? result.clientId : null);
   const el = document.getElementById('clientIdDisplay');
   if (!el) return;
   if (clientId) {
     el.textContent = clientId;
     el.title = '点击复制凭证';
-    el.addEventListener('click', () => {
+    el.onclick = () => {
       navigator.clipboard.writeText(clientId).then(() => showToast('凭证已复制！'));
-    });
+    };
   } else {
     el.textContent = '生成中...';
-    // 触发 background 生成
+    // 触发 background 生成（安装后通常已有）
     setTimeout(loadClientId, 1000);
   }
 }
@@ -345,21 +414,31 @@ async function manualSyncToPublish() {
   btn.textContent = '⟳';
 
   let cookies, cookieStr, apiUrl;
+  const platformClientId = await getCurrentClientId(currentPlatform);
   if (currentPlatform === 'douyin') {
     cookies = await getDouyinCookies();
     cookieStr = cookiesToString(cookies);
-    apiUrl = `${SERVER}/api/cookie`;
+    apiUrl = getCookieApiUrl('douyin');
     if (!cookieStr || !cookieStr.includes('sessionid=')) {
       showToast('未检测到抖音登录，无法同步');
       btn.disabled = false; btn.textContent = '☁';
       return;
     }
-  } else {
+  } else if (currentPlatform === 'xhs') {
     cookies = await getXhsCookies();
     cookieStr = cookiesToString(cookies);
-    apiUrl = `${SERVER}/api/analysis/xhs/cookie`;
+    apiUrl = getCookieApiUrl('xhs');
     if (!cookieStr || cookieStr.length === 0) {
       showToast('未检测到小红书登录，无法同步');
+      btn.disabled = false; btn.textContent = '☁';
+      return;
+    }
+  } else {
+    cookies = await getGeminiCookies();
+    cookieStr = cookiesToString(cookies);
+    apiUrl = getCookieApiUrl('gemini');
+    if (!cookieStr || cookieStr.length === 0) {
+      showToast('未检测到 Gemini 登录信息，无法同步');
       btn.disabled = false; btn.textContent = '☁';
       return;
     }
@@ -371,7 +450,7 @@ async function manualSyncToPublish() {
     fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookie: cookieStr }),
+      body: JSON.stringify({ cookie: cookieStr, clientId: platformClientId, platform: currentPlatform }),
     }).then(r => r.json()).catch(() => null),
   ];
 
@@ -389,7 +468,7 @@ async function manualSyncToPublish() {
   const supabaseRes = results[1];
 
   const parseOk = parseRes?.success === true || parseRes?.ok === true;
-  const supabaseOk = currentPlatform === 'xhs' || supabaseRes?.ok === true;
+  const supabaseOk = currentPlatform !== 'douyin' || supabaseRes?.ok === true;
 
   if (parseOk || supabaseOk) {
     const now = Date.now();
@@ -413,9 +492,7 @@ async function checkServerStatus() {
   const el = document.getElementById('serverStatus');
   if (!el) return;
   try {
-    const apiUrl = currentPlatform === 'douyin' 
-      ? `${SERVER}/api/cookie` 
-      : `${SERVER}/api/analysis/xhs/cookie`;
+    const apiUrl = getCookieApiUrl(currentPlatform);
     const res = await fetch(apiUrl, { cache: 'no-store' });
     const data = await res.json();
     const valid = currentPlatform === 'douyin' ? data.valid : data.set;
@@ -446,7 +523,7 @@ function switchPlatform(platform) {
   });
   
   // 更新标题
-  const platformName = platform === 'douyin' ? '抖音' : '小红书';
+  const platformName = getPlatformName(platform);
   document.getElementById('platformSubtitle').textContent = `${platformName} Cookie 管理`;
   
   // 更新按钮文本
@@ -475,6 +552,7 @@ function switchPlatform(platform) {
   
   // 保存到 storage
   chrome.storage.local.set({ currentPlatform: platform });
+  loadClientId();
 }
 
 // ── 初始化 ────────────────────────────────────────────────
@@ -489,6 +567,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Tab 切换事件
   document.getElementById('tabDouyin').addEventListener('click', () => switchPlatform('douyin'));
   document.getElementById('tabXhs').addEventListener('click', () => switchPlatform('xhs'));
+  document.getElementById('tabGemini').addEventListener('click', () => switchPlatform('gemini'));
 
   // 恢复本地缓存的同步时间
   chrome.storage.local.get(['lastPublishSync'], result => {

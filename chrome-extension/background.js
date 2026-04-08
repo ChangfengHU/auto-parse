@@ -1,5 +1,26 @@
 const SERVER = 'https://parse.vyibc.com';
 const ALARM_NAME = 'douyinKeepAlive';
+const CLIENT_ID_KEYS = {
+  douyin: 'douyinClientId',
+  xhs: 'xhsClientId',
+  gemini: 'geminiClientId',
+};
+
+async function ensurePlatformClientIds() {
+  const store = await chrome.storage.local.get(Object.values(CLIENT_ID_KEYS));
+  const updates = {};
+  if (!store[CLIENT_ID_KEYS.douyin]) updates[CLIENT_ID_KEYS.douyin] = 'dy_' + crypto.randomUUID().replace(/-/g, '');
+  if (!store[CLIENT_ID_KEYS.xhs]) updates[CLIENT_ID_KEYS.xhs] = 'xhs_' + crypto.randomUUID().replace(/-/g, '');
+  if (!store[CLIENT_ID_KEYS.gemini]) updates[CLIENT_ID_KEYS.gemini] = 'gm_' + crypto.randomUUID().replace(/-/g, '');
+  if (Object.keys(updates).length > 0) {
+    await chrome.storage.local.set(updates);
+    console.log('[发布平台] 平台凭证已补齐:', updates);
+  }
+  const finalStore = await chrome.storage.local.get([CLIENT_ID_KEYS.douyin, 'clientId']);
+  if (!finalStore.clientId && finalStore[CLIENT_ID_KEYS.douyin]) {
+    await chrome.storage.local.set({ clientId: finalStore[CLIENT_ID_KEYS.douyin] });
+  }
+}
 
 const COOKIE_KEYS = [
   'sessionid', 'sessionid_ss', 'uid_tt', 'uid_tt_ss',
@@ -61,7 +82,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 async function syncToSupabase(cookieStr) {
   try {
-    const { clientId } = await chrome.storage.local.get('clientId');
+    await ensurePlatformClientIds();
+    const { douyinClientId: clientId } = await chrome.storage.local.get(CLIENT_ID_KEYS.douyin);
     if (!clientId) return false;
 
     const res = await fetch(`${SUPABASE_URL}/rest/v1/douyin_sessions`, {
@@ -240,12 +262,8 @@ function restoreAlarm() {
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const { clientId } = await chrome.storage.local.get('clientId');
-  if (!clientId) {
-    const id = 'dy_' + crypto.randomUUID().replace(/-/g, '');
-    await chrome.storage.local.set({ clientId: id });
-    console.log('[发布平台] clientId 已生成:', id);
-  }
+  await ensurePlatformClientIds();
   restoreAlarm();
 });
+ensurePlatformClientIds().catch(() => {});
 restoreAlarm();

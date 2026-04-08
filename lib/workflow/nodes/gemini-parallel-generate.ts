@@ -117,15 +117,40 @@ export async function executeGeminiParallelGenerate(
         : '';
       let imageUrl = sourceUrl;
       if (resolved.uploadToOSS) {
+        let buffer: Buffer | null = null;
+        let mimeType = 'image/png';
+
         if (sourceUrl) {
-          const { buffer, mimeType } = await readImageBufferFromPage(branchPage, sourceUrl);
-          const ossKey = renderOssPath(resolved.ossPath, index, mimeType);
-          imageUrl = await uploadBuffer(buffer, ossKey, mimeType);
-        } else {
-          const fallback = await branchPage.screenshot({ type: 'png' });
-          const ossKey = renderOssPath(resolved.ossPath, index, 'image/png');
-          imageUrl = await uploadBuffer(fallback, ossKey, 'image/png');
+          try {
+            const imageData = await readImageBufferFromPage(branchPage, sourceUrl);
+            buffer = imageData.buffer;
+            mimeType = imageData.mimeType;
+            ctx.emit?.('log', `${prefix} 使用 source URL 提取图片`);
+          } catch {
+            // blob/data URL 在并发页面里偶发不可 fetch，回退到元素截图
+            ctx.emit?.('log', `${prefix} source URL 提取失败，回退元素截图`);
+          }
         }
+
+        if (!buffer && resolved.imageSelector) {
+          try {
+            await branchPage.locator(resolved.imageSelector).first().waitFor({ state: 'visible', timeout: 10_000 });
+            buffer = await branchPage.locator(resolved.imageSelector).first().screenshot({ type: 'png' });
+            mimeType = 'image/png';
+            ctx.emit?.('log', `${prefix} 使用元素截图提取图片`);
+          } catch {
+            // ignore and fallback to full page
+          }
+        }
+
+        if (!buffer) {
+          buffer = await branchPage.screenshot({ type: 'png' });
+          mimeType = 'image/png';
+          ctx.emit?.('log', `${prefix} 使用整页截图兜底提取图片`);
+        }
+
+        const ossKey = renderOssPath(resolved.ossPath, index, mimeType);
+        imageUrl = await uploadBuffer(buffer, ossKey, mimeType);
       }
       const pageUrl = branchPage.url();
       ctx.emit?.('log', `${prefix} 完成`);

@@ -11,6 +11,8 @@
   "host_permissions": [
     "https://*.douyin.com/*",
     "https://*.xiaohongshu.com/*",
+    "https://*.google.com/*",
+    "https://gemini.google.com/*",
     "https://parse.vyibc.com/*",
     "https://okkgchwzppghiyfgmrlj.supabase.co/*",
     "http://localhost/*",
