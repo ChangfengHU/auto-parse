@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import { existsSync } from 'fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -6,8 +7,16 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 
-const XHS_CLI_ROOT = process.env.XHS_CLI_ROOT || '/Users/huchangfeng/xiaohongshu-cli';
-const XHS_CLI_PYTHON = process.env.XHS_CLI_PYTHON || join(XHS_CLI_ROOT, '.venv', 'bin', 'python');
+const DEFAULT_CLI_ROOT = join(process.cwd(), 'python', 'vendors', 'xiaohongshu_cli');
+const XHS_CLI_ROOT = process.env.XHS_CLI_ROOT || DEFAULT_CLI_ROOT;
+const XHS_CLI_PYTHON = (() => {
+  if (process.env.XHS_CLI_PYTHON) return process.env.XHS_CLI_PYTHON;
+  const candidates = [
+    join(process.cwd(), 'python', '.venv', 'bin', 'python'),
+    join(XHS_CLI_ROOT, '.venv', 'bin', 'python'),
+  ];
+  return candidates.find((p) => existsSync(p)) || 'python3';
+})();
 const XHS_CLI_ENTRYPOINT = ['-m', 'xhs_cli.cli'] as const;
 
 interface CliErrorPayload {
@@ -103,4 +112,26 @@ export async function getXhsUserPostsByCli(cookie: string, userId: string, curso
   const args = ['user-posts', userId];
   if (cursor) args.push('--cursor', cursor);
   return runCliCommand<Record<string, unknown>>(cookie, args);
+}
+
+export async function getXhsFeedByCli(cookie: string) {
+  return runCliCommand<Record<string, unknown>>(cookie, ['feed']);
+}
+
+export async function searchXhsNotesByCli(cookie: string, keyword: string, page = 1) {
+  return runCliCommand<Record<string, unknown>>(cookie, ['search', keyword, '--page', String(page)]);
+}
+
+export async function getXhsCommentsByCli(
+  cookie: string,
+  noteId: string,
+  options?: { cursor?: string; xsecToken?: string }
+) {
+  const args = ['comments', noteId];
+  if (options?.xsecToken) args.push('--xsec-token', options.xsecToken);
+  return runCliCommand<Record<string, unknown>>(cookie, args);
+}
+
+export async function getXhsUnreadByCli(cookie: string) {
+  return runCliCommand<Record<string, unknown>>(cookie, ['unread']);
 }

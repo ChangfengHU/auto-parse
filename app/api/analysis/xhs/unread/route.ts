@@ -1,25 +1,21 @@
 import { NextResponse } from 'next/server';
 import { getXhsCookie } from '@/lib/analysis/xhs-cookie';
-
-const PYTHON_API = 'http://127.0.0.1:1030';
+import { getXhsUnread } from '@/lib/analysis/xhs-backend';
 
 export async function GET() {
   try {
-    const res = await fetch(`${PYTHON_API}/unread`, {
-      method: 'GET',
-      headers: {
-        'X-XHS-Cookie': getXhsCookie() || '',
-      },
-    });
-    
-    if (!res.ok) {
-      throw new Error(`Python API returned ${res.status}`);
+    const cookie = getXhsCookie();
+    if (!cookie) {
+      return NextResponse.json({ error: '请先设置小红书 Cookie' }, { status: 401 });
     }
-    
-    const data = await res.json();
+
+    const data = await getXhsUnread(cookie);
     return NextResponse.json({ ok: true, data });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('XHS Unread API Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
   }
 }

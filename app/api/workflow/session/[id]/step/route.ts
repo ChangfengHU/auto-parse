@@ -56,6 +56,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const stream = new ReadableStream({
     async start(controller) {
+      let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
       const send = (type: string, payload: string) => {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type, payload })}\n\n`));
@@ -98,6 +99,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         }
 
         updateSession(sessionId, { status: 'running', currentStep: requestedIndex });
+        // 保持 SSE 通道活性，避免在长耗时步骤（如 waitAfter）期间被中间代理断流。
+        heartbeatTimer = setInterval(() => {
+          send('heartbeat', String(Date.now()));
+        }, 10_000);
 
         // ── 人工停顿 ─────────────────────────────────────────────────────────
         if (session.humanOptions?.randomDelay) {
@@ -218,6 +223,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         const msg = e instanceof Error ? e.message : String(e);
         send('error', msg);
       } finally {
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
         try { controller.close(); } catch { /* ignore */ }
       }
     },

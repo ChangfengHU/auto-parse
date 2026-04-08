@@ -28,6 +28,7 @@ import { executeXhsDownload } from './nodes/xhs-download';
 import { executeLocalhostImageDownload } from './nodes/localhost-image-download';
 import { executeLocalhostImageDownloadDebug } from './nodes/localhost-image-download-debug';
 import { executeMetaAIGenerate } from './nodes/metaai-generate';
+import { executeGeminiParallelGenerate } from './nodes/gemini-parallel-generate';
 import { executeVertexAI } from './nodes/vertex-ai';
 
 // ── 节点注册表 ────────────────────────────────────────────────────────────────
@@ -52,6 +53,7 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   localhost_image_download: executeLocalhostImageDownload,
   localhost_image_download_debug: executeLocalhostImageDownloadDebug,
   metaai_generate:       executeMetaAIGenerate,
+  gemini_parallel_generate: executeGeminiParallelGenerate,
   vertex_ai:             executeVertexAI,
 };
 

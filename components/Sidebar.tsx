@@ -77,6 +77,16 @@ const NAV = [
     ),
   },
   {
+    href: '/settings/backends',
+    label: '后端配置',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317a1 1 0 011.35-.936l1.93.965a1 1 0 00.894 0l1.93-.965a1 1 0 011.35.936v2.168a1 1 0 00.553.894l1.93.965a1 1 0 010 1.788l-1.93.965a1 1 0 00-.553.894v2.168a1 1 0 01-1.35.936l-1.93-.965a1 1 0 00-.894 0l-1.93.965a1 1 0 01-1.35-.936v-2.168a1 1 0 00-.553-.894l-1.93-.965a1 1 0 010-1.788l1.93-.965a1 1 0 00.553-.894V4.317z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 12a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
+      </svg>
+    ),
+  },
+  {
     href: '/docs',
     label: '接口文档',
     icon: (

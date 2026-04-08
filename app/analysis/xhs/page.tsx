@@ -600,7 +600,10 @@ export default function XhsPage() {
     setOssTestResults(null);
     try {
       const imageUrls = imageList
-        .map((img) => img.previewUrl || img.originalUrl || img.urlDefault || img.url)
+        .map((img) => {
+          const item = img as OssCandidateImage;
+          return item.previewUrl || item.originalUrl || item.urlDefault || item.url;
+        })
         .filter((url): url is string => Boolean(url));
       const res = await fetch('/api/content/test-oss', {
         method: 'POST',

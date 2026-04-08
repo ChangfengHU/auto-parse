@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getXhsCookie } from '@/lib/analysis/xhs-cookie';
-
-const PYTHON_API = 'http://127.0.0.1:1030';
+import { getXhsComments } from '@/lib/analysis/xhs-backend';
 
 type RawComment = {
   id?: string;
@@ -37,34 +36,33 @@ export async function POST(req: Request) {
     if (!noteId) {
       return NextResponse.json({ error: 'Note ID is required' }, { status: 400 });
     }
-
-    const params = new URLSearchParams({ note_id: noteId });
-    if (cursor) params.set('cursor', cursor);
-    if (xsecToken) params.set('xsec_token', xsecToken);
-
-    const res = await fetch(`${PYTHON_API}/comments?${params.toString()}`, {
-      method: 'GET',
-      headers: {
-        'X-XHS-Cookie': getXhsCookie() || '',
-      },
-    });
-
-    if (!res.ok) {
-      throw new Error(`Python API returned ${res.status}`);
+    const cookie = getXhsCookie();
+    if (!cookie) {
+      return NextResponse.json({ error: '请先设置小红书 Cookie' }, { status: 401 });
     }
 
-    const data = await res.json();
-    if (!data?.success) {
-      throw new Error(data?.error || '评论接口返回失败');
-    }
-
-    const payload = data.data || {};
+    const payload = await getXhsComments(cookie, noteId, { cursor, xsecToken });
+    const comments =
+      (payload as { comments?: RawComment[]; data?: { comments?: RawComment[] } })?.comments ||
+      (payload as { data?: { comments?: RawComment[] } })?.data?.comments ||
+      [];
+    const nextCursor =
+      (payload as { cursor?: string; data?: { cursor?: string } })?.cursor ||
+      (payload as { data?: { cursor?: string } })?.data?.cursor ||
+      '';
+    const hasMoreValue =
+      (payload as { has_more?: unknown; hasMore?: unknown; data?: { has_more?: unknown; hasMore?: unknown } })
+        ?.has_more ??
+      (payload as { has_more?: unknown; hasMore?: unknown; data?: { has_more?: unknown; hasMore?: unknown } })
+        ?.hasMore ??
+      (payload as { data?: { has_more?: unknown; hasMore?: unknown } })?.data?.has_more ??
+      (payload as { data?: { has_more?: unknown; hasMore?: unknown } })?.data?.hasMore;
     return NextResponse.json({
       ok: true,
       data: {
-        comments: normalizeComments(payload.comments || []),
-        cursor: payload.cursor || '',
-        hasMore: Boolean(payload.has_more ?? payload.hasMore),
+        comments: normalizeComments(comments),
+        cursor: nextCursor,
+        hasMore: Boolean(hasMoreValue),
       },
     });
   } catch (error: unknown) {

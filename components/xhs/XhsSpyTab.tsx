@@ -6,14 +6,20 @@ interface NoteItem {
   note_id?: string;
   id?: string;
   xsec_token?: string;
-  note_card: {
-    display_title: string;
-    type: string;
-    liked_count: string | number;
-    cover: { url_default: string; height: number; width: number };
-    user?: { nickname: string; avatar: string; xsec_token?: string };
-    interact_info?: { liked_count: string | number };
-  };
+    note_card: {
+      display_title: string;
+      type: string;
+      liked_count: string | number;
+      cover: {
+        url_default?: string;
+        url?: string;
+        info_list?: Array<{ url?: string; image_scene?: string }>;
+        height: number;
+        width: number;
+      };
+      user?: { nickname: string; avatar: string; xsec_token?: string };
+      interact_info?: { liked_count: string | number };
+    };
 }
 
 export default function XhsSpyTab({ 
@@ -23,6 +29,23 @@ export default function XhsSpyTab({
   onSelectNote?: (url: string) => void;
   userId?: string;
 }) {
+  const proxyXhsImage = (url?: string) => {
+    if (!url) return '';
+    const normalized = url.startsWith('//') ? `https:${url}` : url.startsWith('http://') ? `https://${url.slice(7)}` : url;
+    if (!normalized.includes('xhscdn.com') && !normalized.includes('xiaohongshu.com')) return normalized;
+    return `/api/proxy/image?url=${encodeURIComponent(normalized)}`;
+  };
+
+  const getCoverUrl = (cover: NoteItem['note_card']['cover']) => {
+    if (cover.url_default) return proxyXhsImage(cover.url_default);
+    if (cover.url) return proxyXhsImage(cover.url);
+    if (Array.isArray(cover.info_list) && cover.info_list.length > 0) {
+      const best = cover.info_list.find((i) => String(i.image_scene || '').includes('WM')) || cover.info_list[cover.info_list.length - 1];
+      return proxyXhsImage(best?.url);
+    }
+    return '';
+  };
+
   const [userId, setUserId] = useState(initialUserId);
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<any>(null);
@@ -133,7 +156,7 @@ export default function XhsSpyTab({
       {prof && (
         <div className="flex items-start gap-5 p-5 border border-border bg-card rounded-2xl">
           <img
-            src={prof.avatar}
+            src={proxyXhsImage(prof.avatar)}
             className="w-20 h-20 rounded-full border-2 border-rose-100 object-cover shadow-md flex-shrink-0"
             alt={prof.nickname}
           />
@@ -172,7 +195,7 @@ export default function XhsSpyTab({
                 >
                   <div className="relative overflow-hidden bg-muted" style={{ aspectRatio: `${card.cover.width || 3}/${card.cover.height || 4}` }}>
                     <img
-                      src={card.cover.url_default}
+                      src={getCoverUrl(card.cover)}
                       alt={card.display_title}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                       loading="lazy"

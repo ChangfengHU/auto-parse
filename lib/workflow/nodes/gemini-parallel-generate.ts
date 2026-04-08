@@ -1,0 +1,192 @@
+import type { Page } from 'playwright';
+import type { GeminiParallelGenerateParams, NodeResult, WorkflowContext } from '../types';
+import { captureScreenshot } from '../utils';
+import { uploadBuffer } from '../../oss';
+
+interface BranchResult {
+  index: number;
+  prompt: string;
+  success: boolean;
+  imageUrl?: string;
+  sourceUrl?: string;
+  pageUrl?: string;
+  error?: string;
+}
+
+function normalizePrompts(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map(item => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+function mimeToExtension(mimeType: string): string {
+  if (mimeType.includes('png')) return 'png';
+  if (mimeType.includes('webp')) return 'webp';
+  if (mimeType.includes('gif')) return 'gif';
+  if (mimeType.includes('svg')) return 'svg';
+  return 'jpg';
+}
+
+function renderOssPath(template: string, index: number, mimeType: string): string {
+  const timestamp = String(Date.now());
+  let key = template.replace(/\{\{timestamp\}\}/g, timestamp).replace(/\{\{index\}\}/g, String(index + 1));
+  if (!/\.[a-z0-9]+$/i.test(key)) {
+    key += `.${mimeToExtension(mimeType)}`;
+  }
+  return key;
+}
+
+async function readImageBufferFromPage(page: Page, src: string): Promise<{ buffer: Buffer; mimeType: string }> {
+  const payload = await page.evaluate(async (imageSrc) => {
+    try {
+      const res = await fetch(imageSrc);
+      if (!res.ok) {
+        return { error: `fetch image failed: ${res.status}` };
+      }
+      const mimeType = res.headers.get('content-type')?.split(';')[0] || 'image/png';
+      const buf = await res.arrayBuffer();
+      return { mimeType, data: Array.from(new Uint8Array(buf)) };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  }, src);
+
+  if ('error' in payload) {
+    throw new Error(payload.error);
+  }
+  return { buffer: Buffer.from(payload.data), mimeType: payload.mimeType || 'image/png' };
+}
+
+export async function executeGeminiParallelGenerate(
+  page: Page,
+  params: GeminiParallelGenerateParams,
+  ctx: WorkflowContext
+): Promise<NodeResult> {
+  const log: string[] = [];
+  const prompts = normalizePrompts(params.prompts);
+  if (prompts.length === 0) {
+    return { success: false, log: ['❌ prompts 为空，至少传入 1 条提示词'], error: 'prompts is empty' };
+  }
+
+  const maxConcurrency = Math.max(1, Math.min(6, params.maxConcurrency ?? 3));
+  const minSuccess = Math.max(1, Math.min(prompts.length, params.minSuccess ?? prompts.length));
+  const closeExtraTabs = params.closeExtraTabs ?? true;
+  const resolved = {
+    url: params.url?.trim() || 'https://gemini.google.com/app',
+    inputSelector: params.inputSelector?.trim() || 'textarea',
+    preClickText: params.preClickText?.trim(),
+    preClickSelector: params.preClickSelector?.trim(),
+    submitSelector: params.submitSelector?.trim(),
+    successSelector: params.successSelector?.trim() || '[aria-label="Copy image"]',
+    imageSelector: params.imageSelector?.trim(),
+    uploadToOSS: params.uploadToOSS ?? true,
+    ossPath: params.ossPath?.trim() || 'gemini-images/{{timestamp}}-{{index}}.png',
+    perTabTimeout: Math.max(10_000, params.perTabTimeout ?? 180_000),
+  };
+  const outputVar = params.outputVar?.trim() || 'geminiImageUrls';
+  const outputDetailVar = params.outputDetailVar?.trim() || 'geminiBranches';
+
+  ctx.emit?.('log', `🚀 并发生图开始：${prompts.length} 条提示词，并发=${maxConcurrency}`);
+  log.push(`🚀 并发生图开始：${prompts.length} 条提示词，并发=${maxConcurrency}`);
+
+  const branchPages: Page[] = [];
+  const worker = async (index: number, prompt: string): Promise<BranchResult> => {
+    const branchPage = await page.context().newPage();
+    branchPages.push(branchPage);
+    const prefix = `🧵 [并发分支 ${index + 1}]`;
+    try {
+      ctx.emit?.('log', `${prefix} 启动`);
+      await branchPage.goto(resolved.url, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+      if (resolved.preClickSelector) {
+        await branchPage.locator(resolved.preClickSelector).first().click({ timeout: 10_000 });
+      } else if (resolved.preClickText) {
+        await branchPage.getByRole('button', { name: resolved.preClickText }).last().click({ timeout: 10_000 });
+      }
+      await branchPage.waitForSelector(resolved.inputSelector, { state: 'visible', timeout: 20_000 });
+      const input = branchPage.locator(resolved.inputSelector).first();
+      await input.fill(prompt);
+      if (resolved.submitSelector) {
+        await branchPage.locator(resolved.submitSelector).first().click({ timeout: 10_000 });
+      } else {
+        await input.press('Enter');
+      }
+      await branchPage.waitForSelector(resolved.successSelector, { state: 'visible', timeout: resolved.perTabTimeout });
+      const sourceUrl = resolved.imageSelector
+        ? await branchPage.locator(resolved.imageSelector).first().getAttribute('src').then(v => v ?? '').catch(() => '')
+        : '';
+      let imageUrl = sourceUrl;
+      if (resolved.uploadToOSS) {
+        if (sourceUrl) {
+          const { buffer, mimeType } = await readImageBufferFromPage(branchPage, sourceUrl);
+          const ossKey = renderOssPath(resolved.ossPath, index, mimeType);
+          imageUrl = await uploadBuffer(buffer, ossKey, mimeType);
+        } else {
+          const fallback = await branchPage.screenshot({ type: 'png' });
+          const ossKey = renderOssPath(resolved.ossPath, index, 'image/png');
+          imageUrl = await uploadBuffer(fallback, ossKey, 'image/png');
+        }
+      }
+      const pageUrl = branchPage.url();
+      ctx.emit?.('log', `${prefix} 完成`);
+      return { index, prompt, success: true, imageUrl, sourceUrl, pageUrl };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.emit?.('log', `${prefix} 失败：${message}`);
+      return { index, prompt, success: false, error: message, pageUrl: branchPage.url() };
+    }
+  };
+
+  const results: BranchResult[] = [];
+  let cursor = 0;
+  const slots = Array.from({ length: Math.min(maxConcurrency, prompts.length) }, async () => {
+    while (cursor < prompts.length) {
+      const next = cursor++;
+      const result = await worker(next, prompts[next]);
+      results.push(result);
+    }
+  });
+  await Promise.all(slots);
+
+  if (closeExtraTabs) {
+    await Promise.all(branchPages.map(p => p.close().catch(() => {})));
+  }
+
+  const sorted = results.sort((a, b) => a.index - b.index);
+  const successItems = sorted.filter(item => item.success);
+  const successCount = successItems.length;
+  const imageUrls = successItems
+    .map(item => item.imageUrl?.trim() || '')
+    .filter(Boolean);
+  const success = successCount >= minSuccess;
+
+  ctx.vars[outputVar] = JSON.stringify(imageUrls);
+  ctx.vars[outputDetailVar] = JSON.stringify(sorted);
+  successItems.forEach(item => {
+    const branchUrl = item.imageUrl?.trim() || '(空)';
+    const line = `🔗 分支 ${item.index + 1} URL: ${branchUrl}`;
+    log.push(line);
+    ctx.emit?.('log', line);
+  });
+  const aggregateLine = `🧩 输出变量 ${outputVar} = ${JSON.stringify(imageUrls)}`;
+  log.push(aggregateLine);
+  ctx.emit?.('log', aggregateLine);
+  log.push(`✅ 并发完成：成功 ${successCount}/${prompts.length}，阈值=${minSuccess}`);
+  ctx.emit?.('log', `✅ 并发完成：成功 ${successCount}/${prompts.length}，阈值=${minSuccess}`);
+
+  const screenshot = await captureScreenshot(page).catch(() => undefined);
+  return {
+    success,
+    log,
+    screenshot,
+    error: success ? undefined : `并发分支成功数不足：${successCount}/${prompts.length}（需要 ${minSuccess}）`,
+    output: {
+      successCount,
+      totalCount: prompts.length,
+      imageUrls,
+      branches: sorted,
+      [outputVar]: imageUrls,
+      [outputDetailVar]: sorted,
+    },
+  };
+}

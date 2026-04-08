@@ -19,6 +19,7 @@ export type NodeType =
   | 'localhost_image_download' // 高级：本地解析页面图片批量下载 → 上传 OSS
   | 'localhost_image_download_debug' // 调试：本地图片批量下载调试版本
   | 'metaai_generate' // 高级：调用外部 Python 脚本执行 Meta AI 生成视频并上传 OSS
+  | 'gemini_parallel_generate' // 高级：并发打开多个 Tab 同时触发 Gemini 生图
   | 'vertex_ai' // 高级：Vertex AI 聚合节点，封装生图/参考图编辑/生视频等能力
 
 // ── 节点定义 ──────────────────────────────────────────────────────────────────
@@ -197,6 +198,25 @@ export interface LocalhostImageDownloadDebugParams {
 export interface MetaAIGenerateParams {
   prompt: string                 // 提示词
   outputVar?: string             // 输出的 OSS 连接数组变量名，默认为 'metaaiVideos'
+}
+
+export interface GeminiParallelGenerateParams {
+  prompts: string[]              // 待并发提交的提示词列表（建议 3 条）
+  url?: string                   // Gemini 页面地址，默认 https://gemini.google.com/app
+  inputSelector?: string         // 输入框选择器
+  preClickText?: string          // 提交前先点击的按钮文案（如 Create image）
+  preClickSelector?: string      // 提交前先点击的按钮选择器（优先于 preClickText）
+  submitSelector?: string        // 提交按钮选择器，不填则按 Enter
+  successSelector?: string       // 成功判定元素选择器（默认 Copy image 按钮）
+  imageSelector?: string         // 可选：用于抓取图片 URL 的选择器
+  uploadToOSS?: boolean          // 是否上传分支图片到 OSS（默认 true）
+  ossPath?: string               // OSS 存储路径模板，支持 {{timestamp}}/{{index}}
+  perTabTimeout?: number         // 每个 Tab 成功等待超时（ms）
+  maxConcurrency?: number        // 并发度，默认 3
+  minSuccess?: number            // 至少成功多少个分支才算节点成功
+  closeExtraTabs?: boolean       // 是否关闭本节点创建的临时 Tab（默认 true）
+  outputVar?: string             // 成功图片 URL 数组变量（JSON 字符串）
+  outputDetailVar?: string       // 分支明细变量（JSON 字符串）
 }
 
 export interface VertexAIParams {

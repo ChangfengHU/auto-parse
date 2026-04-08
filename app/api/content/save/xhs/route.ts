@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { saveXhsPost } from '@/lib/content-storage-hybrid';
+import { linkMaterialsBySourceNoteId } from '@/lib/materials';
 import { uploadVideoFromUrl, uploadXhsImageFromUrl } from '@/lib/oss';
 
 type SaveImage = {
@@ -11,6 +12,7 @@ type SaveImage = {
 };
 
 type SaveNoteData = {
+  noteId?: string;
   imageList?: SaveImage[];
   images?: SaveImage[];
   postUrl?: string;
@@ -102,6 +104,10 @@ export async function POST(req: NextRequest) {
     };
 
     const savedPost = await saveXhsPost(noteDataToSave);
+    const noteId = String(noteData.noteId || '').trim();
+    if (noteId && savedPost?.id) {
+      linkMaterialsBySourceNoteId(noteId, String(savedPost.id));
+    }
     console.log('✅ 小红书作品已保存:', savedPost.id);
 
     return NextResponse.json({

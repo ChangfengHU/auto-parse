@@ -24,12 +24,45 @@ interface NoteCard {
 let initialFeedCache: NoteCard[] | null = null;
 let initialFeedPromise: Promise<NoteCard[]> | null = null;
 
+function normalizeImageUrl(url?: string) {
+  if (!url) return '';
+  if (url.startsWith('//')) return `https:${url}`;
+  if (url.startsWith('http://')) return `https://${url.slice(7)}`;
+  return url;
+}
+
+function proxyXhsImage(url?: string) {
+  const normalized = normalizeImageUrl(url);
+  if (!normalized) return '';
+  if (!normalized.includes('xhscdn.com') && !normalized.includes('xiaohongshu.com')) return normalized;
+  return `/api/proxy/image?url=${encodeURIComponent(normalized)}`;
+}
+
 async function requestFeedItems(): Promise<NoteCard[]> {
   const res = await fetch('/api/analysis/xhs/feed');
   const d = await res.json();
   if (!d.ok) throw new Error(d.error);
 
-  return (d.data?.data?.items ?? []).filter((i: any) => i?.note_card);
+  const payload = d.data?.data ?? d.data;
+  return (payload?.items ?? []).filter((i: any) => i?.note_card);
+}
+
+async function autoSaveFeedCovers(items: NoteCard[]) {
+  if (!items.length) return;
+  await fetch('/api/materials/xhs-feed-covers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      items: items.map((item) => ({
+        id: item.id,
+        xsec_token: item.xsec_token,
+        note_card: {
+          display_title: item.note_card?.display_title,
+          cover: item.note_card?.cover,
+        },
+      })),
+    }),
+  }).catch(() => {});
 }
 
 export default function XhsFeedTab({ 
@@ -71,6 +104,7 @@ export default function XhsFeedTab({
       })();
 
       setNotes(items);
+      void autoSaveFeedCovers(items);
       if (items.length === 0) setError('暂时没有热门推荐，请检查 Cookie 是否过期');
     } catch (e: any) {
       setError(String(e));
@@ -88,12 +122,12 @@ export default function XhsFeedTab({
   };
 
   const getCoverUrl = (cover: any) => {
-    if (cover.url_default) return cover.url_default;
-    if (cover.url) return cover.url;
+    if (cover.url_default) return proxyXhsImage(cover.url_default);
+    if (cover.url) return proxyXhsImage(cover.url);
     if (cover.info_list && cover.info_list.length > 0) {
       // 优先找带 WM 或较大尺寸的
       const best = cover.info_list.find((i: any) => i.image_scene?.includes('WM')) || cover.info_list[cover.info_list.length - 1];
-      return best.url;
+      return proxyXhsImage(best.url);
     }
     return '';
   };
@@ -152,7 +186,7 @@ export default function XhsFeedTab({
                   <div className="p-2.5 flex flex-col gap-1.5 flex-1">
                     <p className="text-xs font-semibold line-clamp-2 leading-snug">{card.display_title || '(无标题)'}</p>
                     <div className="flex items-center gap-1.5 mt-auto">
-                      <img src={card.user.avatar} className="w-3.5 h-3.5 rounded-full object-cover bg-muted" />
+                      <img src={proxyXhsImage(card.user.avatar)} className="w-3.5 h-3.5 rounded-full object-cover bg-muted" />
                       <span className="text-[10px] text-muted-foreground truncate flex-1">{card.user.nickname}</span>
                       <span className="text-[10px] text-rose-500 font-semibold flex-shrink-0">♥ {formatLikes(likes)}</span>
                     </div>

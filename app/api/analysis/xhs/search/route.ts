@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getXhsCookie } from '@/lib/analysis/xhs-cookie';
-
-const PYTHON_API = 'http://127.0.0.1:1030';
+import { searchXhsNotes } from '@/lib/analysis/xhs-backend';
 
 export async function POST(req: Request) {
   try {
@@ -9,23 +8,18 @@ export async function POST(req: Request) {
     if (!keyword) {
       return NextResponse.json({ error: 'Keyword is required' }, { status: 400 });
     }
-
-    // 转发给远端 Python 服务
-    const res = await fetch(`${PYTHON_API}/search?keyword=${encodeURIComponent(keyword)}&page=${page}`, {
-      method: 'GET',
-      headers: {
-        'X-XHS-Cookie': getXhsCookie() || '',
-      },
-    });
-    
-    if (!res.ok) {
-      throw new Error(`Python API returned ${res.status}`);
+    const cookie = getXhsCookie();
+    if (!cookie) {
+      return NextResponse.json({ error: '请先设置小红书 Cookie' }, { status: 401 });
     }
-    
-    const data = await res.json();
+
+    const data = await searchXhsNotes(cookie, keyword, Number(page) || 1);
     return NextResponse.json({ ok: true, data });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('XHS Search API Error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 500 }
+    );
   }
 }

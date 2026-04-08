@@ -1694,6 +1694,27 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
     tags:     initialContext?.tags ?? '',
     clientId: initialContext?.clientId ?? '',
   });
+  const [runtimeVars, setRuntimeVars] = useState<Record<string, string>>(() => {
+    const seeded: Record<string, string> = {};
+    const contextMap = (initialContext ?? {}) as Record<string, string>;
+    for (const key of initialWorkflow.vars ?? []) {
+      const value = contextMap[key];
+      if (typeof value === 'string') seeded[key] = value;
+    }
+    return seeded;
+  });
+  const workflowVarKeys = initialWorkflow.vars ?? [];
+
+  const collectSessionVars = useCallback((): Record<string, string> => {
+    const merged: Record<string, string> = { ...runtimeVars };
+    if (ctx.videoUrl) merged.videoUrl = ctx.videoUrl;
+    if (ctx.title) merged.title = ctx.title;
+    if (ctx.tags) merged.tags = ctx.tags;
+    if (ctx.clientId) merged.clientId = ctx.clientId;
+    return Object.fromEntries(
+      Object.entries(merged).filter(([, v]) => typeof v === 'string' && v.trim().length > 0)
+    );
+  }, [ctx, runtimeVars]);
 
   const logEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
@@ -1819,6 +1840,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
               donePayload = JSON.parse(evt.payload) as SessionStepDonePayload;
               if (donePayload.vars) {
                 setCtx(prev => ({ ...prev, ...donePayload!.vars }));
+                setRuntimeVars(prev => ({ ...prev, ...donePayload!.vars }));
               }
               const st: StepStatus = donePayload.skipped
                 ? 'skip'
@@ -1875,11 +1897,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   async function createSession(autoRun = false) {
     try {
       appendLog('🚀 创建 Debug 会话...');
-      const vars: Record<string, string> = {};
-      if (ctx.videoUrl) vars.videoUrl = ctx.videoUrl;
-      if (ctx.title)    vars.title    = ctx.title;
-      if (ctx.tags)     vars.tags     = ctx.tags;
-      if (ctx.clientId) vars.clientId = ctx.clientId;
+      const vars = collectSessionVars();
       const res = await fetch('/api/workflow/session', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2169,14 +2187,14 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
 
         {/* ── 节点详情 + 执行面板（选中节点时始终显示）── */}
         {rightPanelMode === 'node' && editingIdx !== null && (
-          <NodeDetailPanel
+            <NodeDetailPanel
             node={nodes[editingIdx]}
             idx={editingIdx}
             total={nodes.length}
             onChange={patch => updateNode(editingIdx, patch)}
             onClose={() => setEditingIdx(null)}
             sessionId={sessionId}
-            vars={Object.fromEntries(Object.entries(ctx).filter(([, v]) => v))}
+            vars={collectSessionVars()}
             materials={materials}
             onVarsChange={(nextVars) => {
               setCtx(prev => ({
@@ -2186,6 +2204,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                 tags: nextVars.tags ?? prev.tags,
                 clientId: nextVars.clientId ?? prev.clientId,
               }));
+              setRuntimeVars(prev => ({ ...prev, ...nextVars }));
             }}
             onStepStatusChange={(i, status) => {
               setRunning(status === 'running');
@@ -2211,18 +2230,37 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
               </div>
 
               <div className="rounded-xl border border-border bg-card p-3">
+                {workflowVarKeys.length > 0 && (
+                  <>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">工作流运行时变量（测试前可修改）</p>
+                    <div className="space-y-1.5 mb-3">
+                      {workflowVarKeys.map((key) => (
+                        <div key={key}>
+                          <label className="text-[9px] text-muted-foreground block mb-0.5">
+                            {key}
+                            {WORKFLOW_VARS_META[key] ? ` · ${WORKFLOW_VARS_META[key]}` : ''}
+                          </label>
+                          <input
+                            value={runtimeVars[key] ?? ''}
+                            onChange={e => setRuntimeVars(prev => ({ ...prev, [key]: e.target.value }))}
+                            placeholder={`请输入 ${key}`}
+                            className="w-full bg-background border border-border rounded px-2 py-1 text-[11px] font-mono outline-none focus:border-primary"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
                 <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">当前运行时变量</p>
                 <div className="space-y-1.5">
-                  {([
-                    { key: 'videoUrl', label: '视频地址' },
-                    { key: 'title', label: '标题' },
-                    { key: 'tags', label: '话题标签' },
-                    { key: 'clientId', label: '账号 ID' },
-                  ] as { key: keyof DebugCtx; label: string }[]).map(({ key, label }) => (
+                  {Object.entries(collectSessionVars()).length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">—</p>
+                  )}
+                  {Object.entries(collectSessionVars()).map(([key, value]) => (
                     <div key={key}>
-                      <label className="text-[9px] text-muted-foreground block mb-0.5">{label}</label>
+                      <label className="text-[9px] text-muted-foreground block mb-0.5">{key}</label>
                       <p className="text-[11px] font-mono text-foreground/80 break-all bg-muted/30 rounded px-2 py-1 min-h-7">
-                        {ctx[key] || '—'}
+                        {value || '—'}
                       </p>
                     </div>
                   ))}
@@ -2247,15 +2285,13 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
               <div className="w-56 flex-shrink-0 bg-card border border-border rounded-xl p-3 overflow-y-auto">
                 <p className="text-xs font-semibold mb-2">发布参数</p>
                 <div className="space-y-1.5">
-                  {([
-                    { key: 'videoUrl', label: '视频地址' },
-                    { key: 'title',    label: '标题' },
-                    { key: 'tags',     label: '话题标签' },
-                    { key: 'clientId', label: '账号ID' },
-                  ] as { key: keyof DebugCtx; label: string }[]).map(({ key, label }) => (
+                  {Object.entries(collectSessionVars()).length === 0 && (
+                    <p className="text-[11px] text-muted-foreground">—</p>
+                  )}
+                  {Object.entries(collectSessionVars()).map(([key, value]) => (
                     <div key={key}>
-                      <label className="text-[9px] text-muted-foreground block mb-0.5">{label}</label>
-                      <p className="text-[11px] font-mono text-foreground/80 truncate bg-muted/30 rounded px-2 py-0.5">{ctx[key] || '—'}</p>
+                      <label className="text-[9px] text-muted-foreground block mb-0.5">{key}</label>
+                      <p className="text-[11px] font-mono text-foreground/80 truncate bg-muted/30 rounded px-2 py-0.5">{value || '—'}</p>
                     </div>
                   ))}
                 </div>
