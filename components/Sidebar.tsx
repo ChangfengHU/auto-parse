@@ -23,6 +23,17 @@ const NAV = [
     ),
   },
   {
+    href: '/image-generate',
+    label: '图片生成',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 13l2.5-2.5a1 1 0 011.414 0L16 14.586M8 17h8" />
+        <circle cx="9" cy="8" r="1.5" />
+      </svg>
+    ),
+  },
+  {
     href: '/publish',
     label: '视频发布',
     icon: (
