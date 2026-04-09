@@ -25,7 +25,9 @@ export async function POST(req: Request) {
     const body = await req.json();
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     if (!name) return NextResponse.json({ error: '缺少有效的 name' }, { status: 400 });
+    const id = typeof body.id === 'string' ? body.id.trim() : '';
     const def = await createWorkflow({
+      id: id || undefined,
       name,
       description: body.description ?? '',
       nodes: body.nodes ?? [],

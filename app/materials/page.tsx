@@ -239,7 +239,7 @@ export default function MaterialsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground">素材库</h1>
           <p className="mt-1 text-muted-foreground text-sm">支持标题检索、关联状态筛选与二次解析确认保存</p>
@@ -252,7 +252,7 @@ export default function MaterialsPage() {
         </button>
       </div>
 
-      <div className="mb-4 inline-flex rounded-xl bg-muted p-1">
+      <div className="mb-4 inline-flex flex-wrap rounded-xl bg-muted p-1 gap-1">
         <button
           onClick={() => setActiveTab('video')}
           className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
@@ -279,7 +279,7 @@ export default function MaterialsPage() {
             if (e.key === 'Enter') setKeyword(searchInput.trim());
           }}
           placeholder="按标题搜索"
-          className="w-56 px-3 py-2 text-sm rounded-lg border border-border bg-background"
+          className="w-full sm:w-56 px-3 py-2 text-sm rounded-lg border border-border bg-background"
         />
         <button
           onClick={() => setKeyword(searchInput.trim())}
@@ -320,8 +320,8 @@ export default function MaterialsPage() {
         {materials.map((m) => {
           const isVideo = (m.mediaType ?? 'video') === 'video';
           return (
-            <div key={m.id} className="group bg-card border border-border rounded-2xl p-4 flex gap-5">
-              <div className="w-32 h-20 flex-shrink-0 bg-black rounded-xl overflow-hidden">
+            <div key={m.id} className="group bg-card border border-border rounded-2xl p-4 flex flex-col sm:flex-row gap-4 sm:gap-5">
+              <div className="w-full sm:w-32 h-44 sm:h-20 flex-shrink-0 bg-black rounded-xl overflow-hidden">
                 {isVideo ? (
                   <video src={m.ossUrl + '#t=1'} className="w-full h-full object-cover" preload="metadata" muted />
                 ) : (
@@ -338,7 +338,7 @@ export default function MaterialsPage() {
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="truncate max-w-[320px]">{m.ossUrl}</span>
+                    <span className="truncate">{m.ossUrl}</span>
                     <span>·</span>
                     <span>{timeAgo(m.parsedAt)}</span>
                   </div>
@@ -354,7 +354,7 @@ export default function MaterialsPage() {
                   )}
                 </div>
 
-                <div className="flex items-center justify-between gap-3 mt-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3">
                   <div className="flex gap-2 flex-wrap">
                     {isVideo && (
                       <button
@@ -412,8 +412,8 @@ export default function MaterialsPage() {
         })}
       </div>
 
-      {total > 0 && (
-        <div className="mt-6 flex items-center justify-between text-xs text-muted-foreground">
+       {total > 0 && (
+         <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-muted-foreground">
           <span>
             第 {page}/{totalPages} 页 · 共 {total} 条
           </span>
@@ -492,7 +492,7 @@ export default function MaterialsPage() {
                   </div>
                 )}
                 {parseData.images?.length > 0 && (
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {parseData.images.slice(0, 8).map((img) => (
                       <img key={img.index} src={img.previewUrl} alt="" className="w-full aspect-square object-cover rounded-md border border-border" />
                     ))}
@@ -522,7 +522,7 @@ export default function MaterialsPage() {
               </div>
             )}
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 disabled={!parseData || saveLoading}
                 onClick={() => void confirmSaveToContent()}

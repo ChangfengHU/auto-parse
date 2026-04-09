@@ -129,7 +129,7 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (set: boolean) => voi
             在小红书网页版登录后，打开 Chrome 开发者工具 → Application → Cookies → www.xiaohongshu.com，
             复制 <code className="bg-muted px-1 rounded">web_session</code> 的值粘贴到下方：
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <input
               value={input}
               onChange={e => setInput(e.target.value)}
@@ -317,7 +317,7 @@ function XhsDetailDrawer({
               </div>
 
               {/* 统计 */}
-              <div className="grid grid-cols-4 gap-2 bg-card border border-border p-3 rounded-xl shadow-sm">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-card border border-border p-3 rounded-xl shadow-sm">
                 <StatBadge icon="❤️" value={post.stats.likes} label="点赞" />
                 <StatBadge icon="⭐" value={post.stats.collects} label="收藏" />
                 <StatBadge icon="💬" value={post.stats.comments} label="评论" />
@@ -652,13 +652,13 @@ export default function XhsPage() {
         savedPostId={savedPostId}
       />
 
-      <div className="flex flex-col gap-5 p-6 max-w-6xl mx-auto pb-20">
-        <div className="flex items-end justify-between">
+      <div className="flex flex-col gap-5 p-4 sm:p-6 max-w-6xl mx-auto pb-20">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">小红书内容中枢 <span className="text-sm font-normal text-muted-foreground ml-2 opacity-60">XHS Matrix</span></h1>
             <p className="text-sm text-muted-foreground mt-1">全网爆款扫描器 · 竞品博主雷达 · 极速无头解析</p>
           </div>
-          <div className="flex items-center gap-1 bg-muted p-1 rounded-xl">
+           <div className="flex items-center gap-1 bg-muted p-1 rounded-xl overflow-x-auto">
             <button onClick={() => setActiveTab('feed')} className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeTab === 'feed' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>发现热门</button>
             <button onClick={() => setActiveTab('search')} className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeTab === 'search' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>🚀 搜爆款</button>
             <button onClick={() => setActiveTab('spy')} className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-all ${activeTab === 'spy' ? 'bg-background shadow-sm text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>🔍 刺探博主</button>
@@ -678,7 +678,7 @@ export default function XhsPage() {
                  <h2 className="text-lg font-bold">粘贴链接即刻开始</h2>
                  <p className="text-sm text-muted-foreground">支持解析视频、图文、直播及短链接</p>
                </div>
-               <div className="flex gap-2">
+               <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   value={url}
                   onChange={e => setUrl(e.target.value)}
@@ -689,7 +689,7 @@ export default function XhsPage() {
                 <button
                   onClick={() => { setDrawerOpen(true); analyze(); }}
                   disabled={loading || !url.trim() || !cookieSet}
-                  className="px-6 py-3 bg-primary text-primary-foreground rounded-xl text-sm font-bold disabled:opacity-50 hover:shadow-lg hover:shadow-primary/20 transition-all"
+                   className="px-6 py-3 w-full sm:w-auto bg-primary text-primary-foreground rounded-xl text-sm font-bold disabled:opacity-50 hover:shadow-lg hover:shadow-primary/20 transition-all"
                 >
                   解析
                 </button>

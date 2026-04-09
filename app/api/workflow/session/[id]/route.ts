@@ -45,12 +45,30 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (!session) return NextResponse.json({ error: 'session not found' }, { status: 404 });
 
   const reqUrl = new URL(_req.url);
-  const keepPage = reqUrl.searchParams.get('keepPage') === '1' || process.env.KEEP_BROWSER_OPEN === 'true';
+  let keepPage = reqUrl.searchParams.get('keepPage') === '1' || process.env.KEEP_BROWSER_OPEN === 'true';
+  let keptLastTab = false;
 
   if (session._page && !keepPage) {
-    await session._page.close().catch(() => {});
+    try {
+      if (session._browser) {
+        const openPages = session._page
+          .context()
+          .pages()
+          .filter((p) => !p.isClosed());
+        if (openPages.length <= 1) {
+          // AdsPower 场景下保留最后一个标签页，避免整个分身退回 Inactive。
+          keepPage = true;
+          keptLastTab = true;
+        }
+      }
+      if (!keepPage) {
+        await session._page.close().catch(() => {});
+      }
+    } catch {
+      await session._page.close().catch(() => {});
+    }
   }
   deleteSession(id);
 
-  return NextResponse.json({ ok: true, keepPage, message: `Session ${id} 已关闭` });
+  return NextResponse.json({ ok: true, keepPage, keptLastTab, message: `Session ${id} 已关闭` });
 }

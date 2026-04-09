@@ -10,6 +10,7 @@ const NODE_ICONS: Record<string, string> = {
   navigate: '🌐', text_input: '✏️', click: '👆', scroll: '🖱️',
   screenshot: '📸', file_upload: '📤', wait_condition: '⏳', qrcode: '📱',
   vertex_ai: '🖼️',
+  topic_picker_agent: '🧠',
 };
 
 const NODE_COLORS: Record<string, string> = {
@@ -17,6 +18,7 @@ const NODE_COLORS: Record<string, string> = {
   scroll: 'bg-cyan-500', screenshot: 'bg-gray-500', file_upload: 'bg-green-500',
   wait_condition: 'bg-yellow-500', qrcode: 'bg-pink-500',
   vertex_ai: 'bg-indigo-500',
+  topic_picker_agent: 'bg-emerald-500',
 };
 
 export default function WorkflowsPage() {
@@ -92,18 +94,18 @@ export default function WorkflowsPage() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="bg-card border-b border-border px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-4">
+      <header className="bg-card border-b border-border px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <Link href="/" className="text-xl font-bold text-foreground hover:text-primary transition-colors">doouyin</Link>
           <span className="text-muted-foreground">/</span>
-          <h1 className="text-lg font-semibold">工作流管理</h1>
+          <h1 className="text-lg font-semibold truncate">工作流管理</h1>
         </div>
         <div className="flex items-center gap-2">
           <Link href="/publish" className="px-3 py-1.5 bg-muted hover:bg-muted/80 text-sm rounded-lg transition-colors">返回发布</Link>
         </div>
       </header>
 
-      <div className="max-w-5xl mx-auto px-6 py-8">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-xl font-bold text-foreground">工作流列表</h2>

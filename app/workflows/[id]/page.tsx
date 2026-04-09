@@ -34,15 +34,15 @@ export default function WorkflowDetailPage() {
 
   return (
     <div className="h-screen flex flex-col">
-      <header className="bg-card border-b border-border px-6 py-3 flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-4">
+      <header className="bg-card border-b border-border px-4 sm:px-6 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 flex-shrink-0">
+        <div className="flex items-center gap-3 sm:gap-4 min-w-0">
           <a href="/" className="text-xl font-bold text-foreground hover:text-primary transition-colors">doouyin</a>
           <span className="text-muted-foreground">/</span>
           <a href="/workflows" className="text-sm text-muted-foreground hover:text-foreground transition-colors">工作流</a>
           <span className="text-muted-foreground">/</span>
-          <h1 className="text-sm font-semibold text-foreground">{workflow.name}</h1>
+          <h1 className="text-sm font-semibold text-foreground truncate">{workflow.name}</h1>
         </div>
-        <a href="/publish" className="px-3 py-1.5 bg-muted hover:bg-muted/80 text-sm rounded-lg transition-colors">返回发布</a>
+        <a href="/publish" className="px-3 py-1.5 bg-muted hover:bg-muted/80 text-sm rounded-lg transition-colors self-start sm:self-auto">返回发布</a>
       </header>
       <div className="flex-1 overflow-hidden">
         <WorkflowEditor workflow={workflow} initialContext={initialContext} />

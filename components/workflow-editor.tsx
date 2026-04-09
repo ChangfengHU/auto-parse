@@ -1662,6 +1662,7 @@ function ContextMenu({
 // ── 主组件 ────────────────────────────────────────────────────────────────────
 
 export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: WorkflowEditorProps) {
+  const MAX_AUTO_RETRY = 2;
   // ── 工作流编辑 ─────────────────────────────────────────────────────────────
   const [nodes, setNodes] = useState<NodeDef[]>(initialWorkflow.nodes);
   const [workflowName, setWorkflowName] = useState(initialWorkflow.name);
@@ -1680,6 +1681,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   const [stepStatus, setStepStatus] = useState<StepStatus[]>(initialWorkflow.nodes.map(() => 'pending'));
   const [humanOptions, setHumanOptions] = useState<HumanOptions>({ ...DEFAULT_HUMAN_OPTIONS });
   const [keepBrowserPage, setKeepBrowserPage] = useState(true);
+  const [autoRetryOnFailure, setAutoRetryOnFailure] = useState(true);
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [screenshot, setScreenshot] = useState<string | null>(null);
@@ -1727,12 +1729,19 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
     if (typeof window === 'undefined') return;
     const saved = window.localStorage.getItem('workflow.keepBrowserPage');
     if (saved === '0') setKeepBrowserPage(false);
+    const retrySaved = window.localStorage.getItem('workflow.autoRetryOnFailure');
+    if (retrySaved === '0') setAutoRetryOnFailure(false);
   }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('workflow.keepBrowserPage', keepBrowserPage ? '1' : '0');
   }, [keepBrowserPage]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('workflow.autoRetryOnFailure', autoRetryOnFailure ? '1' : '0');
+  }, [autoRetryOnFailure]);
 
   const appendLog = useCallback((text: string) => {
     setLogs(prev => [...prev, { ts: ts(), text }]);
@@ -1798,7 +1807,11 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   function onDragEnd() { dragIdx.current = null; }
 
   // ── Debug Session ──────────────────────────────────────────────────────────
-  async function executeSessionStep(activeSessionId: string, idx: number, options?: { skip?: boolean; manageRunning?: boolean }) {
+  async function executeSessionStep(
+    activeSessionId: string,
+    idx: number,
+    options?: { skip?: boolean; manageRunning?: boolean; reset?: boolean }
+  ) {
     const manageRunning = options?.manageRunning ?? true;
     if (manageRunning) setRunning(true);
     setCurrentStep(idx);
@@ -1806,10 +1819,11 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
 
     try {
       const body = options?.skip ? { skip: true, stepIndex: idx } : { stepIndex: idx };
+      const requestBody = options?.reset ? { ...body, reset: true } : body;
       const res = await fetch(`/api/workflow/session/${activeSessionId}/step`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify(requestBody),
       });
       if (!res.body) throw new Error('No body');
 
@@ -1882,12 +1896,46 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   async function runSessionSequentially(activeSessionId: string, startIndex = 0) {
     setRunning(true);
     try {
-      let nextIndex = startIndex;
-      while (nextIndex < nodes.length) {
-        const payload = await executeSessionStep(activeSessionId, nextIndex, { manageRunning: false });
-        if (!payload) break;
-        if (payload.done || payload.failed) break;
-        nextIndex = payload.nextStep;
+      const maxRetries = autoRetryOnFailure ? MAX_AUTO_RETRY : 0;
+      let attempt = 0;
+      while (attempt <= maxRetries) {
+        if (attempt > 0) {
+          appendLog(`⚠️ 工作流执行不稳定，触发自动重试（第 ${attempt}/${maxRetries} 次），从第 1 步重新开始`);
+          setStepStatus(nodes.map(() => 'pending'));
+          setCurrentStep(0);
+          setLastExecutedStep(null);
+        }
+
+        let nextIndex = attempt === 0 ? startIndex : 0;
+        let shouldRetry = false;
+        while (nextIndex < nodes.length) {
+          const payload = await executeSessionStep(activeSessionId, nextIndex, {
+            manageRunning: false,
+            reset: attempt > 0 && nextIndex === 0,
+          });
+          if (!payload) {
+            shouldRetry = false;
+            nextIndex = nodes.length;
+            break;
+          }
+          if (payload.done) {
+            return;
+          }
+          if (payload.failed) {
+            if (attempt < maxRetries) {
+              appendLog(`⚠️ 第 ${nextIndex + 1} 步失败，准备整体重试`);
+              shouldRetry = true;
+            } else {
+              appendLog(`❌ 第 ${nextIndex + 1} 步失败，已达到最大重试次数（${maxRetries}）`);
+              shouldRetry = false;
+            }
+            break;
+          }
+          nextIndex = payload.nextStep;
+        }
+
+        if (!shouldRetry) break;
+        attempt += 1;
       }
     } finally {
       setRunning(false);
@@ -2102,6 +2150,16 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
               type="checkbox"
               checked={keepBrowserPage}
               onChange={e => setKeepBrowserPage(e.target.checked)}
+              className="accent-primary"
+            />
+          </label>
+
+          <label className="flex items-center justify-between rounded px-1 py-1 text-[10px] text-muted-foreground hover:bg-muted/40">
+            <span>🔁 失败自动重试（最多 {MAX_AUTO_RETRY} 次，从第 1 步开始）</span>
+            <input
+              type="checkbox"
+              checked={autoRetryOnFailure}
+              onChange={e => setAutoRetryOnFailure(e.target.checked)}
               className="accent-primary"
             />
           </label>

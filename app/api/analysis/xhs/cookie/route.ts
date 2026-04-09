@@ -6,6 +6,7 @@
 
 import { NextResponse } from 'next/server';
 import { setXhsCookie, getXhsCookie, clearXhsCookie, hasXhsCookie } from '@/lib/analysis/xhs-cookie';
+import { upsertPlatformSession } from '@/lib/analysis/platform-session';
 
 export async function GET() {
   const cookie = getXhsCookie();
@@ -19,11 +20,15 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const body = await req.json() as { cookie?: string };
+  const body = await req.json() as { cookie?: string; clientId?: string };
   const raw = body.cookie?.trim();
   if (!raw) return NextResponse.json({ error: 'cookie 不能为空' }, { status: 400 });
 
   setXhsCookie(raw);
+  const clientId = body.clientId?.trim();
+  if (clientId) {
+    await upsertPlatformSession('xhs', clientId, raw);
+  }
   return NextResponse.json({ ok: true, set: hasXhsCookie() });
 }
 

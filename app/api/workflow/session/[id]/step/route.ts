@@ -48,6 +48,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const body = await req.json().catch(() => ({})) as {
     skip?: boolean;
     stepIndex?: number;
+    reset?: boolean;
     params?: Record<string, unknown>;
     node?: Partial<NodeDef>;
   };
@@ -66,6 +67,23 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       try {
         const session = getSession(sessionId);
         if (!session) { send('error', 'session not found'); return; }
+
+        if (body.reset) {
+          const restoredVars = { ...(session.initialVars ?? {}) };
+          updateSession(sessionId, {
+            vars: restoredVars,
+            currentStep: 0,
+            lastExecutedStep: null,
+            status: 'paused',
+            history: [],
+          });
+          session.vars = restoredVars;
+          session.currentStep = 0;
+          session.lastExecutedStep = null;
+          session.status = 'paused';
+          session.history = [];
+          send('log', '🔁 已重置执行状态：从第 1 步重新开始');
+        }
 
         // ── 确定要执行的步骤 ──────────────────────────────────────────────────
         const requestedIndex = body.stepIndex ?? session.currentStep;
@@ -158,6 +176,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         send('log', `🌐 当前页面：${runtimePage.url() || '(空白)'}`);
 
         const result = await executeNode(runtimePage, activeNode, ctx);
+        // 把节点内部产出的结构化日志逐条透传给前端，避免只在 done 里一次性返回。
+        for (const line of result.log ?? []) {
+          send('log', line);
+        }
         const nextVars = Object.fromEntries(
           Object.entries(ctx.vars).filter(([key]) => key !== '__pauseToken')
         );

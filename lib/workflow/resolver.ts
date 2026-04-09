@@ -16,9 +16,11 @@ export function resolveParams<T extends Record<string, unknown>>(
     if (typeof value === 'string') {
       result[key] = resolveTemplate(value, vars);
     } else if (Array.isArray(value)) {
-      result[key] = value.map(v =>
-        typeof v === 'string' ? resolveTemplate(v, vars) : v
-      );
+      result[key] = value.map(v => {
+        if (typeof v === 'string') return resolveTemplate(v, vars);
+        if (v && typeof v === 'object') return resolveParams(v as Record<string, unknown>, vars);
+        return v;
+      });
     } else if (value && typeof value === 'object') {
       result[key] = resolveParams(value as Record<string, unknown>, vars);
     } else {

@@ -14,8 +14,18 @@ export async function executeTextInput(
     log.push(`✏️ 填入文本到 ${params.selector}`);
     const el = page.locator(params.selector).first();
     await el.waitFor({ state: 'visible', timeout: 10_000 });
+    const value = String(params.value ?? '');
+    const isContentEditable = await el
+      .evaluate((node) => node instanceof HTMLElement && node.isContentEditable)
+      .catch(() => false);
 
-    if (params.clear !== false) {
+    if (isContentEditable) {
+      await el.click({ timeout: 10_000 });
+      if (params.clear !== false) {
+        await page.keyboard.press('ControlOrMeta+A').catch(() => {});
+        await page.keyboard.press('Backspace').catch(() => {});
+      }
+    } else if (params.clear !== false) {
       await el.clear().catch(() =>
         el.selectText().then(() => page.keyboard.press('Backspace'))
       );
@@ -24,9 +34,13 @@ export async function executeTextInput(
     if (useHumanType) {
       // 逐字符输入，每个字符延迟随机波动（模拟真人打字节奏）
       const baseDelay = params.delay ?? 80;
-      for (let i = 0; i < params.value.length; i++) {
-        const char = params.value[i];
-        await el.pressSequentially(char, { delay: 0 });
+      for (let i = 0; i < value.length; i++) {
+        const char = value[i];
+        if (isContentEditable) {
+          await page.keyboard.type(char, { delay: 0 });
+        } else {
+          await el.pressSequentially(char, { delay: 0 });
+        }
         // 随机延迟：基础 ± 40%，中文字符后偶尔多停顿
         const variance = baseDelay * 0.4;
         let delay = baseDelay + (Math.random() * 2 - 1) * variance;
@@ -36,14 +50,22 @@ export async function executeTextInput(
         }
         await page.waitForTimeout(delay);
       }
-      log.push(`⌨️ 人工逐键输入完成（${params.value.length} 字）`);
+      log.push(`⌨️ 人工逐键输入完成（${value.length} 字）`);
     } else if (params.delay && params.delay > 0) {
-      await el.pressSequentially(params.value, { delay: params.delay });
+      if (isContentEditable) {
+        await page.keyboard.type(value, { delay: params.delay });
+      } else {
+        await el.pressSequentially(value, { delay: params.delay });
+      }
     } else {
-      await el.fill(params.value);
+      if (isContentEditable) {
+        await page.keyboard.type(value, { delay: 0 });
+      } else {
+        await el.fill(value);
+      }
     }
 
-    log.push(`✅ 已填入：${params.value.slice(0, 30)}${params.value.length > 30 ? '...' : ''}`);
+    log.push(`✅ 已填入：${value.slice(0, 30)}${value.length > 30 ? '...' : ''}`);
     const screenshot = await captureScreenshot(page);
     return { success: true, log, screenshot };
   } catch (e) {

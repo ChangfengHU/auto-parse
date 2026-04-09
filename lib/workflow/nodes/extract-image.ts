@@ -35,8 +35,30 @@ export async function executeExtractImage(
       throw new Error(`索引 ${index} 超出范围，共找到 ${count} 个图片`);
     }
 
-    const targetElement = elements.nth(index);
-    log.push(`✅ 找到 ${count} 个图片，选择第 ${index + 1} 个`);
+    let targetElement = elements.nth(index);
+    let selectedIndex = index;
+    if (index === -1) {
+      let bestIndex = -1;
+      let bestArea = 0;
+      for (let i = 0; i < count; i++) {
+        const box = await elements.nth(i).boundingBox().catch(() => null);
+        if (!box) continue;
+        const area = Math.max(0, box.width) * Math.max(0, box.height);
+        if (area > bestArea) {
+          bestArea = area;
+          bestIndex = i;
+        }
+      }
+      if (bestIndex < 0) {
+        throw new Error('未找到可见图片元素');
+      }
+      selectedIndex = bestIndex;
+      targetElement = elements.nth(bestIndex);
+      log.push(`✅ 找到 ${count} 个图片，自动选择面积最大项：第 ${bestIndex + 1} 个`);
+    } else {
+      log.push(`✅ 找到 ${count} 个图片，选择第 ${index + 1} 个`);
+    }
+    log.push(`🎯 当前提取目标索引：${selectedIndex}`);
 
     // 滚动到元素位置，触发懒加载
     try {

@@ -27,9 +27,12 @@ import { executeExtractImageClipboard } from './nodes/extract-image-clipboard';
 import { executeXhsDownload } from './nodes/xhs-download';
 import { executeLocalhostImageDownload } from './nodes/localhost-image-download';
 import { executeLocalhostImageDownloadDebug } from './nodes/localhost-image-download-debug';
+import { executeCredentialLogin } from './nodes/credential-login';
+import { executeWorkflowCall } from './nodes/workflow-call';
 import { executeMetaAIGenerate } from './nodes/metaai-generate';
 import { executeGeminiParallelGenerate } from './nodes/gemini-parallel-generate';
 import { executeVertexAI } from './nodes/vertex-ai';
+import { executeTopicPickerAgent } from './nodes/topic-picker-agent';
 
 // ── 节点注册表 ────────────────────────────────────────────────────────────────
 
@@ -52,9 +55,12 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   xhs_download:          executeXhsDownload,
   localhost_image_download: executeLocalhostImageDownload,
   localhost_image_download_debug: executeLocalhostImageDownloadDebug,
+  credential_login:       executeCredentialLogin,
+  workflow_call:          executeWorkflowCall,
   metaai_generate:       executeMetaAIGenerate,
   gemini_parallel_generate: executeGeminiParallelGenerate,
   vertex_ai:             executeVertexAI,
+  topic_picker_agent:    executeTopicPickerAgent,
 };
 
 // ── 单步执行 ──────────────────────────────────────────────────────────────────

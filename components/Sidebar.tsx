@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import type { ReactNode } from 'react';
 
 const NAV = [
   {
@@ -30,6 +31,15 @@ const NAV = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M4 5a2 2 0 012-2h12a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V5z" />
         <path strokeLinecap="round" strokeLinejoin="round" d="M8 13l2.5-2.5a1 1 0 011.414 0L16 14.586M8 17h8" />
         <circle cx="9" cy="8" r="1.5" />
+      </svg>
+    ),
+  },
+  {
+    href: '/topic-ideas',
+    label: '今日选题',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l2.4 4.86 5.37.78-3.89 3.79.92 5.35L12 15.7l-4.8 2.52.92-5.35-3.89-3.79 5.37-.78L12 3z" />
       </svg>
     ),
   },
@@ -108,15 +118,28 @@ const NAV = [
   },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({
+  className = '',
+  compact = false,
+  onNavigate,
+  headerRight,
+}: {
+  className?: string;
+  compact?: boolean;
+  onNavigate?: () => void;
+  headerRight?: ReactNode;
+}) {
   const pathname = usePathname();
 
   return (
-    <aside className="w-52 shrink-0 border-r border-border bg-card flex flex-col py-6 px-3 gap-1 transition-colors">
+    <aside className={`w-52 shrink-0 border-r border-border bg-card flex flex-col py-6 px-3 gap-1 transition-colors ${className}`}>
       {/* Logo */}
-      <div className="px-3 mb-6">
-        <span className="text-lg font-bold tracking-tight text-foreground">doouyin</span>
-        <p className="text-xs text-muted-foreground mt-0.5">视频解析 & 发布</p>
+      <div className="px-3 mb-6 flex items-start justify-between gap-2">
+        <div>
+          <span className="text-lg font-bold tracking-tight text-foreground">doouyin</span>
+          <p className="text-xs text-muted-foreground mt-0.5">视频解析 & 发布</p>
+        </div>
+        {headerRight}
       </div>
 
       {NAV.map(({ href, label, icon }) => {
@@ -125,14 +148,16 @@ export default function Sidebar() {
           <Link
             key={href}
             href={href}
+            onClick={onNavigate}
             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
               active
                 ? 'bg-primary/10 text-primary border border-primary/20 shadow-sm'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
+            title={label}
           >
             {icon}
-            {label}
+            {!compact && label}
           </Link>
         );
       })}

@@ -38,7 +38,7 @@ function MaterialsDrawer({
       {/* 抽屉主体 */}
       <div
         className={`fixed right-0 top-0 h-full z-50 bg-card border-l border-border shadow-2xl flex flex-col transition-transform duration-300 ${open ? 'translate-x-0' : 'translate-x-full'}`}
-        style={{ width: 400 }}
+        style={{ width: 'min(400px, 100vw)' }}
       >
         {/* 标题栏 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">

@@ -29,7 +29,6 @@ export async function executeNavigate(
       'http://127.0.0.1:50325',
     ].filter(Boolean) as string[]));
     const explicitProxyServer = params.adsProxyServer?.trim() || process.env.ADS_FORCE_PROXY_SERVER?.trim() || '';
-    const defaultLaunchArgs = ['--no-sandbox', '--disable-dev-shm-usage'];
     let effectiveProxyServer = explicitProxyServer;
 
     if (params.useAdsPower && !effectiveProxyServer) {
@@ -74,15 +73,13 @@ export async function executeNavigate(
       }
     }
 
-    const startLaunchArgs = effectiveProxyServer
-      ? [...defaultLaunchArgs, `--proxy-server=${effectiveProxyServer}`]
-      : defaultLaunchArgs;
-    
+    const manualCdpUrl = (params.adsManualCdpUrl || '').trim();
+    const hasManualCdp = !!manualCdpUrl && !manualCdpUrl.includes('{{');
     // 0. 特性：手动 CDP 直连方案（最高优先级，用于绕过 API 鉴权报错）
-    if (params.useAdsPower && params.adsManualCdpUrl) {
+    if (params.useAdsPower && hasManualCdp) {
       emit(`🚀 检测到手动 CDP 地址，正在跳过 API 探测进行直连...`);
       try {
-        newBrowser = await chromium.connectOverCDP(params.adsManualCdpUrl);
+        newBrowser = await chromium.connectOverCDP(manualCdpUrl);
         emit(`🔄 手动直连成功，已接管浏览器实例`);
         
         await new Promise(r => setTimeout(r, 1000));
@@ -103,88 +100,105 @@ export async function executeNavigate(
       emit(`🛡 AdsPower 模式已开启，正在初始化隔离容器...`);
       const profileId = (params.adsProfileId || '').trim();
       if (!profileId) throw new Error('未提供 AdsPower 分身编号 (adsProfileId)');
+      const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
       let connected = false;
-      const endpointOrder = effectiveProxyServer
-        ? ['/api/v1/browser/start', '/api/v1/browser/active']
-        : ['/api/v1/browser/active', '/api/v1/browser/start'];
+      // 配额安全策略：仅复用已激活分身，绝不自动 start，避免触发 AdsPower 启动/创建额度。
+      const endpointOrder = ['/api/v1/browser/active'];
       for (const apiUrl of apiUrls) {
         emit(`🔍 正在探测 AdsPower API 地址: ${apiUrl}`);
+        emit(`🧮 配额保护已启用：仅调用 browser/active，不自动启动分身`);
+        let rateLimited = false;
+        let gotAuthoritativeActiveState = false;
         for (const endpoint of endpointOrder) {
           const urlObj = new URL(`${apiUrl}${endpoint}`);
           urlObj.searchParams.set('user_id', profileId);
-          if (endpoint === '/api/v1/browser/start') {
-            if (effectiveProxyServer) {
-              try {
-                const stopUrl = new URL(`${apiUrl}/api/v1/browser/stop`);
-                stopUrl.searchParams.set('user_id', profileId);
-                await fetch(stopUrl.toString(), { method: 'GET', signal: AbortSignal.timeout(5000) });
-                emit(`🔁 已尝试重启分身以应用代理参数`);
-              } catch {
-                emit(`⚠️ 重启分身失败，继续尝试直接启动`);
-              }
-            }
-            urlObj.searchParams.set('launch_args', JSON.stringify(startLaunchArgs));
-            emit(`⚙️ 启动参数: ${startLaunchArgs.join(' ')}`);
-          }
           if (apiKey) {
             urlObj.searchParams.set('apikey', apiKey);
             urlObj.searchParams.set('api_key', apiKey);
           }
 
-          try {
-            const headers: Record<string, string> = apiKey
-              ? {
-                  Authorization: `Bearer ${apiKey}`,
-                  'api-key': apiKey,
+          const headers: Record<string, string> = apiKey
+            ? {
+                Authorization: `Bearer ${apiKey}`,
+                'api-key': apiKey,
+              }
+            : {};
+
+          for (let activeTry = 1; activeTry <= 3; activeTry += 1) {
+            try {
+              const res = await fetch(urlObj.toString(), {
+                method: 'GET',
+                headers,
+                signal: AbortSignal.timeout(8000),
+              });
+              if (!res.ok) {
+                emit(`⚠️ 接口 HTTP 错误 ${res.status}: ${res.statusText}`);
+                break;
+              }
+              const data = await res.json() as {
+                code?: number;
+                msg?: string;
+                data?: { status?: string; ws?: { puppeteer?: string } };
+              };
+              emit(`📡 API 原始响应: ${JSON.stringify(data)}`);
+
+              if (data.code !== 0) {
+                const msg = String(data.msg || '').toLowerCase();
+                if ((msg.includes('too many request') || msg.includes('too many requests')) && activeTry < 3) {
+                  emit(`⏳ AdsPower 接口限流，${activeTry}/2 次退避后重试...`);
+                  await sleep(1200 * activeTry);
+                  continue;
                 }
-              : {};
+                if (msg.includes('too many request') || msg.includes('too many requests')) {
+                  rateLimited = true;
+                }
+                emit(`❌ API 逻辑报错: ${data.msg}`);
+                break;
+              }
+              gotAuthoritativeActiveState = true;
 
-            const res = await fetch(urlObj.toString(), {
-              method: 'GET',
-              headers,
-              signal: AbortSignal.timeout(8000),
-            });
-            if (!res.ok) {
-              emit(`⚠️ 接口 HTTP 错误 ${res.status}: ${res.statusText}`);
-              continue;
+              const wsEndpoint = data.data?.ws?.puppeteer;
+              if (!wsEndpoint) {
+                const status = String(data.data?.status || '').toLowerCase();
+                if (status === 'inactive' && activeTry < 3) {
+                  emit(`⏳ 分身状态 Inactive，${activeTry}/2 次短轮询后重试...`);
+                  await sleep(1200 * activeTry);
+                  continue;
+                }
+                emit(`❌ API 返回成功但缺少 ws 地址，请确认浏览器已成功启动`);
+                break;
+              }
+
+              emit(`✅ API 校验通过，正在连接调试端点 (CDP)...`);
+              newBrowser = await chromium.connectOverCDP(wsEndpoint);
+              emit(`🔄 CDP 握手成功，取得浏览器控制权`);
+
+              await new Promise(r => setTimeout(r, 1000));
+              const contexts = newBrowser.contexts();
+              if (contexts.length === 0) throw new Error('AdsPower 浏览器环境未就绪（无 contexts）');
+
+              const pgs = contexts[0].pages();
+              activePage = pgs.length > 0 ? pgs[0] : await contexts[0].newPage();
+              connected = true;
+              break;
+            } catch (err: unknown) {
+              emit(`⚠️ 尝试连接 ${apiUrl}${endpoint} 失败: ${getErrorMessage(err)}`);
+              break;
             }
-            const data = await res.json() as {
-              code?: number;
-              msg?: string;
-              data?: { ws?: { puppeteer?: string } };
-            };
-            emit(`📡 API 原始响应: ${JSON.stringify(data)}`);
-
-            if (data.code !== 0) {
-              emit(`❌ API 逻辑报错: ${data.msg}`);
-              continue;
-            }
-
-            const wsEndpoint = data.data?.ws?.puppeteer;
-            if (!wsEndpoint) {
-              emit(`❌ API 返回成功但缺少 ws 地址，请确认浏览器已成功启动`);
-              continue;
-            }
-
-            emit(`✅ API 校验通过，正在连接调试端点 (CDP)...`);
-            newBrowser = await chromium.connectOverCDP(wsEndpoint);
-            emit(`🔄 CDP 握手成功，取得浏览器控制权`);
-
-            await new Promise(r => setTimeout(r, 1000));
-            const contexts = newBrowser.contexts();
-            if (contexts.length === 0) throw new Error('AdsPower 浏览器环境未就绪（无 contexts）');
-
-            const pgs = contexts[0].pages();
-            activePage = pgs.length > 0 ? pgs[0] : await contexts[0].newPage();
-            connected = true;
-            break;
-          } catch (err: unknown) {
-            emit(`⚠️ 尝试连接 ${apiUrl}${endpoint} 失败: ${getErrorMessage(err)}`);
           }
+          if (connected) break;
         }
 
         if (connected) {
+          break;
+        }
+        if (gotAuthoritativeActiveState) {
+          // 已拿到 active 接口的有效状态，避免继续打别名地址造成额外限流。
+          break;
+        }
+        if (rateLimited) {
+          emit('⏳ AdsPower 接口当前限流，跳过多地址探测，稍后再由会话重试接管');
           break;
         }
       }
@@ -220,7 +234,7 @@ export async function executeNavigate(
       }
 
       if (!connected) {
-        throw new Error('AdsPower 唤起失败。API 鉴权失败且未发现存活的直连端口。请确保分身已手动打开。');
+        throw new Error('AdsPower 分身未激活或不可用。已禁用自动启动（配额保护），请先在 AdsPower 中手动打开分身后重试。');
       }
     } else {
       emit(`ℹ️ 未开启 AdsPower，使用原生浏览器模式`);

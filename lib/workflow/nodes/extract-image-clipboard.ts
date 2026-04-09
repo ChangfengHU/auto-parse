@@ -7,6 +7,8 @@ import { uploadBuffer } from '../../oss';
 export interface ExtractImageClipboardParams {
   /** 触发复制的按钮选择器，默认为 Gemini 的"复制图片"按钮 */
   copyButtonSelector?: string;
+  /** 查找复制按钮超时（ms），默认 60000 */
+  copyButtonTimeout?: number;
   /** 点击复制按钮后等待剪贴板就绪的时间（ms），默认 3000 */
   waitAfterCopy?: number;
   /** 是否上传到 OSS（默认 true） */
@@ -89,6 +91,7 @@ export async function executeExtractImageClipboard(
   try {
     // 解析参数
     const copyButtonSelector = params.copyButtonSelector || '[aria-label="Copy image"]';
+    const copyButtonTimeout = params.copyButtonTimeout ?? 60_000;
     const waitAfterCopy = params.waitAfterCopy ?? 3000;
     const uploadToOSS = params.uploadToOSS ?? true;
     const outputVar = params.outputVar || 'imageUrl';
@@ -101,7 +104,7 @@ export async function executeExtractImageClipboard(
     log.push(`🖱️ 正在查找复制按钮：${copyButtonSelector}`);
     ctx.emit?.('log', `🖱️ 正在查找复制按钮...`);
 
-    await page.waitForSelector(copyButtonSelector, { timeout: 10_000 });
+    await page.waitForSelector(copyButtonSelector, { timeout: copyButtonTimeout });
     await page.click(copyButtonSelector);
     log.push(`✅ 已点击复制按钮`);
 

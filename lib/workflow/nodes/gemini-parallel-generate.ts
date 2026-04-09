@@ -10,6 +10,7 @@ interface BranchResult {
   imageUrl?: string;
   sourceUrl?: string;
   pageUrl?: string;
+  extractionMethod?: 'source' | 'clipboard' | 'element_screenshot' | 'page_screenshot';
   error?: string;
 }
 
@@ -58,6 +59,41 @@ async function readImageBufferFromPage(page: Page, src: string): Promise<{ buffe
   return { buffer: Buffer.from(payload.data), mimeType: payload.mimeType || 'image/png' };
 }
 
+async function readImageBufferFromClipboard(page: Page): Promise<{ buffer: Buffer; mimeType: string }> {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  const payload = await page.evaluate(async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        const imgType = item.types.includes('image/png')
+          ? 'image/png'
+          : item.types.find(t => t.startsWith('image/'));
+        if (!imgType) continue;
+        const blob = await item.getType(imgType);
+        const buf = await blob.arrayBuffer();
+        return { mimeType: imgType, data: Array.from(new Uint8Array(buf)) };
+      }
+      for (const item of items) {
+        if (!item.types.includes('text/html')) continue;
+        const htmlBlob = await item.getType('text/html');
+        const html = await htmlBlob.text();
+        const match = html.match(/src="((?:blob|data|https?)[^"]+)"/i);
+        if (!match) continue;
+        const res = await fetch(match[1]);
+        if (!res.ok) continue;
+        const mimeType = res.headers.get('content-type')?.split(';')[0] || 'image/png';
+        const buf = await res.arrayBuffer();
+        return { mimeType, data: Array.from(new Uint8Array(buf)) };
+      }
+      return { error: 'clipboard has no image payload' };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+  if ('error' in payload) throw new Error(payload.error);
+  return { buffer: Buffer.from(payload.data), mimeType: payload.mimeType || 'image/png' };
+}
+
 export async function executeGeminiParallelGenerate(
   page: Page,
   params: GeminiParallelGenerateParams,
@@ -91,6 +127,20 @@ export async function executeGeminiParallelGenerate(
   log.push(`🚀 并发生图开始：${prompts.length} 条提示词，并发=${maxConcurrency}`);
 
   const branchPages: Page[] = [];
+  let clipboardQueue = Promise.resolve();
+  const withClipboardLock = async <T>(fn: () => Promise<T>): Promise<T> => {
+    const prev = clipboardQueue;
+    let release: (() => void) | undefined;
+    clipboardQueue = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release?.();
+    }
+  };
   const worker = async (index: number, prompt: string): Promise<BranchResult> => {
     const branchPage = await page.context().newPage();
     branchPages.push(branchPage);
@@ -116,6 +166,7 @@ export async function executeGeminiParallelGenerate(
         ? await branchPage.locator(resolved.imageSelector).first().getAttribute('src').then(v => v ?? '').catch(() => '')
         : '';
       let imageUrl = sourceUrl;
+      let extractionMethod: BranchResult['extractionMethod'] = 'source';
       if (resolved.uploadToOSS) {
         let buffer: Buffer | null = null;
         let mimeType = 'image/png';
@@ -125,10 +176,29 @@ export async function executeGeminiParallelGenerate(
             const imageData = await readImageBufferFromPage(branchPage, sourceUrl);
             buffer = imageData.buffer;
             mimeType = imageData.mimeType;
+            extractionMethod = 'source';
             ctx.emit?.('log', `${prefix} 使用 source URL 提取图片`);
           } catch {
-            // blob/data URL 在并发页面里偶发不可 fetch，回退到元素截图
-            ctx.emit?.('log', `${prefix} source URL 提取失败，回退元素截图`);
+            ctx.emit?.('log', `${prefix} source URL 提取失败，准备回退剪贴板原图`);
+          }
+        }
+
+        if (!buffer) {
+          try {
+            const copySelector = resolved.successSelector;
+            await withClipboardLock(async () => {
+              const copyBtn = branchPage.locator(copySelector).first();
+              await copyBtn.waitFor({ state: 'visible', timeout: 10_000 });
+              await copyBtn.click({ timeout: 10_000 });
+              await branchPage.waitForTimeout(1200);
+              const clip = await readImageBufferFromClipboard(branchPage);
+              buffer = clip.buffer;
+              mimeType = clip.mimeType;
+              extractionMethod = 'clipboard';
+            });
+            ctx.emit?.('log', `${prefix} 使用剪贴板原图提取图片`);
+          } catch {
+            ctx.emit?.('log', `${prefix} 剪贴板原图提取失败，回退截图`);
           }
         }
 
@@ -137,6 +207,7 @@ export async function executeGeminiParallelGenerate(
             await branchPage.locator(resolved.imageSelector).first().waitFor({ state: 'visible', timeout: 10_000 });
             buffer = await branchPage.locator(resolved.imageSelector).first().screenshot({ type: 'png' });
             mimeType = 'image/png';
+            extractionMethod = 'element_screenshot';
             ctx.emit?.('log', `${prefix} 使用元素截图提取图片`);
           } catch {
             // ignore and fallback to full page
@@ -146,6 +217,7 @@ export async function executeGeminiParallelGenerate(
         if (!buffer) {
           buffer = await branchPage.screenshot({ type: 'png' });
           mimeType = 'image/png';
+          extractionMethod = 'page_screenshot';
           ctx.emit?.('log', `${prefix} 使用整页截图兜底提取图片`);
         }
 
@@ -154,7 +226,7 @@ export async function executeGeminiParallelGenerate(
       }
       const pageUrl = branchPage.url();
       ctx.emit?.('log', `${prefix} 完成`);
-      return { index, prompt, success: true, imageUrl, sourceUrl, pageUrl };
+      return { index, prompt, success: true, imageUrl, sourceUrl, pageUrl, extractionMethod };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.emit?.('log', `${prefix} 失败：${message}`);

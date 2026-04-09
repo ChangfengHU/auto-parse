@@ -18,9 +18,12 @@ export type NodeType =
   | 'xhs_download'   // 高级：小红书帖子图片/视频批量下载 → 上传 OSS
   | 'localhost_image_download' // 高级：本地解析页面图片批量下载 → 上传 OSS
   | 'localhost_image_download_debug' // 调试：本地图片批量下载调试版本
+  | 'credential_login' // 高级：按凭证 ID 拉取并注入平台 Cookie
+  | 'workflow_call' // 高级：把现有工作流当作节点执行（支持并发多次调用）
   | 'metaai_generate' // 高级：调用外部 Python 脚本执行 Meta AI 生成视频并上传 OSS
   | 'gemini_parallel_generate' // 高级：并发打开多个 Tab 同时触发 Gemini 生图
   | 'vertex_ai' // 高级：Vertex AI 聚合节点，封装生图/参考图编辑/生视频等能力
+  | 'topic_picker_agent' // 高级：调用 DailyHot 技能并评估选题，输出 TopN
 
 // ── 节点定义 ──────────────────────────────────────────────────────────────────
 
@@ -150,6 +153,8 @@ export interface QRCodeParams {
 export interface ExtractImageClipboardParams {
   /** 触发复制的按钮选择器，默认为 Gemini "Copy image" 按钮 */
   copyButtonSelector?: string;
+  /** 查找复制按钮超时（ms），默认 60000 */
+  copyButtonTimeout?: number;
   /** 点击后等待剪贴板就绪时间（ms），默认 3000 */
   waitAfterCopy?: number;
   /** 是否上传到 OSS（默认 true） */
@@ -200,6 +205,26 @@ export interface MetaAIGenerateParams {
   outputVar?: string             // 输出的 OSS 连接数组变量名，默认为 'metaaiVideos'
 }
 
+export interface CredentialLoginParams {
+  platform?: 'douyin' | 'xhs' | 'gemini'
+  credentialId?: string
+  strict?: boolean
+  outputCookieVar?: string
+}
+
+export interface WorkflowCallParams {
+  workflowId: string
+  runs?: Array<Record<string, string>> | string
+  count?: number | string
+  instanceIds?: string[] | string
+  promptVarName?: string
+  maxConcurrency?: number
+  minSuccess?: number
+  inheritVars?: boolean
+  outputVar?: string
+  outputDetailVar?: string
+}
+
 export interface GeminiParallelGenerateParams {
   prompts: string[]              // 待并发提交的提示词列表（建议 3 条）
   url?: string                   // Gemini 页面地址，默认 https://gemini.google.com/app
@@ -234,6 +259,23 @@ export interface VertexAIParams {
   ossPath?: string
   outputVar?: string
   outputListVar?: string
+}
+
+export interface TopicPickerAgentParams {
+  goal?: string
+  count?: number
+  baseUrl?: string
+  sources?: string[] | string
+  perSourceLimit?: number
+  evaluatorId?: string
+  llmProvider?: 'auto' | 'openai' | 'gemini' | 'qianwen' | 'deepseek'
+  llmModel?: string
+  llmBaseUrl?: string
+  llmApiKey?: string
+  llmApiKeyEnv?: string
+  llmTemperature?: number
+  outputVar?: string
+  outputDetailVar?: string
 }
 
 // ── 工作流定义 ────────────────────────────────────────────────────────────────
@@ -279,6 +321,7 @@ export interface WorkflowSession {
   id: string
   workflowId: string
   workflow: WorkflowDef
+  initialVars: Record<string, string>      // 会话创建时的初始变量，用于失败重试时回滚
   vars: Record<string, string>
   currentStep: number
   lastExecutedStep: number | null   // 最近一次实际执行的步骤索引（用于接力判断）

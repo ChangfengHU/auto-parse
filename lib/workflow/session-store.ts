@@ -17,11 +17,12 @@ function store(): Map<string, WorkflowSession> {
 }
 
 export function createSession(
-  partial: Omit<WorkflowSession, 'id' | 'createdAt' | 'history' | 'currentStep' | 'status'>
+  partial: Omit<WorkflowSession, 'id' | 'createdAt' | 'history' | 'currentStep' | 'status' | 'initialVars'>
 ): WorkflowSession {
   const session: WorkflowSession = {
     ...partial,
     id: randomUUID(),
+    initialVars: { ...(partial.vars ?? {}) },
     currentStep: 0,
     lastExecutedStep: null,
     status: 'paused',
@@ -50,4 +51,8 @@ export function deleteSession(id: string): boolean {
 
 export function listSessions(): WorkflowSession[] {
   return Array.from(store().values()).map(s => ({ ...s, _page: undefined, _browser: undefined }));
+}
+
+export function listLiveSessions(): WorkflowSession[] {
+  return Array.from(store().values());
 }
