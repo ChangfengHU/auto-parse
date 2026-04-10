@@ -12,7 +12,7 @@ npm run dev
 
 ```bash
 # .env.local
-NEXT_PUBLIC_DEBUG_VNC_URL=https://parseweb.vyibc.com/vnc_lite.html?path=websockify&autoconnect=1&reconnect=1
+NEXT_PUBLIC_DEBUG_VNC_URL=https://parseweb.vyibc.com/vnc.html?path=websockify&autoconnect=1&reconnect=1&resize=remote
 ```
 
 ## 核心页面

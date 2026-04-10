@@ -3,8 +3,10 @@ import { DEFAULT_HUMAN_OPTIONS } from '@/lib/workflow/human-options';
 import { getPersistentContext } from '@/lib/persistent-browser';
 import { executeNode } from '@/lib/workflow/engine';
 import { createSession, deleteSession, getSession, updateSession } from '@/lib/workflow/session-store';
+import { chromium, type Browser, type Page } from 'playwright';
 import type {
   NavigateParams,
+  NodeDef,
   StepHistory,
   WorkflowContext,
   WorkflowDef,
@@ -112,6 +114,51 @@ function collectImageUrls(session: WorkflowSession): string[] {
   return Array.from(urls);
 }
 
+async function closeSessionPageSafely(session: WorkflowSession): Promise<'closed' | 'kept-last-tab' | 'none'> {
+  const page = session._page;
+  if (!page) return 'none';
+  try {
+    // AdsPower 场景：如果已经是该分身最后一个标签页，则不关闭，避免分身退回 Inactive。
+    if (session._browser) {
+      const openPages = page.context().pages().filter((p) => !p.isClosed());
+      if (openPages.length <= 1) {
+        return 'kept-last-tab';
+      }
+    }
+    await page.close().catch(() => {});
+    return 'closed';
+  } catch {
+    await page.close().catch(() => {});
+    return 'closed';
+  }
+}
+
+async function ensureRuntimePageForNode(input: {
+  session: WorkflowSession;
+  node: NodeDef;
+  currentPage?: Page;
+}): Promise<{ page: Page; tempBrowser?: Browser }> {
+  if (input.currentPage) {
+    return { page: input.currentPage };
+  }
+
+  const isAdsPowerNavigate =
+    input.node.type === 'navigate' &&
+    Boolean(((input.node.params ?? {}) as Partial<NavigateParams>).useAdsPower);
+  if (isAdsPowerNavigate) {
+    const tempBrowser = await chromium.launch({ headless: true });
+    const page = await tempBrowser.newPage();
+    return { page, tempBrowser };
+  }
+
+  const ctx = await getPersistentContext();
+  const page = await ctx.newPage();
+  page.on('dialog', d => d.accept());
+  updateSession(input.session.id, { _page: page });
+  input.session._page = page;
+  return { page };
+}
+
 async function runTask(taskId: string) {
   const task = taskStore().get(taskId);
   if (!task) return;
@@ -129,13 +176,6 @@ async function runTask(taskId: string) {
   updateTask(taskId, { status: 'running', startedAt: new Date().toISOString() });
 
   let runtimePage = session._page;
-  if (!runtimePage) {
-    const ctx = await getPersistentContext();
-    runtimePage = await ctx.newPage();
-    runtimePage.on('dialog', d => d.accept());
-    updateSession(session.id, { _page: runtimePage });
-    session._page = runtimePage;
-  }
 
   for (let i = session.currentStep; i < session.workflow.nodes.length; i++) {
     const freshTask = taskStore().get(taskId);
@@ -150,7 +190,7 @@ async function runTask(taskId: string) {
         timestamp: new Date().toISOString(),
       });
       if (freshTask.autoCloseTab && session._page) {
-        await session._page.close().catch(() => {});
+        await closeSessionPageSafely(session);
         deleteSession(session.id);
       }
       return;
@@ -174,7 +214,21 @@ async function runTask(taskId: string) {
       humanOptions: session.humanOptions,
     };
 
-    const result = await executeNode(runtimePage, node, ctx);
+    const { page: stepPage, tempBrowser } = await ensureRuntimePageForNode({
+      session,
+      node,
+      currentPage: runtimePage,
+    });
+    runtimePage = stepPage;
+
+    let result: Awaited<ReturnType<typeof executeNode>>;
+    try {
+      result = await executeNode(runtimePage, node, ctx);
+    } finally {
+      if (tempBrowser) {
+        await tempBrowser.close().catch(() => {});
+      }
+    }
     const nextVars = Object.fromEntries(
       Object.entries(ctx.vars).filter(([key]) => key !== '__pauseToken')
     );
@@ -228,7 +282,7 @@ async function runTask(taskId: string) {
       });
       const failedTask = taskStore().get(taskId);
       if (failedTask?.autoCloseTab && session._page) {
-        await session._page.close().catch(() => {});
+        await closeSessionPageSafely(session);
         deleteSession(session.id);
       }
       return;
@@ -258,7 +312,7 @@ async function runTask(taskId: string) {
     },
   });
   if (doneTask?.autoCloseTab && finalSession._page) {
-    await finalSession._page.close().catch(() => {});
+    await closeSessionPageSafely(finalSession);
     deleteSession(finalSession.id);
   }
 }

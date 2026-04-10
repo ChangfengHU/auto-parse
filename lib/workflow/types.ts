@@ -274,6 +274,9 @@ export interface TopicPickerAgentParams {
   llmApiKey?: string
   llmApiKeyEnv?: string
   llmTemperature?: number
+  llmSystemPrompt?: string
+  llmUserPromptTemplate?: string
+  llmCandidateLimit?: number
   outputVar?: string
   outputDetailVar?: string
 }

@@ -6,21 +6,16 @@ import { evaluateTopicCandidates } from '../skills/topic-evaluator-skill';
 import type { TopicCandidate } from '../topic-evaluators';
 
 const DEFAULT_SOURCES = ['douyin', 'bilibili', 'baidu', 'toutiao', 'thepaper'];
+const DEFAULT_SYSTEM_PROMPT =
+  '你是内容选题总监。基于候选热点，按目标筛选最值得做的 3-5 个选题，优先考虑曝光潜力、播放潜力、涨粉潜力。必须输出严格 JSON。';
+const DEFAULT_USER_PROMPT_TEMPLATE =
+  '任务目标：{{goal}}\n输出数量：{{count}}\n\n候选数据（JSON）：\n{{candidatesJson}}\n\n请仅输出 JSON，结构为：{"selected":[{"rank":1,"title":"","source":"","sourceName":"","score":0-100,"reason":"","expected":{"exposure":0,"plays":0,"fans":0},"url":""}],"summary":"","discarded":[{"title":"","reason":""}]}\n要求：selected 按优先级排序，尽量覆盖多个来源。';
 
 interface LlmMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
 type LlmProvider = 'openai' | 'gemini' | 'qianwen' | 'deepseek';
-
-interface LlmToolCall {
-  name: 'dailyhot.fetch_topics' | 'evaluator.score_candidates';
-  arguments?: Record<string, unknown>;
-}
-
-interface LlmPlannerResult {
-  toolCalls: LlmToolCall[];
-}
 
 interface LlmFinalResult {
   selected: Array<{
@@ -50,6 +45,10 @@ function parseSources(raw: unknown): string[] {
     }
   }
   return text.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function renderPromptTemplate(template: string, vars: Record<string, string>) {
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => vars[key] ?? '');
 }
 
 function normalizeTitle(title: string) {
@@ -467,12 +466,20 @@ export async function executeTopicPickerAgent(
   const outputVar = String(params.outputVar ?? 'topicIdeas').trim() || 'topicIdeas';
   const outputDetailVar = String(params.outputDetailVar ?? 'topicIdeasDetail').trim() || 'topicIdeasDetail';
   const evaluatorId = String(params.evaluatorId ?? '').trim() || undefined;
+  const llmSystemPrompt = String(params.llmSystemPrompt ?? ctx.vars.topicLlmSystemPrompt ?? DEFAULT_SYSTEM_PROMPT).trim() || DEFAULT_SYSTEM_PROMPT;
+  const llmUserPromptTemplate = String(
+    params.llmUserPromptTemplate ?? ctx.vars.topicLlmUserPromptTemplate ?? DEFAULT_USER_PROMPT_TEMPLATE
+  ).trim() || DEFAULT_USER_PROMPT_TEMPLATE;
+  const llmCandidateLimitRaw = Number(params.llmCandidateLimit ?? ctx.vars.topicLlmCandidateLimit ?? 80);
+  const llmCandidateLimit = Number.isFinite(llmCandidateLimitRaw)
+    ? Math.max(20, Math.min(150, Math.floor(llmCandidateLimitRaw)))
+    : 80;
 
   try {
     const llmConfig = resolveLlmConfig(params, ctx);
     log.push(`🎯 目标：${goal}`);
     log.push(`🧠 LLM：${llmConfig.provider}/${llmConfig.model} @ ${llmConfig.baseUrl}`);
-    log.push(`🧰 Skills：dailyhot.fetch_topics + evaluator.score_candidates`);
+    log.push(`🧰 Skill：dailyhot.fetch_topics（候选拉取）`);
     log.push(`📡 来源：${sources.join(', ')}`);
 
     const fetched = await fetchDailyHotTopics({ baseUrl, sources, perSourceLimit });
@@ -502,94 +509,26 @@ export async function executeTopicPickerAgent(
       .map(([source, size]) => `${source}:${size}`)
       .join(', ');
     log.push(`📊 候选分布：${sourceSummary}`);
-
-    const plannerPrompt: LlmMessage[] = [
-      {
-        role: 'system',
-        content:
-          '你是选题Agent的规划器。你必须输出JSON对象，不要输出其他文本。可用工具: dailyhot.fetch_topics, evaluator.score_candidates。' +
-          '如果已经有候选数据，优先调用 evaluator.score_candidates。返回格式: {"toolCalls":[{"name":"...","arguments":{}}]}',
-      },
-      {
-        role: 'user',
-        content: JSON.stringify(
-          {
-            goal,
-            count,
-            availableTools: ['dailyhot.fetch_topics', 'evaluator.score_candidates'],
-            candidatePreview: candidates.slice(0, 12).map((item) => ({
-              title: item.title,
-              source: item.source,
-              hotScore: Number(item.hotScore.toFixed(1)),
-              trendScore: Number(item.trendScore.toFixed(1)),
-            })),
-          },
-          null,
-          2
-        ),
-      },
-    ];
-
-    let planner: LlmPlannerResult = { toolCalls: [{ name: 'evaluator.score_candidates', arguments: {} }] };
-    try {
-      const plannerRaw = await callLlm(llmConfig, plannerPrompt);
-      planner = parseJsonObject<LlmPlannerResult>(plannerRaw);
-    } catch {
-      // keep safe default
-    }
-    const plannerText = (planner.toolCalls ?? [])
-      .map((call) => `${call.name}${call.arguments ? `(${JSON.stringify(call.arguments)})` : ''}`)
-      .join(' -> ');
-    log.push(`🤖 Planner 工具计划：${plannerText || 'evaluator.score_candidates(默认回退)'}`);
-
-    const toolCalls = Array.isArray(planner.toolCalls) ? planner.toolCalls : [];
-    const shouldRunEvaluator =
-      toolCalls.length === 0 || toolCalls.some((call) => call.name === 'evaluator.score_candidates');
-
-    const evaluated = evaluateTopicCandidates({
-      candidates,
+    const candidateInput = candidates.slice(0, llmCandidateLimit).map((item, index) => ({
+      rank: index + 1,
+      title: item.title,
+      source: item.source,
+      sourceName: item.sourceName,
+      hotValue: item.hotValue ?? null,
+      sourceRank: item.rank,
+      timestamp: item.timestamp ?? null,
+      url: item.url ?? '',
+    }));
+    const userPrompt = renderPromptTemplate(llmUserPromptTemplate, {
       goal,
-      evaluatorId: shouldRunEvaluator
-        ? String(toolCalls.find((call) => call.name === 'evaluator.score_candidates')?.arguments?.evaluatorId ?? evaluatorId ?? '')
-        : evaluatorId,
+      count: String(count),
+      candidatesJson: JSON.stringify(candidateInput, null, 2),
     });
-    log.push(`🧪 评估器：${evaluated.evaluator.id}@${evaluated.evaluator.version}（${evaluated.evaluator.label}）`);
-    for (const [index, item] of evaluated.scored.slice(0, Math.min(5, count + 2)).entries()) {
-      log.push(`  #${index + 1} ${item.title}（${item.sourceName}）score=${item.score.toFixed(2)}`);
-    }
-
+    log.push(`🤖 已将 ${candidateInput.length} 条候选交给 LLM 过滤选择`);
+    log.push(`📝 提示词可编辑：llmSystemPrompt / llmUserPromptTemplate`);
     const finalPrompt: LlmMessage[] = [
-      {
-        role: 'system',
-        content:
-          '你是选题评审Agent。请严格输出JSON对象，字段仅允许：selected, summary, discarded。' +
-          `selected 必须是 ${count} 条（若不够可少，但尽量满足），每条包含 title/source/sourceName/score/reason/expected/url。` +
-          'score 范围0-100，expected包含 exposure/plays/fans 三个整数。',
-      },
-      {
-        role: 'user',
-        content: JSON.stringify(
-          {
-            goal,
-            count,
-            candidateCount: candidates.length,
-            scoredTop: evaluated.scored.slice(0, 20).map((item, index) => ({
-              rank: index + 1,
-              title: item.title,
-              source: item.source,
-              sourceName: item.sourceName,
-              score: Number(item.score.toFixed(2)),
-              reason: item.reason,
-              expected: item.expected,
-              url: item.url ?? '',
-            })),
-            instruction:
-              '基于上述候选与评分，给出最终3-5条选题。允许你根据目标重排，但必须解释原因，并输出结构化JSON。',
-          },
-          null,
-          2
-        ),
-      },
+      { role: 'system', content: llmSystemPrompt },
+      { role: 'user', content: userPrompt },
     ];
 
     let llmFinal: LlmFinalResult | null = null;
@@ -597,15 +536,15 @@ export async function executeTopicPickerAgent(
       const finalRaw = await callLlm(llmConfig, finalPrompt);
       llmFinal = parseJsonObject<LlmFinalResult>(finalRaw);
     } catch (error) {
-      log.push(`⚠️ LLM 最终输出解析失败，已回退到评估器结果：${error instanceof Error ? error.message : String(error)}`);
+      log.push(`⚠️ LLM 输出解析失败，已回退到评估器：${error instanceof Error ? error.message : String(error)}`);
     }
 
-    const fallback = fallbackFromEvaluator({
+    const evaluated = evaluateTopicCandidates({
+      candidates,
       goal,
-      count,
-      scored: evaluated.scored,
-      evaluator: evaluated.evaluator,
+      evaluatorId,
     });
+    const fallback = fallbackFromEvaluator({ goal, count, scored: evaluated.scored, evaluator: evaluated.evaluator });
     const selected = llmFinal
       ? normalizeFinalResult(llmFinal, count, candidates, fallback.summary)
       : fallback.selected;
@@ -629,6 +568,11 @@ export async function executeTopicPickerAgent(
     const detail = {
       goal,
       llm: { provider: llmConfig.provider, model: llmConfig.model, baseUrl: llmConfig.baseUrl },
+      prompt: {
+        system: llmSystemPrompt,
+        userTemplate: llmUserPromptTemplate,
+        candidateLimit: llmCandidateLimit,
+      },
       evaluator: evaluated.evaluator,
       sourceCount: fetched.enabledSources.length,
       candidateCount: candidates.length,

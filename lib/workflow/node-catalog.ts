@@ -741,7 +741,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       workflowId: '',
       runs: [],
       count: '{{imageCount}}',
-      instanceIds: ['k1b908rw', 'k1b8yqxe', 'k1ba8vac'],
+      instanceIds: ['k1b908rw', 'k1bc2kj2', 'k1bc2kja'],
       promptVarName: 'noteUrl',
       maxConcurrency: 3,
       minSuccess: '{{imageCount}}',
@@ -773,7 +773,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         label: '浏览器实例池',
         desc: '当 runs 为空时，按该实例池轮询分发 browserInstanceId。可填 JSON 数组或逗号分隔字符串。',
         type: 'template',
-        example: '[\"k1b908rw\",\"k1b8yqxe\",\"k1ba8vac\"]',
+        example: '[\"k1b908rw\",\"k1bc2kj2\",\"k1bc2kja\"]',
       },
       promptVarName: {
         label: '提示词变量名',
@@ -971,7 +971,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
     label: '选题 Agent',
     icon: '🧠',
     category: 'advanced',
-    desc: 'LLM 驱动的选题 Agent：由模型决定调用哪些 skill（热点拉取/评估），并输出最终 3-5 条选题。',
+    desc: '先通过 DailyHot skill 拉取热点并健康检查，再将候选交给 LLM 按提示词直接过滤选择最终 3-5 条选题。',
     defaultParams: {
       goal: '给我当前最具价值的三个选题',
       count: 3,
@@ -984,6 +984,11 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       llmBaseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
       llmApiKeyEnv: 'QWEN_API_KEY',
       llmTemperature: 0.2,
+      llmSystemPrompt:
+        '你是内容选题总监。基于候选热点，按目标筛选最值得做的 3-5 个选题，优先考虑曝光潜力、播放潜力、涨粉潜力。必须输出严格 JSON。',
+      llmUserPromptTemplate:
+        '任务目标：{{goal}}\\n输出数量：{{count}}\\n\\n候选数据（JSON）：\\n{{candidatesJson}}\\n\\n请仅输出 JSON，结构为：{\"selected\":[{\"rank\":1,\"title\":\"\",\"source\":\"\",\"sourceName\":\"\",\"score\":0-100,\"reason\":\"\",\"expected\":{\"exposure\":0,\"plays\":0,\"fans\":0},\"url\":\"\"}],\"summary\":\"\",\"discarded\":[{\"title\":\"\",\"reason\":\"\"}]}\\n要求：selected 按优先级排序，尽量覆盖多个来源。',
+      llmCandidateLimit: 80,
       outputVar: 'topicIdeas',
       outputDetailVar: 'topicIdeasDetail',
     },
@@ -1019,8 +1024,8 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         example: '20',
       },
       evaluatorId: {
-        label: '评估器插件',
-        desc: '评估 skill 的默认插件 ID（LLM 可覆盖），默认 hotness-v1；涨粉可选 growth-v1。',
+        label: '回退评估器',
+        desc: '仅当 LLM 输出失败时用于回退排序，默认 hotness-v1；涨粉可选 growth-v1。',
         type: 'string',
         example: 'hotness-v1',
       },
@@ -1059,6 +1064,24 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         desc: '0-1 之间，越低越稳定。',
         type: 'number',
         example: '0.2',
+      },
+      llmSystemPrompt: {
+        label: 'LLM 系统提示词',
+        desc: '用于约束模型角色和输出格式。支持在工作流节点中直接修改。',
+        type: 'template',
+        example: '你是内容选题总监...必须输出严格 JSON。',
+      },
+      llmUserPromptTemplate: {
+        label: 'LLM 用户提示词模板',
+        desc: '支持模板变量：{{goal}} {{count}} {{candidatesJson}}。',
+        type: 'template',
+        example: '任务目标：{{goal}}\\n候选数据：{{candidatesJson}}\\n请仅输出 JSON...',
+      },
+      llmCandidateLimit: {
+        label: '送入 LLM 的候选上限',
+        desc: '为控制 token 成本，仅将前 N 条候选发送给模型。',
+        type: 'number',
+        example: '80',
       },
       outputVar: {
         label: 'TopN 输出变量',

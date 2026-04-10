@@ -265,7 +265,7 @@ export default function TopicIdeasPage() {
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">今日选题</h1>
-        <p className="text-sm text-muted-foreground mt-1">基于 DailyHotApi + 选题评估器，输出 3-5 条可执行选题。</p>
+        <p className="text-sm text-muted-foreground mt-1">先拉取 DailyHot 候选并健康检查，再交给 LLM 过滤输出 3-5 条可执行选题。</p>
       </div>
 
       <div className="bg-card border border-border rounded-xl p-4 space-y-4">

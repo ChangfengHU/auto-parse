@@ -10,7 +10,7 @@ type LogEntry = {
   text: string;
 };
 
-type GenerateCase = 'single' | 'ads-multi' | 'ads-ai-pool';
+type GenerateCase = 'single' | 'ads-multi' | 'ads-ai-pool' | 'ads-ha-10';
 
 type AdsRunInput = {
   browserInstanceId: string;
@@ -33,9 +33,10 @@ type AdsPoolTask = {
   prompt: string;
   browserInstanceId?: string;
   sessionId?: string;
-  status: 'pending' | 'running' | 'success' | 'failed';
+  status: 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
   imageUrl?: string;
   error?: string;
+  attempts?: number;
 };
 
 const AI_THEME_OPTIONS = [
@@ -52,6 +53,21 @@ const AI_STYLE_OPTIONS = [
   '未来赛博朋克',
   '国潮插画',
   '杂志 editorial',
+];
+
+const HA_DEFAULT_INSTANCE_IDS = ['k1b908rw', 'k1bc2kj2', 'k1bc2kja'];
+
+const HA_DEFAULT_PROMPTS = [
+  '赛博朋克城市夜景，霓虹灯，电影感，8k',
+  '北欧极简客厅，清晨自然光，写实摄影，高级质感',
+  '情侣校园散步，电影感，8k',
+  '秋日森林木屋，阳光透过树叶，写实摄影',
+  '未来感电商产品主视觉，悬浮平台，体积光',
+  '海边日落人像，胶片颗粒，暖色调',
+  '现代办公室团队协作场景，明亮自然光，商业摄影',
+  '国潮风神兽插画，细节丰富，海报构图',
+  '极简白色厨房空间，杂志风室内摄影',
+  '雨夜街头反光路面，电影级光影，广角镜头',
 ];
 
 function nowTime() {
@@ -292,9 +308,9 @@ export default function ImageGeneratePage() {
   const [generateCase, setGenerateCase] = useState<GenerateCase>('single');
   const [adsRuns, setAdsRuns] = useState<AdsRunInput[]>([
     { browserInstanceId: 'k1b908rw', prompt: '' },
-    { browserInstanceId: 'k1ba8vac', prompt: '' },
+    { browserInstanceId: 'k1bc2kj2', prompt: '' },
   ]);
-  const [instancePoolIds, setInstancePoolIds] = useState<string[]>(['k1b908rw', 'k1ba8vac']);
+  const [instancePoolIds, setInstancePoolIds] = useState<string[]>(['k1b908rw', 'k1bc2kj2']);
   const [instancePoolStatus, setInstancePoolStatus] = useState<InstancePoolStatus[]>([]);
   const [aiTheme, setAiTheme] = useState(AI_THEME_OPTIONS[0]);
   const [aiStyle, setAiStyle] = useState(AI_STYLE_OPTIONS[0]);
@@ -574,6 +590,7 @@ export default function ImageGeneratePage() {
     setError('');
     setLogs([]);
     setImageUrls([]);
+    setAdsPoolTasks([]);
     setSessionId(null);
 
     try {
@@ -677,7 +694,7 @@ export default function ImageGeneratePage() {
         } else {
           addLog(setLogs, `✅ Ads 并行执行完成：全部成功 (${finalizedResults.length} 组)`, 'success');
         }
-      } else {
+      } else if (generateCase === 'ads-ai-pool') {
         const prompts = aiGeneratedPrompts.map((item) => item.trim()).filter(Boolean);
         if (prompts.length === 0) {
           throw new Error('请先生成提示词');
@@ -688,6 +705,64 @@ export default function ImageGeneratePage() {
         }
         addLog(setLogs, `🚀 启动实例池调度，共 ${prompts.length} 条提示词，实例池 ${poolIds.length} 个`);
         await runAdsPoolTasks(prompts);
+      } else {
+        addLog(setLogs, '🚀 启动高可用 10 图任务（失败自动重试）');
+        const createRes = await fetch('/api/gemini-web/image/ads-ha', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompts: HA_DEFAULT_PROMPTS,
+            instanceIds: HA_DEFAULT_INSTANCE_IDS,
+            maxConcurrency: 3,
+            maxAttemptsPerPrompt: 6,
+            runTimeoutMs: 8 * 60 * 1000,
+            pollIntervalMs: 2000,
+            workflowId,
+            autoCloseTab: false,
+          }),
+        });
+        const createData = await createRes.json();
+        if (!createRes.ok || !createData?.taskId) {
+          throw new Error(createData?.error || `创建高可用任务失败（HTTP ${createRes.status}）`);
+        }
+        const taskId = String(createData.taskId);
+        setSessionId(taskId);
+        addLog(setLogs, `✅ 高可用任务已创建：${taskId}`, 'success');
+
+        while (true) {
+          const queryRes = await fetch(`/api/gemini-web/image/ads-ha/tasks/${taskId}`);
+          const queryData = await queryRes.json();
+          if (!queryRes.ok) {
+            throw new Error(queryData?.error || `查询任务失败（HTTP ${queryRes.status}）`);
+          }
+          const urls: string[] = Array.isArray(queryData?.result?.imageUrls)
+            ? queryData.result.imageUrls.filter((item: unknown) => typeof item === 'string')
+            : [];
+          setImageUrls(urls);
+
+          const items = Array.isArray(queryData?.result?.items) ? queryData.result.items : [];
+          setAdsPoolTasks(
+            items.map((item: Record<string, unknown>) => ({
+              id: String(item.id || ''),
+              prompt: String(item.prompt || ''),
+              browserInstanceId: String(item.browserInstanceId || ''),
+              status: String(item.status || 'pending') as AdsPoolTask['status'],
+              imageUrl: String(item.primaryImageUrl || ''),
+              error: String(item.error || ''),
+              attempts: Number(item.attempts || 0),
+            }))
+          );
+
+          if (queryData?.done) {
+            if (queryData?.status === 'success') {
+              addLog(setLogs, `✅ 高可用任务完成：成功 ${queryData?.result?.successCount || 0}/${queryData?.result?.totalCount || 0}`, 'success');
+            } else {
+              addLog(setLogs, `⚠️ 高可用任务结束：成功 ${queryData?.result?.successCount || 0}/${queryData?.result?.totalCount || 0}`, 'error');
+            }
+            break;
+          }
+          await sleep(2000);
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -717,6 +792,7 @@ export default function ImageGeneratePage() {
               <option value="single">通用单流程</option>
               <option value="ads-multi">Ads 工作流（多组并行）</option>
               <option value="ads-ai-pool">Ads 实例池（AI 提示词）</option>
+              <option value="ads-ha-10">Ads 高可用（默认 10 图）</option>
             </select>
           </div>
           <div>
@@ -735,7 +811,7 @@ export default function ImageGeneratePage() {
           </div>
           <div className="text-xs text-muted-foreground flex items-end">
             {selectedWorkflow
-              ? `${generateCase === 'ads-multi' ? 'Ads 并行模式' : generateCase === 'ads-ai-pool' ? 'Ads 实例池模式' : '普通模式'} · 节点数：${selectedWorkflow.nodes.length}`
+              ? `${generateCase === 'ads-multi' ? 'Ads 并行模式' : generateCase === 'ads-ai-pool' ? 'Ads 实例池模式' : generateCase === 'ads-ha-10' ? 'Ads 高可用模式' : '普通模式'} · 节点数：${selectedWorkflow.nodes.length}`
               : '暂无可用工作流'}
           </div>
         </div>
@@ -800,7 +876,7 @@ export default function ImageGeneratePage() {
               ))}
             </div>
           </div>
-        ) : (
+        ) : generateCase === 'ads-ai-pool' ? (
           <div className="space-y-3">
             <div className="grid md:grid-cols-4 gap-2">
               <div>
@@ -913,6 +989,24 @@ export default function ImageGeneratePage() {
               </div>
             </div>
           </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-border p-3 bg-muted/20">
+              <div className="text-xs text-muted-foreground mb-2">默认实例池（自动调度）</div>
+              <div className="text-xs font-mono break-all">{HA_DEFAULT_INSTANCE_IDS.join(', ')}</div>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <div className="text-xs text-muted-foreground mb-2">默认 10 条提示词（失败自动重试）</div>
+              <div className="space-y-1 max-h-44 overflow-auto">
+                {HA_DEFAULT_PROMPTS.map((item, idx) => (
+                  <div key={`${idx}-${item}`} className="text-xs border border-border rounded px-2 py-1">
+                    <span className="text-muted-foreground mr-2">#{idx + 1}</span>
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         )}
 
         <div className="flex items-center gap-2">
@@ -925,7 +1019,9 @@ export default function ImageGeneratePage() {
                 ? !prompt.trim()
                 : generateCase === 'ads-multi'
                   ? adsRuns.every((item) => !item.browserInstanceId.trim() || !item.prompt.trim())
-                  : aiGeneratedPrompts.length === 0 || instancePoolIds.length === 0)
+                  : generateCase === 'ads-ai-pool'
+                    ? aiGeneratedPrompts.length === 0 || instancePoolIds.length === 0
+                    : false)
             }
             className="px-4 py-2 rounded-lg text-sm font-semibold bg-primary text-white disabled:opacity-50"
           >
@@ -933,9 +1029,11 @@ export default function ImageGeneratePage() {
               ? '生成中...'
               : generateCase === 'single'
                 ? '创建图片'
-                : generateCase === 'ads-multi'
-                  ? '并行生成图片'
-                  : '实例池批量生成'}
+              : generateCase === 'ads-multi'
+                ? '并行生成图片'
+                : generateCase === 'ads-ai-pool'
+                  ? '实例池批量生成'
+                  : '一键高可用生成 10 图'}
           </button>
           {sessionId && <span className="text-xs text-muted-foreground">session: {sessionId}</span>}
           {error && <span className="text-xs text-red-500">{error}</span>}
@@ -967,7 +1065,7 @@ export default function ImageGeneratePage() {
 
         <div className="bg-card border border-border rounded-xl p-4">
           <h2 className="text-sm font-semibold mb-3">生成图片 URL</h2>
-          {generateCase === 'ads-ai-pool' && (
+          {(generateCase === 'ads-ai-pool' || generateCase === 'ads-ha-10') && (
             <div className="mb-3 space-y-2 max-h-56 overflow-auto">
               {adsPoolTasks.length === 0 ? (
                 <div className="text-xs text-muted-foreground">提示词任务结果会显示在这里。</div>
@@ -981,6 +1079,8 @@ export default function ImageGeneratePage() {
                           ? 'text-green-500'
                           : task.status === 'failed'
                             ? 'text-red-500'
+                            : task.status === 'cancelled'
+                              ? 'text-zinc-500'
                             : task.status === 'running'
                               ? 'text-blue-500'
                               : 'text-muted-foreground'
@@ -989,7 +1089,7 @@ export default function ImageGeneratePage() {
                       </span>
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      实例：{task.browserInstanceId || '-'}
+                      实例：{task.browserInstanceId || '-'} · 尝试：{task.attempts || 0}
                     </div>
                     <div className="text-xs">{task.prompt}</div>
                     {task.imageUrl && (

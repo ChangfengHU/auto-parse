@@ -71,7 +71,7 @@ export function resolvePoolInstanceIds(explicit?: string[]): string[] {
     .map((item) => item.trim())
     .filter(Boolean);
   if (fromEnv.length > 0) return fromEnv;
-  return ['k1b908rw', 'k1ba8vac'];
+  return ['k1b908rw', 'k1bc2kj2', 'k1bc2kja'];
 }
 
 function findSessionOccupancy(instanceId: string): InstanceStatus | null {
