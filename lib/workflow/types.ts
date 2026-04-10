@@ -6,6 +6,7 @@ export type NodeType =
   | 'material'        // 业务：从素材库选择素材并输出变量
   | 'navigate'        // 基础：导航到 URL
   | 'text_input'      // 基础：文本填入
+  | 'paste_image_clipboard' // 基础：将图片 URL 写入剪贴板并粘贴到目标输入区
   | 'click'           // 基础：点击元素
   | 'scroll'          // 基础：滚动页面或滚动到元素
   | 'screenshot'      // 基础：截图快照
@@ -76,6 +77,15 @@ export interface TextInputParams {
   value: string
   clear?: boolean   // 是否先清空（默认 true）
   delay?: number    // 每字符延迟 ms（模拟人工输入，默认 0）
+}
+
+export interface PasteImageClipboardParams {
+  imageUrl?: string
+  imageUrls?: string[] | string
+  targetSelector: string
+  waitAfterPaste?: number
+  attachIndicatorSelector?: string
+  outputVar?: string
 }
 
 export interface ClickParams {

@@ -15,6 +15,7 @@ import { getCatalogItem } from './node-catalog';
 import { executeMaterial } from './nodes/material';
 import { executeNavigate } from './nodes/navigate';
 import { executeTextInput } from './nodes/text-input';
+import { executePasteImageClipboard } from './nodes/paste-image-clipboard';
 import { executeClick } from './nodes/click';
 import { executeScroll } from './nodes/scroll';
 import { executeScreenshot } from './nodes/screenshot';
@@ -44,6 +45,7 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   material:              executeMaterial,
   navigate:              executeNavigate,
   text_input:            executeTextInput,
+  paste_image_clipboard: executePasteImageClipboard,
   click:                 executeClick,
   scroll:                executeScroll,
   screenshot:            executeScreenshot,

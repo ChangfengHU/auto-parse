@@ -213,6 +213,61 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
   },
 
   {
+    type: 'paste_image_clipboard',
+    label: '粘贴图片',
+    icon: '🖼️',
+    category: 'basic',
+    desc: '将图片 URL 下载后注入剪贴板，并在目标输入框执行粘贴（用于 Gemini 图片编辑）',
+    defaultParams: {
+      imageUrls: [],
+      imageUrl: '{{imageUrl}}',
+      targetSelector: 'div[contenteditable="true"]',
+      waitAfterPaste: 1200,
+      attachIndicatorSelector: '',
+      outputVar: 'pastedImageUrls',
+    },
+    paramMeta: {
+      imageUrls: {
+        label: '图片 URL 数组',
+        desc: '可填数组（["url1","url2"]）或逗号/换行分隔字符串。为空时自动跳过该节点',
+        type: 'array',
+        required: false,
+        example: '["https://a.jpg","https://b.png"]',
+      },
+      imageUrl: {
+        label: '图片 URL',
+        desc: '单图兼容字段；当 imageUrls 为空时使用此值，支持 {{变量}} 模板',
+        type: 'template',
+        required: false,
+        example: 'http://articel.oss-cn-hangzhou.aliyuncs.com/xhs/feed-covers/xx.jpg',
+      },
+      targetSelector: {
+        ...SELECTOR_META,
+        required: true,
+        desc: '接收粘贴动作的输入框选择器（会先点击聚焦再执行 Ctrl/Cmd+V）',
+      },
+      waitAfterPaste: {
+        label: '粘贴后等待（ms）',
+        desc: '执行粘贴后的额外等待时间，给 Gemini 上传附件预留缓冲',
+        type: 'number',
+        example: '1200',
+      },
+      attachIndicatorSelector: {
+        label: '附件校验选择器',
+        desc: '可选：粘贴后用该选择器校验附件是否出现（为空则不校验）',
+        type: 'selector',
+        example: '[aria-label*="Remove image"], [data-test-id*="image-chip"]',
+      },
+      outputVar: {
+        label: '输出变量名',
+        desc: '把本次粘贴的源图片 URL 数组写入此变量，供后续节点复用',
+        type: 'string',
+        example: 'pastedImageUrls',
+      },
+    },
+  },
+
+  {
     type: 'scroll',
     label: '滚动',
     icon: '🖱️',
