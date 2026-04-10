@@ -24,6 +24,7 @@ import { executeQRCode } from './nodes/qrcode';
 import { executeHumanPause } from './nodes/human-pause';
 import { executeExtractImage } from './nodes/extract-image';
 import { executeExtractImageClipboard } from './nodes/extract-image-clipboard';
+import { executeExtractImageDownload } from './nodes/extract-image-download';
 import { executeXhsDownload } from './nodes/xhs-download';
 import { executeLocalhostImageDownload } from './nodes/localhost-image-download';
 import { executeLocalhostImageDownloadDebug } from './nodes/localhost-image-download-debug';
@@ -52,6 +53,7 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   human_pause:           executeHumanPause,
   extract_image:         executeExtractImage,
   extract_image_clipboard: executeExtractImageClipboard,
+  extract_image_download: executeExtractImageDownload,
   xhs_download:          executeXhsDownload,
   localhost_image_download: executeLocalhostImageDownload,
   localhost_image_download_debug: executeLocalhostImageDownloadDebug,

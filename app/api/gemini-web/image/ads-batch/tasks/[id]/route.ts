@@ -19,11 +19,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       failedCount: task.summary.failed,
       cancelledCount: task.summary.cancelled,
       totalCount: task.summary.total,
+      maxAttemptsPerRun: task.maxAttemptsPerRun,
       runs: task.runs.map((item) => ({
         index: item.index,
         browserInstanceId: item.browserInstanceId,
         prompt: item.prompt,
         status: item.status,
+        attempts: item.attempts,
         imageUrls: item.imageUrls,
         primaryImageUrl: item.imageUrls[0] || null,
         error: item.error,
@@ -34,4 +36,3 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     },
   });
 }
-

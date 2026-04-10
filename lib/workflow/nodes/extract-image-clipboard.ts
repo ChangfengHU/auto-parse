@@ -3,6 +3,11 @@ import type { NodeResult, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
 import { uploadBuffer } from '../../oss';
 
+declare global {
+  // 串行化“清空剪贴板 -> 复制图片 -> 读取剪贴板 -> 上传”，避免并发实例互相覆盖
+  var __extractImageClipboardQueue: Promise<void> | undefined;
+}
+
 /** 节点参数 */
 export interface ExtractImageClipboardParams {
   /** 触发复制的按钮选择器，默认为 Gemini 的"复制图片"按钮 */
@@ -17,6 +22,40 @@ export interface ExtractImageClipboardParams {
   ossPath?: string;
   /** 输出变量名（默认：imageUrl） */
   outputVar?: string;
+}
+
+async function withClipboardLock<T>(fn: () => Promise<T>): Promise<T> {
+  const prev = global.__extractImageClipboardQueue || Promise.resolve();
+  let release!: () => void;
+  global.__extractImageClipboardQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await prev;
+  try {
+    return await fn();
+  } finally {
+    release();
+  }
+}
+
+async function clearClipboard(page: Page): Promise<void> {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.evaluate(async () => {
+    await navigator.clipboard.writeText('');
+  });
+}
+
+async function clipboardHasImage(page: Page): Promise<boolean> {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  const hasImage = await page.evaluate(async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      return items.some((item) => item.types.some((t) => t.startsWith('image/')));
+    } catch {
+      return false;
+    }
+  });
+  return hasImage;
 }
 
 /**
@@ -100,41 +139,71 @@ export async function executeExtractImageClipboard(
     let ossPath = params.ossPath || `gemini-images/{{timestamp}}.png`;
     ossPath = ossPath.replace(/\{\{timestamp\}\}/g, String(Date.now()));
 
-    // ── 步骤 1：定位并点击"复制图片"按钮 ──────────────────────────────
-    log.push(`🖱️ 正在查找复制按钮：${copyButtonSelector}`);
-    ctx.emit?.('log', `🖱️ 正在查找复制按钮...`);
+    const maxCopyRetries = 3;
+    const { imageBuffer, sizeKB, imageUrl } = await withClipboardLock(async () => {
+      // ── 步骤 1：定位复制按钮（加锁后执行，避免并发串图）──────────────────
+      log.push(`🔒 已获取剪贴板锁`);
+      log.push(`🖱️ 正在查找复制按钮：${copyButtonSelector}`);
+      ctx.emit?.('log', `🖱️ 正在查找复制按钮...`);
+      await page.waitForSelector(copyButtonSelector, { timeout: copyButtonTimeout });
 
-    await page.waitForSelector(copyButtonSelector, { timeout: copyButtonTimeout });
-    await page.click(copyButtonSelector);
-    log.push(`✅ 已点击复制按钮`);
+      let copiedBuffer: Buffer | null = null;
+      let copiedMime = 'image/png';
+      for (let attempt = 1; attempt <= maxCopyRetries; attempt++) {
+        // 步骤 2：复制前先清空并确认剪贴板不含图片，减少其他实例残留干扰
+        await clearClipboard(page);
+        log.push(`🧹 已清空剪贴板（尝试 ${attempt}/${maxCopyRetries}）`);
+        await page.waitForTimeout(120);
+        const hasImageAfterClear = await clipboardHasImage(page);
+        if (hasImageAfterClear) {
+          log.push(`⚠️ 清空后剪贴板仍含图片数据（尝试 ${attempt}/${maxCopyRetries}）`);
+        }
 
-    // ── 步骤 2：等待剪贴板就绪 ─────────────────────────────────────────
-    log.push(`⏳ 等待剪贴板就绪（${waitAfterCopy}ms）...`);
-    ctx.emit?.('log', `⏳ 等待剪贴板就绪...`);
-    await page.waitForTimeout(waitAfterCopy);
+        await page.click(copyButtonSelector);
+        log.push(`✅ 已点击复制按钮（尝试 ${attempt}/${maxCopyRetries}）`);
+        const pollEndAt = Date.now() + waitAfterCopy;
+        while (Date.now() < pollEndAt) {
+          try {
+            const { data: imageDataArray, mimeType } = await readImageFromBrowserClipboard(page);
+            copiedBuffer = Buffer.from(imageDataArray);
+            copiedMime = mimeType || 'image/png';
+            if (copiedBuffer.length > 0) {
+              log.push(`✅ 复制校验通过（尝试 ${attempt}/${maxCopyRetries}）`);
+              break;
+            }
+          } catch {
+            // 轮询窗口内允许继续等待
+          }
+          await page.waitForTimeout(180);
+        }
 
-    // ── 步骤 3：通过浏览器 Clipboard API 读取图片数据 ─────────────────
-    log.push(`💾 正在从浏览器剪贴板读取图片数据...`);
-    ctx.emit?.('log', `💾 从浏览器剪贴板读取图片数据...`);
+        if (copiedBuffer && copiedBuffer.length > 0) {
+          break;
+        }
+        log.push(`⚠️ 复制校验失败（尝试 ${attempt}/${maxCopyRetries}）：剪贴板未出现可用图片`);
+      }
 
-    const { data: imageDataArray, mimeType } = await readImageFromBrowserClipboard(page);
-    const imageBuffer = Buffer.from(imageDataArray);
-    const sizeKB = (imageBuffer.length / 1024).toFixed(2);
-    log.push(`✅ 读取成功（格式: ${mimeType}）`);
-    log.push(`✅ 图片提取成功：${sizeKB} KB（原始分辨率）`);
-    ctx.emit?.('log', `✅ 图片 ${sizeKB} KB`);
+      if (!copiedBuffer || copiedBuffer.length <= 0) {
+        throw new Error(`复制后剪贴板无图片数据，重试 ${maxCopyRetries} 次仍失败`);
+      }
 
-    // ── 步骤 4：上传到 OSS ────────────────────────────────────────────
-    let imageUrl = '';
+      const kb = (copiedBuffer.length / 1024).toFixed(2);
+      log.push(`✅ 图片提取成功：${kb} KB（格式: ${copiedMime}）`);
+      ctx.emit?.('log', `✅ 图片 ${kb} KB`);
 
-    if (uploadToOSS) {
-      log.push(`☁️ 正在上传到 OSS：${ossPath}`);
-      ctx.emit?.('log', `☁️ 正在上传到 OSS...`);
+      // 步骤 4：上传到 OSS（锁内执行，上传完成后再释放）
+      let uploaded = '';
+      if (uploadToOSS) {
+        log.push(`☁️ 正在上传到 OSS：${ossPath}`);
+        ctx.emit?.('log', `☁️ 正在上传到 OSS...`);
+        uploaded = await uploadBuffer(copiedBuffer, ossPath, copiedMime.includes('png') ? 'image/png' : copiedMime);
+        log.push(`✅ 上传成功：${uploaded}`);
+        ctx.emit?.('log', `✅ 图片地址：${uploaded}`);
+      }
 
-      imageUrl = await uploadBuffer(imageBuffer, ossPath, 'image/png');
-      log.push(`✅ 上传成功：${imageUrl}`);
-      ctx.emit?.('log', `✅ 图片地址：${imageUrl}`);
-    }
+      log.push(`🔓 释放剪贴板锁`);
+      return { imageBuffer: copiedBuffer, sizeKB: kb, imageUrl: uploaded };
+    });
 
     // 写入上下文变量供后续节点使用
     if (ctx.vars) {

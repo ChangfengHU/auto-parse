@@ -15,6 +15,7 @@ export type NodeType =
   | 'human_pause'     // 高级：暂停等待人工操作（验证码/拦截页）
   | 'extract_image'   // 高级：提取页面图片 → 下载 → 上传 OSS
   | 'extract_image_clipboard' // 高级：剪贴板中转提取高清图片（解决 blob: URL 问题）→ 上传 OSS
+  | 'extract_image_download' // 高级：点击下载按钮并捕获下载事件 → 上传 OSS
   | 'xhs_download'   // 高级：小红书帖子图片/视频批量下载 → 上传 OSS
   | 'localhost_image_download' // 高级：本地解析页面图片批量下载 → 上传 OSS
   | 'localhost_image_download_debug' // 调试：本地图片批量下载调试版本
@@ -162,6 +163,25 @@ export interface ExtractImageClipboardParams {
   /** OSS 存储路径，支持 {{timestamp}} 模板 */
   ossPath?: string;
   /** 输出变量名（默认：imageUrl） */
+  outputVar?: string;
+}
+
+export interface ExtractImageDownloadParams {
+  downloadButtonSelector?: string;
+  menuTriggerSelector?: string;
+  menuItemSelector?: string;
+  allowDomFallback?: boolean;
+  allowClipboardFallback?: boolean;
+  serializeClipboardAccess?: boolean;
+  fallbackImageSelector?: string;
+  buttonIndex?: number;
+  buttonTimeout?: number;
+  downloadTimeout?: number;
+  maxRetries?: number;
+  waitAfterClick?: number;
+  minFileSizeBytes?: number;
+  uploadToOSS?: boolean;
+  ossPath?: string;
   outputVar?: string;
 }
 

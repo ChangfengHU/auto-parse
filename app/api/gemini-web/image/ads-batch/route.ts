@@ -9,6 +9,7 @@ export async function POST(req: NextRequest) {
       workflowId: typeof body.workflowId === 'string' ? body.workflowId : undefined,
       promptVarName: typeof body.promptVarName === 'string' ? body.promptVarName : undefined,
       maxConcurrency: Number(body.maxConcurrency ?? 0) || undefined,
+      maxAttemptsPerRun: Number(body.maxAttemptsPerRun ?? 0) || undefined,
       autoCloseTab: body.autoCloseTab !== undefined ? Boolean(body.autoCloseTab) : undefined,
     });
 
@@ -27,4 +28,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 400 });
   }
 }
-

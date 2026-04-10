@@ -18,6 +18,7 @@ interface BatchRunInput {
 interface BatchRunState extends BatchRunInput {
   index: number;
   status: BatchRunStatus;
+  attempts: number;
   taskId?: string;
   imageUrls: string[];
   error?: string;
@@ -45,6 +46,7 @@ export interface GeminiAdsBatchTask {
   workflowName: string;
   promptVarName: string;
   maxConcurrency: number;
+  maxAttemptsPerRun: number;
   autoCloseTab: boolean;
   cacheUntil?: string;
   summary: BatchSummary;
@@ -62,7 +64,7 @@ function taskStore() {
   return global.__geminiAdsBatchTasks;
 }
 
-const TASK_CACHE_TTL_MS = Number(process.env.GEMINI_ADS_BATCH_TASK_CACHE_TTL_MS || 10 * 60 * 1000);
+const TASK_CACHE_TTL_MS = Number(process.env.GEMINI_ADS_BATCH_TASK_CACHE_TTL_MS || 30 * 60 * 1000);
 const TASK_CACHE_DIR = path.join(os.tmpdir(), 'gemini-ads-batch-task-cache');
 
 function cacheFile(taskId: string) {
@@ -216,64 +218,85 @@ async function runBatchTask(taskId: string) {
 
       const run = fresh.runs[index];
       const startedAt = new Date().toISOString();
-      updateRun(taskId, index, { status: 'running', startedAt });
+      updateRun(taskId, index, { status: 'running', startedAt, error: undefined, endedAt: undefined, imageUrls: [] });
 
       try {
         const vars = buildRunVars({
           promptVarName: fresh.promptVarName,
           run,
         });
-        const child = await createGeminiWebImageTask({
-          workflow,
-          vars,
-          prompt: run.prompt,
-          autoCloseTab: fresh.autoCloseTab,
-        });
-        updateRun(taskId, index, { taskId: child.id });
+        const maxAttempts = Math.max(1, fresh.maxAttemptsPerRun || 1);
+        let finalStatus: BatchRunStatus = 'failed';
+        let finalImageUrls: string[] = [];
+        let finalError: string | undefined;
 
-        while (true) {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           const latestTask = taskStore().get(taskId);
           if (!latestTask) return;
-
           if (latestTask.cancelRequested) {
-            cancelGeminiWebImageTask(child.id);
+            finalStatus = 'cancelled';
+            break;
           }
 
-          const childTask = getGeminiWebImageTask(child.id);
-          if (!childTask) {
-            await new Promise((resolve) => setTimeout(resolve, 1200));
-            continue;
-          }
-          if (!isTerminal(childTask.status)) {
-            await new Promise((resolve) => setTimeout(resolve, 1200));
-            continue;
-          }
+          const child = await createGeminiWebImageTask({
+            workflow,
+            vars,
+            prompt: run.prompt,
+            autoCloseTab: fresh.autoCloseTab,
+          });
+          updateRun(taskId, index, { taskId: child.id, attempts: attempt, status: 'running' });
 
-          const endedAt = new Date().toISOString();
-          if (childTask.status === 'success') {
-            const imageUrls = childTask.result?.imageUrls ?? [];
-            if (imageUrls.length > 0) {
-              updateRun(taskId, index, { status: 'success', imageUrls, endedAt });
-            } else {
-              updateRun(taskId, index, {
-                status: 'failed',
-                imageUrls: [],
-                endedAt,
-                error: '任务完成但未返回图片 URL',
-              });
+          while (true) {
+            const latest = taskStore().get(taskId);
+            if (!latest) return;
+            if (latest.cancelRequested) {
+              cancelGeminiWebImageTask(child.id);
             }
-          } else if (childTask.status === 'cancelled') {
-            updateRun(taskId, index, { status: 'cancelled', imageUrls: [], endedAt });
-          } else {
-            updateRun(taskId, index, {
-              status: 'failed',
-              imageUrls: childTask.result?.imageUrls ?? [],
-              endedAt,
-              error: childTask.error || '子任务失败',
-            });
+
+            const childTask = getGeminiWebImageTask(child.id);
+            if (!childTask) {
+              await new Promise((resolve) => setTimeout(resolve, 1200));
+              continue;
+            }
+            if (!isTerminal(childTask.status)) {
+              await new Promise((resolve) => setTimeout(resolve, 1200));
+              continue;
+            }
+
+            if (childTask.status === 'success') {
+              const imageUrls = childTask.result?.imageUrls ?? [];
+              if (imageUrls.length > 0) {
+                finalStatus = 'success';
+                finalImageUrls = imageUrls;
+                finalError = undefined;
+              } else {
+                finalStatus = 'failed';
+                finalImageUrls = [];
+                finalError = '任务完成但未返回图片 URL';
+              }
+            } else if (childTask.status === 'cancelled') {
+              finalStatus = 'cancelled';
+              finalImageUrls = [];
+              finalError = undefined;
+            } else {
+              finalStatus = 'failed';
+              finalImageUrls = childTask.result?.imageUrls ?? [];
+              finalError = childTask.error || '子任务失败';
+            }
+            break;
           }
-          break;
+
+          if (finalStatus === 'success' || finalStatus === 'cancelled') {
+            break;
+          }
         }
+
+        updateRun(taskId, index, {
+          status: finalStatus,
+          imageUrls: finalImageUrls,
+          error: finalStatus === 'failed' ? finalError : undefined,
+          endedAt: new Date().toISOString(),
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         updateRun(taskId, index, {
@@ -324,6 +347,7 @@ export async function createGeminiAdsBatchTask(input: {
   workflowId?: string;
   promptVarName?: string;
   maxConcurrency?: number;
+  maxAttemptsPerRun?: number;
   autoCloseTab?: boolean;
 }) {
   const runs = input.runs
@@ -348,6 +372,7 @@ export async function createGeminiAdsBatchTask(input: {
 
   const promptVarName = pickPromptVarName(workflow, input.promptVarName);
   const maxConcurrency = Math.max(1, Math.min(6, Number(input.maxConcurrency ?? runs.length) || runs.length));
+  const maxAttemptsPerRun = Math.max(1, Math.min(5, Number(input.maxAttemptsPerRun ?? 1) || 1));
   const taskId = randomUUID();
   const now = new Date().toISOString();
   const runStates: BatchRunState[] = runs.map((item, index) => ({
@@ -356,6 +381,7 @@ export async function createGeminiAdsBatchTask(input: {
     prompt: item.prompt,
     browserWsUrl: item.browserWsUrl,
     status: 'queued',
+    attempts: 0,
     imageUrls: [],
   }));
 
@@ -368,6 +394,7 @@ export async function createGeminiAdsBatchTask(input: {
     workflowName: workflow.name,
     promptVarName,
     maxConcurrency,
+    maxAttemptsPerRun,
     // Ads 批量任务默认不自动关 tab，避免分身退回 Inactive。
     autoCloseTab: input.autoCloseTab === true,
     runs: runStates,
