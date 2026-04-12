@@ -377,16 +377,25 @@ export function getGeminiAdsDispatcherQueueInfo(taskId: string): GeminiAdsDispat
   return { maxSize, size, runningTaskId: state.runningTaskId, state: 'none' };
 }
 
-export async function clearGeminiAdsDispatcherQueue(options?: { reason?: string }) {
+export async function clearGeminiAdsDispatcherQueue(options?: { reason?: string; includeRunning?: boolean }) {
   const reason = (options?.reason || 'queue cleared').slice(0, 500);
+  const includeRunning = options?.includeRunning === true;
   const clearedTaskIds: string[] = [];
 
   await withQueueLock(async () => {
     const state = normalizeQueueState(loadQueueState());
     const ids = state.entries.map((entry) => entry.taskId);
-    const next: DispatcherQueueState = { ...state, entries: [], updatedAt: nowIso() };
+    const next: DispatcherQueueState = {
+      ...state,
+      entries: [],
+      runningTaskId: includeRunning ? undefined : state.runningTaskId,
+      updatedAt: nowIso(),
+    };
     persistQueueState(next);
     clearedTaskIds.push(...ids);
+    if (includeRunning && state.runningTaskId) {
+      clearedTaskIds.push(state.runningTaskId);
+    }
   });
 
   if (clearedTaskIds.length === 0) {
@@ -414,6 +423,14 @@ export async function clearGeminiAdsDispatcherQueue(options?: { reason?: string 
       items: cancelledItems,
       summary: computeSummary(cancelledItems),
     });
+
+    if (task.status === 'running') {
+      updateTask(taskId, {
+        suspendRequested: true,
+        suspendReason: reason,
+      });
+      void forceStopRunningTaskInstances(taskId, reason);
+    }
 
     trace(taskId, 'queue_cleared', { reason });
   }
@@ -1859,15 +1876,22 @@ export async function createGeminiAdsDispatcherTask(input: {
   };
 
   // Enforce FIFO queue capacity before creating the task.
-  await withQueueLock(async () => {
-    const state = normalizeQueueState(loadQueueState());
-    const maxSize = queueMaxSize();
-    const size = queueSize(state);
-    persistQueueState(state);
-    if (size >= maxSize) {
-      throw new Error(`队列已满（${size}/${maxSize}），请稍后重试`);
-    }
-  });
+  if (input.force) {
+    await clearGeminiAdsDispatcherQueue({
+      reason: input.forceReason || 'force clearing queue',
+      includeRunning: true,
+    });
+  } else {
+    await withQueueLock(async () => {
+      const state = normalizeQueueState(loadQueueState());
+      const maxSize = queueMaxSize();
+      const size = queueSize(state);
+      persistQueueState(state);
+      if (size >= maxSize) {
+        throw new Error(`队列已满（${size}/${maxSize}），请稍后重试`);
+      }
+    });
+  }
 
   const now = nowIso();
   const taskId = randomUUID();

@@ -176,19 +176,28 @@ export async function executePasteImageClipboard(
       );
     })) as any;
 
-    const getAttachmentCount = async (): Promise<number> => {
-      if (!verifyAttachment) return 0;
+    const getAttachmentSnapshot = async (): Promise<{ count: number; signature: string }> => {
+      if (!verifyAttachment) return { count: 0, signature: '' };
       const selector = attachIndicatorSelector;
-      const count = await rootHandle
+      const data = await rootHandle
         .evaluate((root: any, sel: string) => {
           try {
-            return root?.querySelectorAll ? root.querySelectorAll(sel).length : 0;
+            const nodes = Array.from(root?.querySelectorAll?.(sel) ?? []) as any[];
+            const signatureParts = nodes.map((el) => {
+              const tag = String(el?.tagName || '').toLowerCase();
+              const src = (el?.getAttribute && el.getAttribute('src')) || '';
+              const aria = (el?.getAttribute && el.getAttribute('aria-label')) || '';
+              const testid = (el?.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-test-id'))) || '';
+              const cls = (el?.getAttribute && el.getAttribute('class')) || '';
+              return [tag, src, aria, testid, cls].filter(Boolean).join('#');
+            });
+            return { count: nodes.length, signature: signatureParts.join('|') };
           } catch {
-            return 0;
+            return { count: 0, signature: '' };
           }
         }, selector)
-        .catch(() => 0);
-      return Number(count || 0);
+        .catch(() => ({ count: 0, signature: '' }));
+      return { count: Number(data?.count || 0), signature: String(data?.signature || '') };
     };
 
     const downloaded: DownloadedImage[] = [];
@@ -198,25 +207,44 @@ export async function executePasteImageClipboard(
 
     let attachedVia: 'clipboard' | 'upload' = 'clipboard';
 
-    const verifyIncrease = async (before: number, expectedIncrease: number, stage: string) => {
+    const verifyIncrease = async (
+      before: { count: number; signature: string },
+      expectedIncrease: number,
+      stage: string,
+      timeoutMs: number
+    ) => {
       if (!verifyAttachment) return;
-      const after = await getAttachmentCount();
-      if (after < before + expectedIncrease) {
-        throw new Error(
-          `${stage} 后未检测到附件出现（before=${before}, after=${after}, expectedIncrease>=${expectedIncrease}）。` +
-            `可通过 attachIndicatorSelector 精准配置，或临时关闭 verifyAttachment。`
-        );
+
+      const start = Date.now();
+      let last = before;
+      while (Date.now() - start < timeoutMs) {
+        const after = await getAttachmentSnapshot();
+        last = after;
+
+        const countOk = after.count >= before.count + expectedIncrease;
+        // 允许“替换型附件”：计数不变，但签名变化（例如 before=1 after=1）
+        const replacedOk = after.count >= before.count && after.signature && after.signature !== before.signature;
+
+        if (countOk || replacedOk) {
+          log.push(`✅ 附件校验通过：before=${before.count} → after=${after.count}${replacedOk && !countOk ? '（替换模式）' : ''}`);
+          return;
+        }
+        await page.waitForTimeout(300);
       }
-      log.push(`✅ 附件校验通过：before=${before} → after=${after}`);
+
+      throw new Error(
+        `${stage} 后未检测到附件出现/变化（before=${before.count}, after=${last.count}, expectedIncrease>=${expectedIncrease}）。` +
+          `可通过 attachIndicatorSelector 精准配置，或临时关闭 verifyAttachment。`
+      );
     };
 
     const tryClipboardPaste = async () => {
       await withSystemClipboardLock(async () => {
         await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
 
-        let beforeCount = await getAttachmentCount();
+        let beforeSnap = await getAttachmentSnapshot();
         if (verifyAttachment) {
-          log.push(`🔎 附件计数（执行前）：${beforeCount}`);
+          log.push(`🔎 附件计数（执行前）：${beforeSnap.count}`);
         }
 
         for (let i = 0; i < downloaded.length; i++) {
@@ -276,8 +304,8 @@ export async function executePasteImageClipboard(
           await page.waitForTimeout(waitAfterPaste);
           log.push(`✅ [${i + 1}/${downloaded.length}] 已执行粘贴`);
 
-          await verifyIncrease(beforeCount, 1, `第 ${i + 1} 张粘贴`);
-          beforeCount = await getAttachmentCount();
+          await verifyIncrease(beforeSnap, 1, `第 ${i + 1} 张粘贴`, Math.max(4000, waitAfterPaste * 4));
+          beforeSnap = await getAttachmentSnapshot();
         }
       });
     };
@@ -295,8 +323,8 @@ export async function executePasteImageClipboard(
       attachedVia = 'upload';
       log.push('🪄 尝试降级：下载到本地后通过 file input 上传...');
 
-      let before = await getAttachmentCount();
-      if (verifyAttachment) log.push(`🔎 附件计数（上传前）：${before}`);
+      let before = await getAttachmentSnapshot();
+      if (verifyAttachment) log.push(`🔎 附件计数（上传前）：${before.count}`);
 
       if (openUploaderSelector) {
         const clicked = await page
@@ -308,7 +336,50 @@ export async function executePasteImageClipboard(
         log.push(clicked ? `🧩 已点击打开上传器：${openUploaderSelector}` : `⚠️ 打开上传器失败：${openUploaderSelector}`);
       }
 
-      const input = page.locator(fileInputSelector).first();
+      const tryRevealFileInput = async (): Promise<boolean> => {
+        const sel = fileInputSelector || 'input[type="file"], input[type="file"][accept*="image" i]';
+        const ok = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
+        if (ok) return true;
+
+        // 没传 openUploaderSelector 时，做一轮启发式点击，常见于 Gemini（先点“添加图片/上传”才挂 input）
+        const candidates = [
+          'button:has-text("Upload")',
+          'button:has-text("上传")',
+          'button:has-text("Add image")',
+          'button:has-text("添加图片")',
+          'button:has-text("Insert")',
+          'button:has-text("插入")',
+          '[aria-label*="upload" i]',
+          '[aria-label*="image" i]',
+          '[aria-label*="photo" i]',
+          '[aria-label*="图片" i]',
+          '[aria-label*="照片" i]',
+        ];
+
+        for (const cand of candidates) {
+          const btn = page.locator(cand).first();
+          const clicked = await btn.click({ timeout: 800 }).then(() => true).catch(() => false);
+          if (!clicked) continue;
+          const appeared = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
+          if (appeared) {
+            log.push(`🧩 自动打开上传器成功：${cand}`);
+            return true;
+          }
+        }
+
+        return false;
+      };
+
+      const revealed = await tryRevealFileInput();
+      if (!revealed) {
+        throw new Error(
+          `未找到 file input（selector=${fileInputSelector || 'input[type=file]'}）。` +
+            `请配置 openUploaderSelector（先点开上传入口）或 fileInputSelector（定位真实 input）。`
+        );
+      }
+
+      const inputSel = fileInputSelector || 'input[type="file"], input[type="file"][accept*="image" i]';
+      const input = page.locator(inputSel).first();
       await input.waitFor({ state: 'attached', timeout: 15_000 });
 
       for (let i = 0; i < downloaded.length; i++) {
@@ -317,8 +388,8 @@ export async function executePasteImageClipboard(
         log.push(`📎 [${i + 1}/${downloaded.length}] 已 setInputFiles：${path.basename(filePath)}（${fileInputSelector}）`);
 
         await page.waitForTimeout(waitAfterUpload);
-        await verifyIncrease(before, 1, `第 ${i + 1} 张文件上传`);
-        before = await getAttachmentCount();
+        await verifyIncrease(before, 1, `第 ${i + 1} 张文件上传`, Math.max(6000, waitAfterUpload * 4));
+        before = await getAttachmentSnapshot();
       }
     }
 
