@@ -1,14 +1,18 @@
 import type { Page } from 'playwright';
 import type { NodeResult, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
+import { withSystemClipboardLock } from '../clipboard-lock';
 import { uploadBuffer } from '../../oss';
 
-declare global {
-  // 串行化“清空剪贴板 -> 复制图片 -> 读取剪贴板 -> 上传”，避免并发实例互相覆盖
-  var __extractImageClipboardQueue: Promise<void> | undefined;
+/** 节点参数 */
+class FailFastError extends Error {
+  code = 'FAIL_FAST';
+  constructor(reason: string) {
+    super(`FAIL_FAST: ${reason}`);
+    this.name = 'FailFastError';
+  }
 }
 
-/** 节点参数 */
 export interface ExtractImageClipboardParams {
   /** 触发复制的按钮选择器，默认为 Gemini 的"复制图片"按钮 */
   copyButtonSelector?: string;
@@ -16,6 +20,15 @@ export interface ExtractImageClipboardParams {
   copyButtonTimeout?: number;
   /** 点击复制按钮后等待剪贴板就绪的时间（ms），默认 3000 */
   waitAfterCopy?: number;
+
+  /**
+   * 失败快判（减少无效等待）：当页面出现这些文本片段时直接判定失败。
+   * 例如："抱歉，今天没办法帮你生成更多视频了"。
+   */
+  failFastTextIncludes?: string[];
+  /** 失败快判：当页面出现这些 DOM（可见）时直接判定失败 */
+  failFastSelector?: string;
+
   /** 是否上传到 OSS（默认 true） */
   uploadToOSS?: boolean;
   /** OSS 存储路径，支持 {{timestamp}} 模板 */
@@ -24,25 +37,75 @@ export interface ExtractImageClipboardParams {
   outputVar?: string;
 }
 
-async function withClipboardLock<T>(fn: () => Promise<T>): Promise<T> {
-  const prev = global.__extractImageClipboardQueue || Promise.resolve();
-  let release!: () => void;
-  global.__extractImageClipboardQueue = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await prev;
-  try {
-    return await fn();
-  } finally {
-    release();
-  }
-}
-
 async function clearClipboard(page: Page): Promise<void> {
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.evaluate(async () => {
     await navigator.clipboard.writeText('');
   });
+}
+
+async function detectFailFast(
+  page: Page,
+  params: ExtractImageClipboardParams
+): Promise<string | null> {
+  const includes = (params.failFastTextIncludes ?? []).map(s => String(s).trim()).filter(Boolean);
+  const selector = String(params.failFastSelector ?? '').trim();
+
+  if (selector) {
+    try {
+      const visible = await page.locator(selector).first().isVisible({ timeout: 200 });
+      if (visible) return `selector: ${selector}`;
+    } catch {
+      // ignore
+    }
+  }
+
+  if (includes.length > 0) {
+    try {
+      const hit = await page.evaluate((needles) => {
+        const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
+        for (const n of needles) {
+          if (n && text.includes(n)) return n;
+        }
+        return null;
+      }, includes);
+      if (hit) return `text: ${hit}`;
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
+}
+
+async function waitForCopyButtonOrFailFast(
+  page: Page,
+  params: ExtractImageClipboardParams,
+  selector: string,
+  timeoutMs: number,
+  log: string[],
+  ctx: WorkflowContext
+): Promise<void> {
+  const endAt = Date.now() + timeoutMs;
+  while (Date.now() < endAt) {
+    const ff = await detectFailFast(page, params);
+    if (ff) {
+      const msg = `🛑 失败快判命中（${ff}），不再等待复制按钮`;
+      log.push(msg);
+      ctx.emit?.('log', msg);
+      throw new FailFastError(msg);
+    }
+
+    try {
+      const handle = await page.$(selector);
+      if (handle) return;
+    } catch {
+      // ignore
+    }
+
+    await page.waitForTimeout(500);
+  }
+  throw new Error(`等待复制按钮超时（${timeoutMs}ms）：${selector}`);
 }
 
 async function clipboardHasImage(page: Page): Promise<boolean> {
@@ -140,12 +203,12 @@ export async function executeExtractImageClipboard(
     ossPath = ossPath.replace(/\{\{timestamp\}\}/g, String(Date.now()));
 
     const maxCopyRetries = 3;
-    const { imageBuffer, sizeKB, imageUrl } = await withClipboardLock(async () => {
+    const { imageBuffer, sizeKB, imageUrl } = await withSystemClipboardLock(async () => {
       // ── 步骤 1：定位复制按钮（加锁后执行，避免并发串图）──────────────────
       log.push(`🔒 已获取剪贴板锁`);
       log.push(`🖱️ 正在查找复制按钮：${copyButtonSelector}`);
       ctx.emit?.('log', `🖱️ 正在查找复制按钮...`);
-      await page.waitForSelector(copyButtonSelector, { timeout: copyButtonTimeout });
+      await waitForCopyButtonOrFailFast(page, params, copyButtonSelector, copyButtonTimeout, log, ctx);
 
       let copiedBuffer: Buffer | null = null;
       let copiedMime = 'image/png';
@@ -159,10 +222,26 @@ export async function executeExtractImageClipboard(
           log.push(`⚠️ 清空后剪贴板仍含图片数据（尝试 ${attempt}/${maxCopyRetries}）`);
         }
 
+        const ffBeforeClick = await detectFailFast(page, params);
+        if (ffBeforeClick) {
+          const msg = `🛑 失败快判命中（${ffBeforeClick}），不再执行复制`;
+          log.push(msg);
+          ctx.emit?.('log', msg);
+          throw new FailFastError(msg);
+        }
+
         await page.click(copyButtonSelector);
         log.push(`✅ 已点击复制按钮（尝试 ${attempt}/${maxCopyRetries}）`);
         const pollEndAt = Date.now() + waitAfterCopy;
         while (Date.now() < pollEndAt) {
+          const ff = await detectFailFast(page, params);
+          if (ff) {
+            const msg = `🛑 失败快判命中（${ff}），停止等待剪贴板`;
+            log.push(msg);
+            ctx.emit?.('log', msg);
+            throw new FailFastError(msg);
+          }
+
           try {
             const { data: imageDataArray, mimeType } = await readImageFromBrowserClipboard(page);
             copiedBuffer = Buffer.from(imageDataArray);

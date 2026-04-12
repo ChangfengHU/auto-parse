@@ -26,6 +26,7 @@ export type NodeType =
   | 'gemini_parallel_generate' // 高级：并发打开多个 Tab 同时触发 Gemini 生图
   | 'vertex_ai' // 高级：Vertex AI 聚合节点，封装生图/参考图编辑/生视频等能力
   | 'topic_picker_agent' // 高级：调用 DailyHot 技能并评估选题，输出 TopN
+  | 'agent_react' // 高级：通用 ReAct Agent（LLM + 工具/skill 循环）
 
 // ── 节点定义 ──────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,8 @@ export interface MaterialParams {
 export interface TextInputParams {
   selector: string
   value: string
+  /** 输入模式：fill=整段填入；type=模拟键盘输入。默认 fill（未设置时可能跟随 humanOptions.humanType） */
+  inputMode?: 'fill' | 'type'
   clear?: boolean   // 是否先清空（默认 true）
   delay?: number    // 每字符延迟 ms（模拟人工输入，默认 0）
 }
@@ -82,9 +85,21 @@ export interface TextInputParams {
 export interface PasteImageClipboardParams {
   imageUrl?: string
   imageUrls?: string[] | string
-  targetSelector: string
+  /** 优先使用该选择器定位输入框；为空时自动定位可输入框 */
+  targetSelector?: string
   waitAfterPaste?: number
+  /** 可选：粘贴/上传后用于校验“附件已出现”的选择器（为空则使用内置默认规则） */
   attachIndicatorSelector?: string
+  /** 是否校验附件是否出现（默认 true）。若校验失败会触发 uploadFallback（如开启） */
+  verifyAttachment?: boolean
+  /** 当剪贴板粘贴失败时，是否自动降级为文件上传（默认 true） */
+  uploadFallback?: boolean
+  /** 可选：点击该按钮打开上传器（如输入框左侧的 + 按钮） */
+  openUploaderSelector?: string
+  /** 可选：file input 选择器，不填则用 input[type=file] */
+  fileInputSelector?: string
+  /** 降级为文件上传后额外等待（ms） */
+  waitAfterUpload?: number
   outputVar?: string
 }
 
@@ -168,6 +183,15 @@ export interface ExtractImageClipboardParams {
   copyButtonTimeout?: number;
   /** 点击后等待剪贴板就绪时间（ms），默认 3000 */
   waitAfterCopy?: number;
+
+  /**
+   * 失败快判（减少无效等待）：当页面出现这些文本片段时直接判定失败。
+   * 例如："抱歉，今天没办法帮你生成更多视频了"。
+   */
+  failFastTextIncludes?: string[];
+  /** 失败快判：当页面出现这些 DOM（可见）时直接判定失败 */
+  failFastSelector?: string;
+
   /** 是否上传到 OSS（默认 true） */
   uploadToOSS?: boolean;
   /** OSS 存储路径，支持 {{timestamp}} 模板 */
@@ -193,6 +217,19 @@ export interface ExtractImageDownloadParams {
   uploadToOSS?: boolean;
   ossPath?: string;
   outputVar?: string;
+
+  /**
+   * 失败快判（减少无效等待）：当页面出现这些文本片段时直接判定失败。
+   * 例如："抱歉，今天没办法帮你生成更多视频了"。
+   */
+  failFastTextIncludes?: string[];
+  /** 失败快判：当页面出现这些 DOM（可见）时直接判定失败 */
+  failFastSelector?: string;
+
+  /** 等待新按钮出现（多轮续话模式）：先记录当前按钮数量，等待数量增加后再下载最新按钮 */
+  waitForNew?: boolean;
+  /** waitForNew 模式的最大等待时间（ms），默认 120000 */
+  waitForNewTimeout?: number;
 }
 
 export interface ExtractImageParams {
@@ -233,6 +270,16 @@ export interface LocalhostImageDownloadDebugParams {
 export interface MetaAIGenerateParams {
   prompt: string                 // 提示词
   outputVar?: string             // 输出的 OSS 连接数组变量名，默认为 'metaaiVideos'
+}
+
+export interface MetaAIDownloadParams {
+  outputVar?: string
+  maxCount?: number
+  waitForLoad?: number
+  waitForNewButtons?: boolean
+  newButtonTimeout?: number
+  baselineVar?: string
+  resetBaseline?: boolean
 }
 
 export interface CredentialLoginParams {
@@ -307,6 +354,23 @@ export interface TopicPickerAgentParams {
   llmSystemPrompt?: string
   llmUserPromptTemplate?: string
   llmCandidateLimit?: number
+  outputVar?: string
+  outputDetailVar?: string
+}
+
+export interface AgentReactParams {
+  systemPrompt?: string
+  userPromptTemplate?: string
+  llmProvider?: 'auto' | 'openai' | 'gemini' | 'qianwen' | 'deepseek'
+  llmModel?: string
+  llmBaseUrl?: string
+  llmApiKey?: string
+  llmApiKeyEnv?: string
+  llmTemperature?: number
+  tools?: string[] | string
+  maxTurns?: number
+  responseSchema?: string
+  outputField?: string
   outputVar?: string
   outputDetailVar?: string
 }

@@ -16,14 +16,8 @@ import { getPersistentContext } from '@/lib/persistent-browser';
 import { getWorkflow } from '@/lib/workflow/workflow-db';
 import { DEFAULT_HUMAN_OPTIONS } from '@/lib/workflow/human-options';
 import { IdleSimulator } from '@/lib/workflow/idle-simulator';
-import type { NavigateParams, WorkflowDef } from '@/lib/workflow/types';
-
-function shouldDeferNativePage(workflow: WorkflowDef): boolean {
-  const firstNode = workflow.nodes[0];
-  if (!firstNode || firstNode.type !== 'navigate') return false;
-  const params = (firstNode.params ?? {}) as Partial<NavigateParams>;
-  return !!params.useAdsPower;
-}
+import { shouldDeferNativePageBootstrap } from '@/lib/workflow/node-runtime';
+import type { WorkflowDef } from '@/lib/workflow/types';
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
@@ -57,8 +51,8 @@ export async function POST(req: Request) {
     lastExecutedStep: null 
   });
 
-  // 3. 如果首步就是 AdsPower 导航，则延迟创建本地浏览器页，避免先弹出 Google Chrome 草稿页
-  if (!shouldDeferNativePage(workflow)) {
+  // 3. 首步若无需浏览器（如 topic_picker_agent）或为 AdsPower 导航，则延迟创建本地浏览器页
+  if (!shouldDeferNativePageBootstrap(workflow)) {
     const ctx = await getPersistentContext();
     const page = await ctx.newPage();
     page.on('dialog', d => d.accept());

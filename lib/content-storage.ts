@@ -74,6 +74,9 @@ type RawNoteData = {
   content?: string;
   author?: { name?: string; id?: string; avatar?: string };
   user?: { nickname?: string; userId?: string; avatar?: string };
+  author_name?: string;
+  author_id?: string;
+  author_avatar?: string;
   tags?: RawTag[];
   tagList?: RawTag[];
   stats?: { likes?: number; comments?: number; shares?: number; collects?: number };
@@ -162,10 +165,18 @@ export function saveXhsPost(postData: RawNoteData, originalUrl?: string): SavedX
       author_id: postData.author?.id || postData.user?.userId || postData.author_id || existing.author_id,
       author_avatar: postData.author?.avatar || postData.user?.avatar || postData.author_avatar || existing.author_avatar,
       tags: postData.tags || postData.tagList || existing.tags,
-      like_count: postData.stats?.likes || parseInt(postData.interactInfo?.likedCount || postData.like_count || '0'),
-      comment_count: postData.stats?.comments || parseInt(postData.interactInfo?.commentCount || postData.comment_count || '0'),
-      share_count: postData.stats?.shares || parseInt(postData.interactInfo?.shareCount || postData.share_count || '0'),
-      collect_count: postData.stats?.collects || parseInt(postData.interactInfo?.collectedCount || postData.collect_count || '0'),
+      like_count:
+        postData.stats?.likes ??
+        parseInt(String(postData.interactInfo?.likedCount ?? postData.like_count ?? '0'), 10),
+      comment_count:
+        postData.stats?.comments ??
+        parseInt(String(postData.interactInfo?.commentCount ?? postData.comment_count ?? '0'), 10),
+      share_count:
+        postData.stats?.shares ??
+        parseInt(String(postData.interactInfo?.shareCount ?? postData.share_count ?? '0'), 10),
+      collect_count:
+        postData.stats?.collects ??
+        parseInt(String(postData.interactInfo?.collectedCount ?? postData.collect_count ?? '0'), 10),
       location: postData.ipLocation || postData.location || existing.location,
       original_url: normalizeOriginalPostUrl(postData, originalUrl) || existing.original_url,
       saved_at: new Date().toISOString(),
@@ -196,13 +207,18 @@ export function saveXhsPost(postData: RawNoteData, originalUrl?: string): SavedX
     author_id: postData.author?.id || postData.user?.userId || '',
     author_avatar: postData.author?.avatar || postData.user?.avatar || '',
     tags: postData.tags || postData.tagList || [],
-    like_count: postData.stats?.likes || parseInt(postData.interactInfo?.likedCount || '0'),
-    comment_count: postData.stats?.comments || parseInt(postData.interactInfo?.commentCount || '0'),
-    share_count: postData.stats?.shares || parseInt(postData.interactInfo?.shareCount || '0'),
-    collect_count: postData.stats?.collects || parseInt(postData.interactInfo?.collectedCount || '0'),
+    like_count:
+      postData.stats?.likes ?? parseInt(String(postData.interactInfo?.likedCount ?? '0'), 10),
+    comment_count:
+      postData.stats?.comments ?? parseInt(String(postData.interactInfo?.commentCount ?? '0'), 10),
+    share_count:
+      postData.stats?.shares ?? parseInt(String(postData.interactInfo?.shareCount ?? '0'), 10),
+    collect_count:
+      postData.stats?.collects ?? parseInt(String(postData.interactInfo?.collectedCount ?? '0'), 10),
     original_url: normalizeOriginalPostUrl(postData, originalUrl),
     location: postData.ipLocation || '',
-    publish_time: postData.publishTime || (postData.time ? new Date(parseInt(postData.time)).toISOString() : undefined),
+    publish_time:
+      postData.publishTime || (postData.time ? new Date(parseInt(String(postData.time), 10)).toISOString() : undefined),
     saved_at: new Date().toISOString(),
     parsed_at: new Date().toISOString(),
     video: normalizeVideo(postData.video),

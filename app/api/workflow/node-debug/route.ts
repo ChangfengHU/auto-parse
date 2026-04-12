@@ -10,24 +10,35 @@
  */
 
 import { NextRequest } from 'next/server';
+import { chromium, type Browser, type Page } from 'playwright';
 import { getDebugScratchPage, resetDebugScratchPage, setDebugScratchPage } from '@/lib/persistent-browser';
 import { executeNode } from '@/lib/workflow/engine';
-import type { NodeDef, WorkflowContext } from '@/lib/workflow/types';
+import type { NavigateParams, NodeDef, WorkflowContext } from '@/lib/workflow/types';
+import { DEFAULT_HUMAN_OPTIONS } from '@/lib/workflow/human-options';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
+
+function isAdsNavigateNode(node: NodeDef): boolean {
+  if (node.type !== 'navigate') return false;
+  const params = (node.params ?? {}) as Partial<NavigateParams>;
+  return Boolean(params.useAdsPower);
+}
 
 export async function POST(req: NextRequest) {
   const body = await req.json() as {
     node: NodeDef;
     vars?: Record<string, string>;
+    humanOptions?: Record<string, boolean>;
   };
 
-  const { node, vars = {} } = body;
+  const { node, vars = {}, humanOptions } = body;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
+      let tempBrowser: Browser | undefined;
+
       function send(type: string, payload: string) {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type, payload })}\n\n`));
@@ -37,8 +48,18 @@ export async function POST(req: NextRequest) {
       try {
         send('log', `🔧 调试节点：${node.label ?? node.type}`);
 
-        // 使用持久草稿页（跨调用保持状态，实现接力）
-        const page = await getDebugScratchPage();
+        let page: Page;
+
+        if (isAdsNavigateNode(node)) {
+          // Ads 导航节点直接从临时 page 起步，避免先卡在本地持久化草稿页启动。
+          tempBrowser = await chromium.launch({ headless: true });
+          page = await tempBrowser.newPage();
+          send('log', '🫥 Ads 单节点调试：跳过本地草稿页，直接准备接管 Ads 浏览器');
+        } else {
+          // 普通节点继续使用持久草稿页（跨调用保持状态，实现接力）
+          page = await getDebugScratchPage();
+        }
+
         const currentUrl = page.url();
         send('log', `🌐 当前页面：${currentUrl || '(空白)'}`);
 
@@ -46,13 +67,21 @@ export async function POST(req: NextRequest) {
           vars: { ...vars, __pauseToken: 'scratch' },
           outputs: {},
           emit: send,
+          humanOptions: { ...DEFAULT_HUMAN_OPTIONS, ...(humanOptions ?? {}) },
         };
 
         const result = await executeNode(page, node, wfCtx);
 
         if (result.newPage) {
-          setDebugScratchPage(result.newPage as import('playwright').Page);
+          setDebugScratchPage(
+            result.newPage as import('playwright').Page,
+            (result.newBrowser as Browser | undefined)
+          );
           send('log', `⚠️ [系统接管] (单节点调试) 游标已转移至新环境实例`);
+          if (tempBrowser) {
+            await tempBrowser.close().catch(() => {});
+            tempBrowser = undefined;
+          }
         }
 
         if (result.screenshot) {
@@ -71,6 +100,9 @@ export async function POST(req: NextRequest) {
         send('log', `❌ 执行异常：${msg}`);
         send('done', JSON.stringify({ success: false, error: msg }));
       } finally {
+        if (tempBrowser) {
+          await tempBrowser.close().catch(() => {});
+        }
         controller.close();
         // 注意：不关闭草稿页，保留浏览器状态供下一个节点接力
       }

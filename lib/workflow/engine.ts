@@ -35,6 +35,7 @@ import { executeMetaAIGenerate } from './nodes/metaai-generate';
 import { executeGeminiParallelGenerate } from './nodes/gemini-parallel-generate';
 import { executeVertexAI } from './nodes/vertex-ai';
 import { executeTopicPickerAgent } from './nodes/topic-picker-agent';
+import { executeAgentReact } from './nodes/agent-react';
 
 // ── 节点注册表 ────────────────────────────────────────────────────────────────
 
@@ -65,6 +66,7 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   gemini_parallel_generate: executeGeminiParallelGenerate,
   vertex_ai:             executeVertexAI,
   topic_picker_agent:    executeTopicPickerAgent,
+  agent_react:           executeAgentReact,
 };
 
 // ── 单步执行 ──────────────────────────────────────────────────────────────────

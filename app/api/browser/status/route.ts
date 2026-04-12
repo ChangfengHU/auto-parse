@@ -1,4 +1,4 @@
-import { browserStatus, isPersistentContextLoggedIn, BROWSER_DATA_DIR, IS_HEADLESS } from '@/lib/persistent-browser';
+import { browserStatus, isPersistentContextLoggedIn } from '@/lib/persistent-browser';
 import { NextResponse } from 'next/server';
 
 /**
@@ -12,8 +12,9 @@ export async function GET() {
 
   return NextResponse.json({
     alive: status.alive,
-    headless: IS_HEADLESS,
-    dataDir: BROWSER_DATA_DIR,
+    configuredHeadless: status.configuredHeadless,
+    runningHeadless: status.runningHeadless,
+    dataDir: status.dataDir,
     openPages: status.openPages,
     douyinLoggedIn: loggedIn,
   });

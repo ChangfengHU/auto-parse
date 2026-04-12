@@ -3,6 +3,16 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import {
+  ArrowPathIcon,
+  PencilSquareIcon,
+  TrashIcon,
+  MagnifyingGlassIcon,
+  ArrowTopRightOnSquareIcon,
+  ChatBubbleLeftEllipsisIcon,
+  HeartIcon,
+  BookmarkIcon,
+} from '@heroicons/react/24/outline';
 
 interface XhsPost {
   id: string;
@@ -12,7 +22,7 @@ interface XhsPost {
   author_name?: string;
   author_id?: string;
   author_avatar?: string;
-  tags?: string[];
+  tags?: Array<string | { name?: string }>;
   like_count?: number;
   comment_count?: number;
   share_count?: number;
@@ -25,6 +35,13 @@ interface XhsPost {
 }
 
 const ITEMS_PER_PAGE = 6;
+
+type TagItem = NonNullable<XhsPost['tags']>[number];
+
+function getTagText(tag: TagItem): string {
+  if (typeof tag === 'string') return tag;
+  return (tag.name || '').trim();
+}
 
 function ContentLibraryContent() {
   const searchParams = useSearchParams();
@@ -55,10 +72,7 @@ function ContentLibraryContent() {
         post.title?.toLowerCase().includes(term) ||
         post.content?.toLowerCase().includes(term) ||
         post.author_name?.toLowerCase().includes(term) ||
-        post.tags?.some(tag => {
-          const tagStr = typeof tag === 'string' ? tag : (tag as any)?.name || String(tag);
-          return tagStr.toLowerCase().includes(term);
-        })
+        post.tags?.some((tag) => getTagText(tag).toLowerCase().includes(term))
       );
     }
     
@@ -171,9 +185,9 @@ function ContentLibraryContent() {
     <div className="min-h-screen bg-background">
       {/* 头部导航 */}
       <div className="border-b border-border bg-card">
-        <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-4">
+        <div className="max-w-[1560px] mx-auto px-3 sm:px-4 py-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-3">
               <h1 className="text-2xl font-bold text-foreground">内容素材库</h1>
               <div className="text-sm text-muted-foreground">
                 共 {filteredPosts.length} 个作品
@@ -183,37 +197,36 @@ function ContentLibraryContent() {
             <div className="flex items-center gap-3">
               <button 
                 onClick={loadPosts}
-                className="px-4 py-2 text-sm bg-muted border border-border rounded-lg hover:bg-border/50 transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-muted border border-border rounded-lg hover:bg-border/50 transition-colors"
               >
-                🔄 刷新
+                <ArrowPathIcon className="h-3.5 w-3.5" />
+                刷新
               </button>
               <Link
                 href="/media-analysis"
-                className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded-lg hover:opacity-90 transition-opacity"
+                className="px-3 py-1.5 bg-primary text-primary-foreground text-xs rounded-lg hover:opacity-90 transition-opacity"
               >
-                ➕ 添加内容
+                添加内容
               </Link>
             </div>
           </div>
           
           {/* 搜索框 */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
             <div className="flex-1 relative">
               <input
                 type="text"
                 placeholder="搜索标题、内容、作者或标签..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full px-4 py-2 pl-10 border border-border rounded-lg bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
+                className="w-full px-3 py-2 pl-9 border border-border rounded-lg bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/40"
               />
-              <div className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground">
-                🔍
-              </div>
+              <MagnifyingGlassIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             </div>
             {searchTerm && (
               <button
                 onClick={() => setSearchTerm('')}
-                className="px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                className="px-2.5 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 清空
               </button>
@@ -223,10 +236,9 @@ function ContentLibraryContent() {
       </div>
 
       {/* 主要内容 */}
-      <div className="container mx-auto px-4 py-8">
+      <div className="max-w-[1560px] mx-auto px-3 sm:px-4 py-5">
         {currentPosts.length === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4">📚</div>
+          <div className="text-center py-12 border border-dashed border-border rounded-xl bg-card">
             <p className="text-xl text-muted-foreground mb-2">
               {searchTerm ? '没有找到匹配的内容' : '还没有保存任何作品'}
             </p>
@@ -238,24 +250,24 @@ function ContentLibraryContent() {
                 href="/media-analysis"
                 className="inline-flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition-opacity"
               >
-                ➕ 开始解析内容
+                开始解析内容
               </Link>
             )}
           </div>
         ) : (
           <>
             {/* 内容网格 */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5 gap-3 mb-5">
               {currentPosts.map((post) => (
                 <div 
                   key={post.id} 
-                  className={`rounded-xl border bg-card p-6 hover:border-primary/30 transition-colors ${
+                  className={`rounded-xl border bg-card p-3 hover:border-primary/30 transition-colors ${
                     highlightId === post.id ? 'ring-2 ring-primary/50' : ''
                   }`}
                 >
                   {/* 作者信息 */}
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center text-white text-sm font-medium">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center text-white text-xs font-medium">
                       {post.author_avatar ? (
                         <img src={post.author_avatar} alt="" className="w-full h-full rounded-full object-cover" />
                       ) : (
@@ -263,10 +275,10 @@ function ContentLibraryContent() {
                       )}
                     </div>
                     <div className="flex-1">
-                      <div className="font-medium text-foreground text-sm">
+                      <div className="font-medium text-foreground text-xs">
                         {post.author_name || '未知用户'}
                       </div>
-                      <div className="text-xs text-muted-foreground">
+                      <div className="text-[11px] text-muted-foreground">
                         {formatTime(post.saved_at)}
                       </div>
                     </div>
@@ -276,26 +288,28 @@ function ContentLibraryContent() {
                           setSelectedPost(post);
                           setShowEditModal(true);
                         }}
-                        className="p-1.5 text-xs text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                         title="编辑"
+                        aria-label="编辑"
                       >
-                        ✏️
+                        <PencilSquareIcon className="h-4 w-4" />
                       </button>
                       <button
                         onClick={() => deletePost(post)}
-                        className="p-1.5 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
                         title="删除"
+                        aria-label="删除"
                       >
-                        🗑️
+                        <TrashIcon className="h-4 w-4" />
                       </button>
                     </div>
                   </div>
 
                   {/* 图片缩略图 */}
                   {post.images && post.images.length > 0 && (
-                    <div className="flex gap-1.5 mb-3">
+                    <div className="flex gap-1.5 mb-2">
                       {post.images.slice(0, 3).map((img, idx) => (
-                        <div key={idx} className="relative flex-1 aspect-square rounded-lg overflow-hidden bg-muted max-w-[80px]">
+                        <div key={idx} className="relative flex-1 aspect-square rounded-md overflow-hidden bg-muted max-w-[74px]">
                           <img
                             src={img.oss_url || img.original_url}
                             alt=""
@@ -313,45 +327,45 @@ function ContentLibraryContent() {
                   )}
 
                   {/* 标题 */}
-                  <h3 className="text-base font-semibold text-foreground mb-3 line-clamp-2">
+                  <h3 className="text-sm font-semibold text-foreground mb-1 line-clamp-2 leading-5">
                     {post.title || '无标题'}
                   </h3>
 
                   {/* 内容摘要 */}
                   {post.content && (
-                    <p className="text-sm text-muted-foreground mb-4 line-clamp-3">
+                    <p className="text-xs text-muted-foreground mb-2 line-clamp-2">
                       {post.content}
                     </p>
                   )}
 
                   {/* 标签 */}
                   {post.tags && post.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mb-4">
-                      {post.tags.slice(0, 3).map((tag, idx) => (
-                        <span key={idx} className="px-2 py-1 bg-pink-100 text-pink-700 text-xs rounded-full dark:bg-pink-900/40 dark:text-pink-300">
-                          #{typeof tag === 'string' ? tag : (tag as any).name || tag}
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {post.tags.slice(0, 2).map((tag, idx) => (
+                        <span key={idx} className="px-1.5 py-0.5 bg-pink-100 text-pink-700 text-[11px] rounded-full dark:bg-pink-900/40 dark:text-pink-300">
+                          #{getTagText(tag)}
                         </span>
                       ))}
-                      {post.tags.length > 3 && (
-                        <span className="px-2 py-1 bg-muted text-muted-foreground text-xs rounded-full">
-                          +{post.tags.length - 3}
+                      {post.tags.length > 2 && (
+                        <span className="px-1.5 py-0.5 bg-muted text-muted-foreground text-[11px] rounded-full">
+                          +{post.tags.length - 2}
                         </span>
                       )}
                     </div>
                   )}
 
                   {/* 互动数据 */}
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground mb-4">
+                  <div className="flex items-center gap-3 text-[11px] text-muted-foreground mb-2">
                     <div className="flex items-center gap-1">
-                      <span>❤️</span>
+                      <HeartIcon className="h-3.5 w-3.5" />
                       <span>{formatNumber(post.like_count)}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <span>💬</span>
+                      <ChatBubbleLeftEllipsisIcon className="h-3.5 w-3.5" />
                       <span>{formatNumber(post.comment_count)}</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <span>⭐</span>
+                      <BookmarkIcon className="h-3.5 w-3.5" />
                       <span>{formatNumber(post.collect_count)}</span>
                     </div>
                   </div>
@@ -363,21 +377,19 @@ function ContentLibraryContent() {
                         href={post.original_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex-1 py-2 px-3 bg-muted border border-border rounded-lg text-xs font-medium text-center hover:bg-border/50 transition-colors"
+                        className="inline-flex items-center justify-center h-8 w-8 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                        title="查看原帖"
+                        aria-label="查看原帖"
                       >
-                        查看原帖 ↗
+                        <ArrowTopRightOnSquareIcon className="h-4 w-4" />
                       </a>
                     )}
                     <a
                       href={`/content-library/detail?id=${post.id}`}
-                      className="flex-1 py-2 px-3 bg-primary text-primary-foreground rounded-lg text-xs font-medium text-center hover:opacity-90 transition-opacity"
+                      className="flex-1 py-1.5 px-3 bg-primary text-primary-foreground rounded-lg text-xs font-medium text-center hover:opacity-90 transition-opacity"
                     >
-                      查看详情
+                      详情
                     </a>
-                  </div>
-
-                  <div className="mt-3 pt-3 border-t border-border text-right">
-                    <span className="text-xs text-muted-foreground">#{post.id}</span>
                   </div>
                 </div>
               ))}
@@ -385,35 +397,21 @@ function ContentLibraryContent() {
 
             {/* 分页 */}
             {totalPages > 1 && (
-              <div className="flex items-center justify-center gap-2">
+              <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
                 <button
                   onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
                   disabled={currentPage === 1}
-                  className="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   上一页
                 </button>
-                
-                <div className="flex items-center gap-1">
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
-                    <button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      className={`px-3 py-2 text-sm rounded-lg transition-colors ${
-                        currentPage === page
-                          ? 'bg-primary text-primary-foreground'
-                          : 'border border-border hover:bg-muted'
-                      }`}
-                    >
-                      {page}
-                    </button>
-                  ))}
-                </div>
-
+                <span className="px-3 py-1.5 rounded-lg border border-border bg-muted text-foreground">
+                  {currentPage} / {totalPages}
+                </span>
                 <button
                   onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
                   disabled={currentPage === totalPages}
-                  className="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className="px-3 py-1.5 border border-border rounded-lg hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   下一页
                 </button>

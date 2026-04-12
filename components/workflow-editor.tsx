@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { WorkflowDef, NodeDef, NodeType, VertexAIParams, WaitAfterConfig } from '@/lib/workflow/types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { WorkflowDef, NodeDef, NodeType, NavigateParams, VertexAIParams, WaitAfterConfig } from '@/lib/workflow/types';
 import type { HumanOptions } from '@/lib/workflow/human-options';
 import { DEFAULT_HUMAN_OPTIONS } from '@/lib/workflow/human-options';
 import { NODE_CATALOG, getCatalogItem, WORKFLOW_VARS_META, NODE_LEVEL_PARAM_META } from '@/lib/workflow/node-catalog';
 import { VERTEX_CAPABILITY_META, getDefaultVertexPrompt, getVertexModelMeta, getVertexModelsForCapability, isBuiltInVertexPrompt } from '@/lib/workflow/vertex-ai-meta';
+import { resolveParams } from '@/lib/workflow/resolver';
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
@@ -51,7 +52,82 @@ const STATUS_LABEL: Record<StepStatus, string> = {
   pending:'待执行', running:'执行中', success:'✓ 成功', warn:'⚠ 警告', error:'✗ 失败', skip:'跳过',
 };
 const DEBUG_VNC_URL = process.env.NEXT_PUBLIC_DEBUG_VNC_URL?.trim() ?? '';
+const DEFAULT_ADS_BROWSER_INSTANCE_ID = 'k1b908rw';
+const DEFAULT_TOPIC_GOAL =
+  '给我当前最具价值的 3 个选题，目标是提升曝光量、播放量和粉丝增长；优先抖音语境，可直接执行落地';
+const DEFAULT_TOPIC_SOURCES = 'douyin,bilibili,baidu,toutiao,thepaper';
+const DEFAULT_SOURCE_IMAGE_URLS = JSON.stringify([
+  'https://articel.oss-cn-hangzhou.aliyuncs.com/uploads/2026/04/06/0e6ad92b-bdbe-4c6d-b5fd-03772025de21.jpeg',
+  'https://articel.oss-cn-hangzhou.aliyuncs.com/uploads/2026/04/06/ce5ae766-d1e1-43a6-ba79-b7d671f1a487.jpeg',
+]);
+const STANDARD_CONTEXT_KEYS = ['videoUrl', 'title', 'tags', 'clientId'] as const;
 function ts() { return new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
+
+function shouldSeedDefaultAdsBrowserInstance(workflow: WorkflowDef): boolean {
+  if (!(workflow.vars ?? []).includes('browserInstanceId')) return false;
+  return workflow.nodes.some((node) => {
+    if (node.type !== 'navigate') return false;
+    const params = (node.params ?? {}) as Partial<NavigateParams>;
+    return Boolean(params.useAdsPower);
+  });
+}
+
+function hasAdsNavigateNode(nodes: NodeDef[]): boolean {
+  return nodes.some((node) => {
+    if (node.type !== 'navigate') return false;
+    const params = (node.params ?? {}) as Partial<NavigateParams>;
+    return Boolean(params.useAdsPower);
+  });
+}
+
+function collectTemplateVars(input: unknown, target: Set<string>) {
+  if (typeof input === 'string') {
+    const matches = input.match(/\{\{(\w+)\}\}/g) ?? [];
+    matches.forEach((match) => target.add(match.replace(/[{}]/g, '')));
+    return;
+  }
+  if (Array.isArray(input)) {
+    input.forEach((item) => collectTemplateVars(item, target));
+    return;
+  }
+  if (input && typeof input === 'object') {
+    Object.values(input as Record<string, unknown>).forEach((value) => collectTemplateVars(value, target));
+  }
+}
+
+function getNodeReferencedVars(node: NodeDef): string[] {
+  const keys = new Set<string>();
+  collectTemplateVars(node.params, keys);
+  collectTemplateVars(node.url, keys);
+  collectTemplateVars(node.waitAfter, keys);
+  return Array.from(keys);
+}
+
+function fieldHint(key: string) {
+  return WORKFLOW_VARS_META[key] || (
+    key === 'videoUrl' ? '当前素材视频地址' :
+    key === 'title' ? '当前标题内容' :
+    key === 'tags' ? '当前标签内容' :
+    key === 'clientId' ? '当前业务侧标识' :
+    '运行时变量'
+  );
+}
+
+function fieldPlaceholder(key: string) {
+  return (
+    key === 'goal' ? DEFAULT_TOPIC_GOAL :
+    key === 'count' ? '3' :
+    key === 'sources' ? DEFAULT_TOPIC_SOURCES :
+    key === 'sourceImageUrls' ? DEFAULT_SOURCE_IMAGE_URLS :
+    `请输入 ${key}`
+  );
+}
+
+function displayPreviewValue(value: unknown) {
+  if (value == null || value === '') return '—';
+  if (typeof value === 'string') return value;
+  return JSON.stringify(value, null, 2);
+}
 
 // ── 参数说明 Tooltip ──────────────────────────────────────────────────────────
 
@@ -109,6 +185,250 @@ function ScreenshotPreviewModal({
           <img src={screenshot} alt="browser preview" className="w-full h-full object-contain" draggable={false} />
         </div>
       </div>
+    </div>
+  );
+}
+
+function tokenizeCommaOrNewline(raw: string): string[] {
+  const text = String(raw || '').trim();
+  if (!text) return [];
+
+  // 支持 JSON 数组字符串（推荐存储格式）
+  if (text.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return parsed.map((s) => String(s || '').trim()).filter(Boolean);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 兼容旧格式：逗号/换行分隔
+  return text
+    .split(/[\n,]/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function SourceImageUrlsTagInput({
+  value,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  placeholder?: string;
+  onChange: (value: string) => void;
+}) {
+  const tokens = useMemo(() => tokenizeCommaOrNewline(value), [value]);
+  const [draft, setDraft] = useState('');
+
+  const commitDraft = useCallback(() => {
+    const next = draft.trim();
+    if (!next) return;
+    const merged = Array.from(new Set(tokens.concat(tokenizeCommaOrNewline(next))));
+    onChange(JSON.stringify(merged));
+    setDraft('');
+  }, [draft, onChange, tokens]);
+
+  const removeToken = useCallback((t: string) => {
+    const next = tokens.filter((x) => x !== t);
+    onChange(JSON.stringify(next));
+  }, [onChange, tokens]);
+
+  return (
+    <div className="mt-2 w-full rounded-lg border border-border bg-card px-2 py-1.5 text-[11px] outline-none focus-within:border-primary">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {tokens.map((t) => (
+          <span
+            key={t}
+            title={t}
+            className="group max-w-full inline-flex items-center gap-1 rounded-full border border-border bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300"
+          >
+            <span className="max-w-[220px] truncate font-mono">{t}</span>
+            <button
+              type="button"
+              onClick={() => removeToken(t)}
+              className="opacity-70 hover:opacity-100 text-emerald-200"
+              aria-label="remove"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commitDraft();
+              return;
+            }
+            if (e.key === 'Backspace' && !draft && tokens.length > 0) {
+              e.preventDefault();
+              const next = tokens.slice(0, -1);
+              onChange(JSON.stringify(next));
+            }
+          }}
+          onBlur={() => commitDraft()}
+          onPaste={(e) => {
+            const text = e.clipboardData?.getData('text') ?? '';
+            const pasted = tokenizeCommaOrNewline(text);
+            if (pasted.length <= 1) return;
+            e.preventDefault();
+            const merged = Array.from(new Set(tokens.concat(pasted)));
+            onChange(JSON.stringify(merged));
+          }}
+          placeholder={tokens.length === 0 ? placeholder : '输入 URL 回车添加…'}
+          className="min-w-[180px] flex-1 bg-transparent font-mono outline-none"
+        />
+      </div>
+      <div className="mt-1 text-[9px] text-muted-foreground">
+        回车添加；支持粘贴多条（逗号/换行分隔）；Backspace 可删除最后一个。
+      </div>
+    </div>
+  );
+}
+
+function RuntimeContextPanel({
+  fieldKeys,
+  values,
+  adsEnabled,
+  sessionId,
+  currentStep,
+  totalSteps,
+  modeLabel,
+  onChange,
+  onResetAdsDefault,
+}: {
+  fieldKeys: string[];
+  values: Record<string, string>;
+  adsEnabled: boolean;
+  sessionId: string | null;
+  currentStep: number;
+  totalSteps: number;
+  modeLabel: string;
+  onChange: (key: string, value: string) => void;
+  onResetAdsDefault: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const autoCollapsedForSessionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) {
+      autoCollapsedForSessionRef.current = null;
+      setCollapsed(false);
+      return;
+    }
+    if (autoCollapsedForSessionRef.current === sessionId) return;
+    autoCollapsedForSessionRef.current = sessionId;
+    setCollapsed(true);
+  }, [sessionId]);
+
+  const previewPairs = fieldKeys
+    .map((key) => [key, values[key] ?? ''] as const)
+    .filter(([, value]) => String(value).trim())
+    .slice(0, 4);
+
+  return (
+    <div className="border-b border-border bg-card/95 px-4 py-3 flex-shrink-0">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-sm font-semibold">运行上下文</h2>
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">{modeLabel}</span>
+            {adsEnabled && (
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] text-primary">Ads 导航已启用</span>
+            )}
+            {sessionId && (
+              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-400 font-mono">
+                #{sessionId.slice(-8)} · {Math.min(currentStep + 1, totalSteps)}/{totalSteps}
+              </span>
+            )}
+          </div>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            这里统一编辑本次调试的运行时变量。修改只影响后续执行，不会直接改写工作流定义。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {adsEnabled && fieldKeys.includes('browserInstanceId') && !collapsed && (
+            <button
+              type="button"
+              onClick={onResetAdsDefault}
+              className="rounded-lg border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
+            >
+              恢复默认实例
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setCollapsed((prev) => !prev)}
+            className="rounded-lg border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
+          >
+            {collapsed ? '展开上下文' : '收起上下文'}
+          </button>
+        </div>
+      </div>
+
+      {collapsed ? (
+        <div className="mt-3 rounded-xl border border-border bg-background px-3 py-2.5">
+          {previewPairs.length === 0 ? (
+            <div className="text-[11px] text-muted-foreground">
+              当前没有可展示的运行时变量，点击“展开上下文”可继续编辑。
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {previewPairs.map(([key, value]) => (
+                <div key={key} className="max-w-full rounded-full border border-border bg-muted/30 px-3 py-1 text-[11px]">
+                  <span className="text-muted-foreground">{key}</span>
+                  <span className="mx-1 text-muted-foreground">=</span>
+                  <span className="font-mono text-foreground/85">
+                    {String(value).length > 48 ? `${String(value).slice(0, 48)}...` : String(value)}
+                  </span>
+                </div>
+              ))}
+              {fieldKeys.length > previewPairs.length && (
+                <div className="rounded-full border border-dashed border-border px-3 py-1 text-[11px] text-muted-foreground">
+                  还有 {fieldKeys.length - previewPairs.length} 个变量
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {fieldKeys.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border px-3 py-4 text-[11px] text-muted-foreground">
+              当前工作流没有声明运行时变量。
+            </div>
+          ) : (
+            fieldKeys.map((key) => (
+              <div key={key} className="rounded-xl border border-border bg-background px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-[11px] font-medium text-foreground">{key}</label>
+                  <span className="text-[10px] text-muted-foreground">{fieldHint(key)}</span>
+                </div>
+                {key === 'sourceImageUrls' ? (
+                  <SourceImageUrlsTagInput
+                    value={values[key] ?? ''}
+                    placeholder={fieldPlaceholder(key)}
+                    onChange={(v) => onChange(key, v)}
+                  />
+                ) : (
+                  <input
+                    value={values[key] ?? ''}
+                    onChange={(e) => onChange(key, e.target.value)}
+                    placeholder={fieldPlaceholder(key)}
+                    className="mt-2 w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary"
+                  />
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -987,6 +1307,7 @@ function NodeDetailPanel({
   node, idx, total, onChange, onClose,
   sessionId, vars,
   materials,
+  humanOptions,
   onVarsChange,
   onStepStatusChange,
 }: {
@@ -998,10 +1319,23 @@ function NodeDetailPanel({
   sessionId: string | null;
   vars: Record<string, string>;
   materials: MaterialItem[];
+  humanOptions: HumanOptions;
   onVarsChange?: (vars: Record<string, string>) => void;
   onStepStatusChange?: (idx: number, status: 'success' | 'error' | 'running') => void;
 }) {
   const catalog = getCatalogItem(node.type);
+  const referencedVars = useMemo(() => getNodeReferencedVars(node), [node]);
+  const resolvedParams = useMemo(
+    () => resolveParams({ ...(node.params ?? {}) }, vars),
+    [node, vars]
+  );
+  const resolvedNodeUrl = useMemo(() => {
+    if (!node.url) return '';
+    return String(resolveParams({ url: node.url }, vars).url || '').trim();
+  }, [node, vars]);
+  const adsPreview = node.type === 'navigate'
+    ? (resolvedParams as Partial<NavigateParams>)
+    : null;
   const [running, setRunning] = useState(false);
   const [screenshotting, setScreenshotting] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -1108,14 +1442,14 @@ function NodeDetailPanel({
         res = await fetch(`/api/workflow/session/${sessionId}/step`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stepIndex: idx, node }),
+          body: JSON.stringify({ stepIndex: idx, node, vars }),
         });
       } else {
         // 无 session：用 node-debug 开临时页面执行
         res = await fetch('/api/workflow/node-debug', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ node, vars }),
+          body: JSON.stringify({ node, vars, humanOptions }),
         });
       }
 
@@ -1322,6 +1656,67 @@ function NodeDetailPanel({
           )}
 
           {/* 节点参数 */}
+          <section>
+            <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">执行预览</h3>
+            <div className="rounded-xl border border-border bg-card p-3 space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <span className={`rounded-full px-2.5 py-1 text-[10px] ${sessionId ? 'bg-emerald-500/10 text-emerald-400' : 'bg-muted text-muted-foreground'}`}>
+                  {sessionId ? 'session 接力' : '独立执行'}
+                </span>
+                {node.type === 'navigate' && adsPreview?.useAdsPower && (
+                  <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[10px] text-primary">
+                    Ads 实例 {adsPreview.adsProfileId || '未解析'}
+                  </span>
+                )}
+                {resolvedNodeUrl && (
+                  <span className="rounded-full bg-sky-500/10 px-2.5 py-1 text-[10px] text-sky-400">
+                    URL 已解析
+                  </span>
+                )}
+              </div>
+
+              {referencedVars.length > 0 ? (
+                <div>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">变量引用</p>
+                  <div className="grid gap-2 md:grid-cols-2">
+                    {referencedVars.map((key) => {
+                      const value = vars[key] ?? '';
+                      const missing = !value.trim();
+                      return (
+                        <div key={key} className={`rounded-lg border px-2.5 py-2 ${missing ? 'border-amber-500/30 bg-amber-500/5' : 'border-border bg-background'}`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-medium text-foreground">{key}</span>
+                            <span className={`text-[10px] ${missing ? 'text-amber-400' : 'text-muted-foreground'}`}>
+                              {missing ? '缺失' : '已解析'}
+                            </span>
+                          </div>
+                          <div className="mt-1 break-all rounded bg-muted/30 px-2 py-1 text-[10px] font-mono text-foreground/80">
+                            {value || '—'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-border px-3 py-2 text-[11px] text-muted-foreground">
+                  本节点当前没有引用模板变量。
+                </div>
+              )}
+
+              <div>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">实际执行参数</p>
+                <div className="rounded-lg bg-background px-3 py-2 text-[10px] font-mono text-foreground/80 overflow-auto max-h-56 whitespace-pre-wrap break-all">
+                  {displayPreviewValue(
+                    resolvedNodeUrl
+                      ? { url: resolvedNodeUrl, ...(resolvedParams as Record<string, unknown>) }
+                      : resolvedParams
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+
           <section>
             <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">节点参数</h3>
             {node.type === 'material' ? (
@@ -1679,7 +2074,17 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   const [currentStep, setCurrentStep] = useState(0);
   const [lastExecutedStep, setLastExecutedStep] = useState<number | null>(null); // 接力追踪
   const [stepStatus, setStepStatus] = useState<StepStatus[]>(initialWorkflow.nodes.map(() => 'pending'));
-  const [humanOptions, setHumanOptions] = useState<HumanOptions>({ ...DEFAULT_HUMAN_OPTIONS });
+  const [humanOptions, setHumanOptions] = useState<HumanOptions>(() => {
+    if (typeof window === 'undefined') return { ...DEFAULT_HUMAN_OPTIONS };
+    try {
+      const saved = window.localStorage.getItem('workflow.humanOptions');
+      if (!saved) return { ...DEFAULT_HUMAN_OPTIONS };
+      const parsed = JSON.parse(saved) as Partial<HumanOptions>;
+      return { ...DEFAULT_HUMAN_OPTIONS, ...parsed };
+    } catch {
+      return { ...DEFAULT_HUMAN_OPTIONS };
+    }
+  });
   const [keepBrowserPage, setKeepBrowserPage] = useState(true);
   const [autoRetryOnFailure, setAutoRetryOnFailure] = useState(true);
   const [running, setRunning] = useState(false);
@@ -1699,13 +2104,46 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   const [runtimeVars, setRuntimeVars] = useState<Record<string, string>>(() => {
     const seeded: Record<string, string> = {};
     const contextMap = (initialContext ?? {}) as Record<string, string>;
+    const useDefaultAdsBrowserInstance = shouldSeedDefaultAdsBrowserInstance(initialWorkflow);
     for (const key of initialWorkflow.vars ?? []) {
       const value = contextMap[key];
-      if (typeof value === 'string') seeded[key] = value;
+      if (typeof value === 'string' && value.trim()) {
+        seeded[key] = value;
+        continue;
+      }
+      if (key === 'browserInstanceId' && useDefaultAdsBrowserInstance) {
+        seeded[key] = DEFAULT_ADS_BROWSER_INSTANCE_ID;
+        continue;
+      }
+      if (key === 'goal') {
+        seeded[key] = DEFAULT_TOPIC_GOAL;
+        continue;
+      }
+      if (key === 'count') {
+        seeded[key] = '3';
+        continue;
+      }
+      if (key === 'sources') {
+        seeded[key] = DEFAULT_TOPIC_SOURCES;
+        continue;
+      }
+      if (key === 'sourceImageUrls') {
+        seeded[key] = DEFAULT_SOURCE_IMAGE_URLS;
+      }
     }
     return seeded;
   });
-  const workflowVarKeys = initialWorkflow.vars ?? [];
+  const workflowVarKeys = useMemo(() => initialWorkflow.vars ?? [], [initialWorkflow.vars]);
+  const adsWorkflowEnabled = useMemo(() => hasAdsNavigateNode(nodes), [nodes]);
+  const runtimeContextKeys = useMemo(() => {
+    const ordered = new Set<string>();
+    workflowVarKeys.forEach((key) => ordered.add(key));
+    Object.keys(runtimeVars).forEach((key) => ordered.add(key));
+    STANDARD_CONTEXT_KEYS.forEach((key) => {
+      if (ctx[key]) ordered.add(key);
+    });
+    return Array.from(ordered);
+  }, [ctx, runtimeVars, workflowVarKeys]);
 
   const collectSessionVars = useCallback((): Record<string, string> => {
     const merged: Record<string, string> = { ...runtimeVars };
@@ -1743,9 +2181,26 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
     window.localStorage.setItem('workflow.autoRetryOnFailure', autoRetryOnFailure ? '1' : '0');
   }, [autoRetryOnFailure]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem('workflow.humanOptions', JSON.stringify(humanOptions));
+    } catch {
+      // ignore
+    }
+  }, [humanOptions]);
+
   const appendLog = useCallback((text: string) => {
     setLogs(prev => [...prev, { ts: ts(), text }]);
   }, []);
+
+  function setContextFieldValue(key: string, value: string) {
+    if ((STANDARD_CONTEXT_KEYS as readonly string[]).includes(key)) {
+      setCtx(prev => ({ ...prev, [key]: value }));
+      return;
+    }
+    setRuntimeVars(prev => ({ ...prev, [key]: value }));
+  }
 
   function updateNodes(next: NodeDef[]) {
     setNodes(next);
@@ -1818,8 +2273,13 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
     setStepStatus(prev => { const n = [...prev]; n[idx] = 'running'; return n; });
 
     try {
-      const body = options?.skip ? { skip: true, stepIndex: idx } : { stepIndex: idx };
-      const requestBody = options?.reset ? { ...body, reset: true } : body;
+      const base = options?.skip ? { skip: true, stepIndex: idx } : { stepIndex: idx };
+      const requestBody = {
+        ...base,
+        ...(options?.reset ? { reset: true } : {}),
+        // 同步最新 vars（允许用户在创建 session 后再改运行时变量）
+        vars: collectSessionVars(),
+      };
       const res = await fetch(`/api/workflow/session/${activeSessionId}/step`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2126,6 +2586,9 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
             </button>
             {showHumanOptions && (
               <div className="mt-1.5 bg-muted/20 rounded-lg p-1.5 space-y-1">
+                <div className="px-1 text-[9px] text-muted-foreground leading-tight">
+                  仅影响调试执行（单节点 debug / 新建 session），会自动保存到浏览器本地（无需点保存）。会话执行中不可切换。
+                </div>
                 {([
                   { key: 'humanMouse',     label: '🐭 鼠标轨迹' },
                   { key: 'humanType',      label: '⌨️ 打字节奏' },
@@ -2243,6 +2706,18 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
           )}
         </div>
 
+        <RuntimeContextPanel
+          fieldKeys={runtimeContextKeys}
+          values={collectSessionVars()}
+          adsEnabled={adsWorkflowEnabled}
+          sessionId={sessionId}
+          currentStep={currentStep}
+          totalSteps={nodes.length}
+          modeLabel={sessionId ? 'session 接力' : '独立执行'}
+          onChange={setContextFieldValue}
+          onResetAdsDefault={() => setRuntimeVars(prev => ({ ...prev, browserInstanceId: DEFAULT_ADS_BROWSER_INSTANCE_ID }))}
+        />
+
         {/* ── 节点详情 + 执行面板（选中节点时始终显示）── */}
         {rightPanelMode === 'node' && editingIdx !== null && (
             <NodeDetailPanel
@@ -2254,6 +2729,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
             sessionId={sessionId}
             vars={collectSessionVars()}
             materials={materials}
+            humanOptions={humanOptions}
             onVarsChange={(nextVars) => {
               setCtx(prev => ({
                 ...prev,
@@ -2291,6 +2767,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                 {workflowVarKeys.length > 0 && (
                   <>
                     <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">工作流运行时变量（测试前可修改）</p>
+                    <p className="mb-2 text-[10px] text-muted-foreground">顶部“运行上下文”与这里实时同步，修改任一处都会影响后续执行。</p>
                     <div className="space-y-1.5 mb-3">
                       {workflowVarKeys.map((key) => (
                         <div key={key}>
@@ -2301,7 +2778,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                           <input
                             value={runtimeVars[key] ?? ''}
                             onChange={e => setRuntimeVars(prev => ({ ...prev, [key]: e.target.value }))}
-                            placeholder={`请输入 ${key}`}
+                            placeholder={fieldPlaceholder(key)}
                             className="w-full bg-background border border-border rounded px-2 py-1 text-[11px] font-mono outline-none focus:border-primary"
                           />
                         </div>

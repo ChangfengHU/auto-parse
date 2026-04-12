@@ -10,6 +10,13 @@ const DEFAULT_SYSTEM_PROMPT =
   '你是内容选题总监。基于候选热点，按目标筛选最值得做的 3-5 个选题，优先考虑曝光潜力、播放潜力、涨粉潜力。必须输出严格 JSON。';
 const DEFAULT_USER_PROMPT_TEMPLATE =
   '任务目标：{{goal}}\n输出数量：{{count}}\n\n候选数据（JSON）：\n{{candidatesJson}}\n\n请仅输出 JSON，结构为：{"selected":[{"rank":1,"title":"","source":"","sourceName":"","score":0-100,"reason":"","expected":{"exposure":0,"plays":0,"fans":0},"url":""}],"summary":"","discarded":[{"title":"","reason":""}]}\n要求：selected 按优先级排序，尽量覆盖多个来源。';
+const SOURCE_ALIASES: Record<string, string[]> = {
+  douyin: ['douyin', '抖音'],
+  bilibili: ['bilibili', '哔哩哔哩', 'b站', 'b站'],
+  baidu: ['baidu', '百度'],
+  toutiao: ['toutiao', '头条', '今日头条'],
+  thepaper: ['thepaper', '澎湃', '澎湃新闻'],
+};
 
 interface LlmMessage {
   role: 'system' | 'user' | 'assistant';
@@ -45,6 +52,29 @@ function parseSources(raw: unknown): string[] {
     }
   }
   return text.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function includesSingleSourceDirective(text: string, aliases: string[]): boolean {
+  if (!text.trim()) return false;
+  const normalized = text.toLowerCase();
+  return aliases.some((alias) => {
+    const token = alias.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return (
+      new RegExp(`(?:只|仅|仅限|限定|only)\\s*(?:返回|输出|保留|选择|取)?[^\\n，,。；;]{0,12}${token}`, 'i').test(normalized) ||
+      new RegExp(`${token}[^\\n，,。；;]{0,10}(?:only|即可|就行|就好|为主|仅|只)`, 'i').test(normalized)
+    );
+  });
+}
+
+function detectForcedSource(args: { goal: string; sources: string[] }): string | null {
+  const sourceSet = new Set(args.sources.map((source) => source.toLowerCase()));
+  for (const source of sourceSet) {
+    const aliases = SOURCE_ALIASES[source] ?? [source];
+    if (includesSingleSourceDirective(args.goal, aliases)) {
+      return source;
+    }
+  }
+  return null;
 }
 
 function renderPromptTemplate(template: string, vars: Record<string, string>) {
@@ -111,6 +141,42 @@ function toCandidates(items: Awaited<ReturnType<typeof fetchDailyHotTopics>>['to
       timelinessScore: buildTimelinessScore(item.timestamp),
     };
   });
+}
+
+function buildSourceTopicLists(items: Awaited<ReturnType<typeof fetchDailyHotTopics>>['topics']) {
+  const grouped = new Map<
+    string,
+    {
+      source: string;
+      sourceName: string;
+      items: Array<{
+        id: string;
+        title: string;
+        rank: number;
+        hotValue?: number;
+        timestamp?: number;
+        url?: string;
+      }>;
+    }
+  >();
+  for (const item of items) {
+    const key = item.source;
+    const entry = grouped.get(key) ?? {
+      source: item.source,
+      sourceName: item.sourceName,
+      items: [],
+    };
+    entry.items.push({
+      id: item.id,
+      title: item.title,
+      rank: item.rank,
+      hotValue: item.hotValue,
+      timestamp: item.timestamp,
+      url: item.url,
+    });
+    grouped.set(key, entry);
+  }
+  return Array.from(grouped.values()).sort((a, b) => a.source.localeCompare(b.source));
 }
 
 function dedupeByTitle<T extends { title: string }>(items: T[]): T[] {
@@ -452,6 +518,54 @@ function enforceSourceDiversity(args: {
   return { selected: finalized, adjusted, requiredUniqueSources };
 }
 
+function enforceSingleSourceSelection(args: {
+  selected: Array<{
+    rank: number;
+    title: string;
+    source: string;
+    sourceName: string;
+    score: number;
+    reason: string;
+    expected: { exposure: number; plays: number; fans: number };
+    url: string;
+  }>;
+  scored: ReturnType<typeof evaluateTopicCandidates>['scored'];
+  count: number;
+  source: string;
+}) {
+  const output: typeof args.selected = [];
+  const titleSet = new Set<string>();
+  const pushUnique = (item: (typeof args.selected)[number]) => {
+    const key = normalizeTitle(item.title);
+    if (!key || titleSet.has(key)) return;
+    titleSet.add(key);
+    output.push(item);
+  };
+
+  for (const item of args.selected) {
+    if (output.length >= args.count) break;
+    if (item.source !== args.source) continue;
+    pushUnique(item);
+  }
+
+  for (const item of args.scored) {
+    if (output.length >= args.count) break;
+    if (item.source !== args.source) continue;
+    pushUnique({
+      rank: 0,
+      title: item.title,
+      source: item.source,
+      sourceName: item.sourceName,
+      score: Number(item.score.toFixed(2)),
+      reason: item.reason,
+      expected: item.expected,
+      url: item.url ?? '',
+    });
+  }
+
+  return output.slice(0, args.count).map((item, index) => ({ ...item, rank: index + 1 }));
+}
+
 export async function executeTopicPickerAgent(
   _page: Page,
   params: TopicPickerAgentParams,
@@ -462,7 +576,7 @@ export async function executeTopicPickerAgent(
   const count = Math.max(3, Math.min(5, Number(params.count ?? ctx.vars.count ?? 3) || 3));
   const baseUrl = String(params.baseUrl ?? ctx.vars.dailyHotApiBaseUrl ?? 'https://dailyhotapi-hazel.vercel.app').trim();
   const perSourceLimit = Math.max(5, Math.min(30, Number(params.perSourceLimit ?? 20) || 20));
-  const sources = parseSources(params.sources).length > 0 ? parseSources(params.sources) : DEFAULT_SOURCES;
+  const requestedSources = parseSources(params.sources).length > 0 ? parseSources(params.sources) : DEFAULT_SOURCES;
   const outputVar = String(params.outputVar ?? 'topicIdeas').trim() || 'topicIdeas';
   const outputDetailVar = String(params.outputDetailVar ?? 'topicIdeasDetail').trim() || 'topicIdeasDetail';
   const evaluatorId = String(params.evaluatorId ?? '').trim() || undefined;
@@ -470,6 +584,11 @@ export async function executeTopicPickerAgent(
   const llmUserPromptTemplate = String(
     params.llmUserPromptTemplate ?? ctx.vars.topicLlmUserPromptTemplate ?? DEFAULT_USER_PROMPT_TEMPLATE
   ).trim() || DEFAULT_USER_PROMPT_TEMPLATE;
+  const forcedSource = detectForcedSource({
+    goal,
+    sources: requestedSources,
+  });
+  const sources = forcedSource ? [forcedSource] : requestedSources;
   const llmCandidateLimitRaw = Number(params.llmCandidateLimit ?? ctx.vars.topicLlmCandidateLimit ?? 80);
   const llmCandidateLimit = Number.isFinite(llmCandidateLimitRaw)
     ? Math.max(20, Math.min(150, Math.floor(llmCandidateLimitRaw)))
@@ -480,6 +599,9 @@ export async function executeTopicPickerAgent(
     log.push(`🎯 目标：${goal}`);
     log.push(`🧠 LLM：${llmConfig.provider}/${llmConfig.model} @ ${llmConfig.baseUrl}`);
     log.push(`🧰 Skill：dailyhot.fetch_topics（候选拉取）`);
+    if (forcedSource) {
+      log.push(`🔒 已命中单源约束：仅保留 ${forcedSource}`);
+    }
     log.push(`📡 来源：${sources.join(', ')}`);
 
     const fetched = await fetchDailyHotTopics({ baseUrl, sources, perSourceLimit });
@@ -549,13 +671,22 @@ export async function executeTopicPickerAgent(
       ? normalizeFinalResult(llmFinal, count, candidates, fallback.summary)
       : fallback.selected;
     const preFinalSelected = selected.length > 0 ? selected : fallback.selected;
-    const diversityAdjusted = enforceSourceDiversity({
-      selected: preFinalSelected,
-      scored: evaluated.scored,
-      count,
-    });
-    const finalSelected = diversityAdjusted.selected;
-    if (diversityAdjusted.adjusted) {
+    const diversityAdjusted = forcedSource
+      ? null
+      : enforceSourceDiversity({
+          selected: preFinalSelected,
+          scored: evaluated.scored,
+          count,
+        });
+    const finalSelected = forcedSource
+      ? enforceSingleSourceSelection({
+          selected: preFinalSelected,
+          scored: evaluated.scored,
+          count,
+          source: forcedSource,
+        })
+      : (diversityAdjusted?.selected ?? preFinalSelected);
+    if (diversityAdjusted?.adjusted) {
       log.push(`⚖️ 已执行多源平衡：至少覆盖 ${diversityAdjusted.requiredUniqueSources} 个来源（避免结果被单一来源垄断）`);
     }
     const selectedSourceSummary = Array.from(
@@ -581,6 +712,16 @@ export async function executeTopicPickerAgent(
       summary: llmFinal?.summary ?? fallback.summary,
       discarded: llmFinal?.discarded ?? [],
       selected: finalSelected,
+      fetch: {
+        baseUrl,
+        requestedSources: requestedSources,
+        effectiveSources: sources,
+        availableSources: fetched.availableSources,
+        enabledSources: fetched.enabledSources,
+        disabledSources: fetched.disabledSources,
+        stats: fetched.stats,
+        topicLists: buildSourceTopicLists(fetched.topics),
+      },
     };
 
     ctx.vars[outputVar] = JSON.stringify(finalSelected);

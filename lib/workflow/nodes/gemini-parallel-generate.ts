@@ -1,6 +1,7 @@
 import type { Page } from 'playwright';
 import type { GeminiParallelGenerateParams, NodeResult, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
+import { withSystemClipboardLock } from '../clipboard-lock';
 import { uploadBuffer } from '../../oss';
 
 interface BranchResult {
@@ -127,20 +128,6 @@ export async function executeGeminiParallelGenerate(
   log.push(`🚀 并发生图开始：${prompts.length} 条提示词，并发=${maxConcurrency}`);
 
   const branchPages: Page[] = [];
-  let clipboardQueue = Promise.resolve();
-  const withClipboardLock = async <T>(fn: () => Promise<T>): Promise<T> => {
-    const prev = clipboardQueue;
-    let release: (() => void) | undefined;
-    clipboardQueue = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    await prev;
-    try {
-      return await fn();
-    } finally {
-      release?.();
-    }
-  };
   const worker = async (index: number, prompt: string): Promise<BranchResult> => {
     const branchPage = await page.context().newPage();
     branchPages.push(branchPage);
@@ -186,7 +173,7 @@ export async function executeGeminiParallelGenerate(
         if (!buffer) {
           try {
             const copySelector = resolved.successSelector;
-            await withClipboardLock(async () => {
+            await withSystemClipboardLock(async () => {
               const copyBtn = branchPage.locator(copySelector).first();
               await copyBtn.waitFor({ state: 'visible', timeout: 10_000 });
               await copyBtn.click({ timeout: 10_000 });

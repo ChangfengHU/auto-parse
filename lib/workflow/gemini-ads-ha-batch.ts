@@ -7,6 +7,13 @@ import {
   createGeminiAdsBatchTask,
   getGeminiAdsBatchTask,
 } from './gemini-ads-batch';
+import {
+  appendTaskTrace,
+  pruneTaskTraces,
+  taskTraceFile,
+  taskTraceFileRelative,
+  type TaskTracePayload,
+} from './task-trace';
 
 type HaTaskStatus = 'queued' | 'running' | 'success' | 'failed' | 'cancelled';
 type HaItemStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
@@ -29,7 +36,9 @@ interface HaItem {
   status: HaItemStatus;
   attempts: number;
   browserInstanceId?: string;
+  mediaUrls: string[];
   imageUrls: string[];
+  primaryMediaType?: 'image' | 'video' | 'unknown';
   error?: string;
   startedAt?: string;
   endedAt?: string;
@@ -54,6 +63,7 @@ export interface GeminiAdsHaBatchTask {
   endedAt?: string;
   cancelRequested: boolean;
   cacheUntil?: string;
+  traceFile?: string;
   settings: HaSettings;
   summary: HaSummary;
   prompts: string[];
@@ -74,6 +84,12 @@ function taskStore() {
 const TASK_CACHE_TTL_MS = Number(process.env.GEMINI_ADS_HA_TASK_CACHE_TTL_MS || 10 * 60 * 1000);
 const TASK_CACHE_DIR = path.join(os.tmpdir(), 'gemini-ads-ha-task-cache');
 
+const TRACE_NAMESPACE = 'gemini-ads-ha';
+
+function trace(taskId: string, event: string, payload: TaskTracePayload = {}) {
+  appendTaskTrace(TRACE_NAMESPACE, taskId, event, payload);
+}
+
 function cacheFile(taskId: string) {
   return path.join(TASK_CACHE_DIR, `${taskId}.json`);
 }
@@ -91,7 +107,15 @@ function loadPersistedTask(taskId: string): GeminiAdsHaBatchTask | undefined {
   try {
     const file = cacheFile(taskId);
     if (!fs.existsSync(file)) return undefined;
-    return JSON.parse(fs.readFileSync(file, 'utf8')) as GeminiAdsHaBatchTask;
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as GeminiAdsHaBatchTask;
+    if (parsed && Array.isArray(parsed.items)) {
+      parsed.items = parsed.items.map((item: any) => {
+        const imageUrls = Array.isArray(item.imageUrls) ? item.imageUrls : [];
+        const mediaUrls = Array.isArray(item.mediaUrls) ? item.mediaUrls : imageUrls;
+        return { ...item, imageUrls, mediaUrls } as HaItem;
+      });
+    }
+    return parsed;
   } catch {
     return undefined;
   }
@@ -157,7 +181,9 @@ function isTerminal(status: string) {
 async function runHaTask(taskId: string) {
   const task = taskStore().get(taskId);
   if (!task) return;
-  updateTask(taskId, { status: 'running', startedAt: new Date().toISOString() });
+  const startedAt = new Date().toISOString();
+  updateTask(taskId, { status: 'running', startedAt });
+  trace(taskId, 'task_started', { startedAt });
 
   while (true) {
     const current = taskStore().get(taskId);
@@ -206,6 +232,12 @@ async function runHaTask(taskId: string) {
       autoCloseTab: current.settings.autoCloseTab,
     });
 
+    trace(taskId, 'wave_created', {
+      batchTaskId: batch.id,
+      size: groupSize,
+      runs: batchRuns,
+    });
+
     updateItems(taskId, (items) =>
       items.map((item) => {
         const idx = picked.findIndex((p) => p.id === item.id);
@@ -235,17 +267,55 @@ async function runHaTask(taskId: string) {
 
       if (isTerminal(wave.status)) {
         const doneAt = new Date().toISOString();
+
+        trace(taskId, 'wave_terminal', { batchTaskId: batch.id, status: wave.status, endedAt: doneAt });
+        const seenPrimary = new Map<string, string>();
+        for (const pickedItem of picked) {
+          const idx = picked.findIndex((p) => p.id === pickedItem.id);
+          const run = wave.runs[idx];
+          const mediaUrls = run?.mediaUrls ?? run?.imageUrls ?? [];
+          const imageUrls = run?.imageUrls ?? [];
+          const primary = (mediaUrls[0] || imageUrls[0]) ?? null;
+          if (primary) {
+            const prev = seenPrimary.get(primary);
+            if (prev) {
+              trace(taskId, 'duplicate_primary_media_detected', {
+                primary,
+                currentItemId: pickedItem.id,
+                currentPrompt: pickedItem.prompt,
+                previousItemId: prev,
+              });
+            } else {
+              seenPrimary.set(primary, pickedItem.id);
+            }
+          }
+          trace(taskId, 'item_observed', {
+            batchTaskId: batch.id,
+            itemId: pickedItem.id,
+            index: pickedItem.index,
+            prompt: pickedItem.prompt,
+            runStatus: run?.status,
+            childTaskId: run?.taskId,
+            mediaUrl: mediaUrls[0] || null,
+            imageUrl: imageUrls[0] || null,
+            error: run?.error,
+          });
+        }
+
         updateItems(taskId, (items) =>
           items.map((item) => {
             const idx = picked.findIndex((p) => p.id === item.id);
             if (idx < 0) return item;
             const run = wave.runs[idx];
+            const mediaUrls = run?.mediaUrls ?? run?.imageUrls ?? [];
             const imageUrls = run?.imageUrls ?? [];
-            if (run?.status === 'success' && imageUrls.length > 0) {
+            if (run?.status === 'success' && mediaUrls.length > 0) {
               return {
                 ...item,
                 status: 'success',
+                mediaUrls,
                 imageUrls,
+                primaryMediaType: run?.primaryMediaType,
                 childTaskId: run.taskId,
                 error: undefined,
                 endedAt: doneAt,
@@ -255,9 +325,11 @@ async function runHaTask(taskId: string) {
             return {
               ...item,
               status: exhausted ? 'failed' : 'pending',
+              mediaUrls: mediaUrls.length > 0 ? mediaUrls : item.mediaUrls,
               imageUrls: imageUrls.length > 0 ? imageUrls : item.imageUrls,
+              primaryMediaType: run?.primaryMediaType || item.primaryMediaType,
               childTaskId: run?.taskId || item.childTaskId,
-              error: run?.error || (imageUrls.length === 0 ? '任务未返回图片 URL' : '子任务失败'),
+              error: run?.error || (mediaUrls.length === 0 ? '任务未返回媒体 URL' : '子任务失败'),
               endedAt: exhausted ? doneAt : undefined,
             };
           })
@@ -274,6 +346,7 @@ async function runHaTask(taskId: string) {
 
     if (timeoutReached) {
       cancelGeminiAdsBatchTask(batch.id);
+      trace(taskId, 'wave_timeout', { batchTaskId: batch.id, timeoutMs: current.settings.runTimeoutMs });
       updateItems(taskId, (items) =>
         items.map((item) => {
           const matched = pickedIds.has(item.id);
@@ -300,13 +373,15 @@ async function runHaTask(taskId: string) {
         ? item
         : { ...item, status: 'cancelled' as const, endedAt: item.endedAt || endedAt }
     );
+    const summary = computeSummary(cancelledItems);
     updateTask(taskId, {
       status: 'cancelled',
       endedAt,
       cacheUntil: new Date(Date.now() + TASK_CACHE_TTL_MS).toISOString(),
       items: cancelledItems,
-      summary: computeSummary(cancelledItems),
+      summary,
     });
+    trace(taskId, 'task_finalized', { status: 'cancelled', endedAt, summary });
     return;
   }
 
@@ -322,13 +397,15 @@ async function runHaTask(taskId: string) {
     return item;
   });
   const summary = computeSummary(settledItems);
+  const status = summary.success === summary.total ? 'success' : 'failed';
   updateTask(taskId, {
-    status: summary.success === summary.total ? 'success' : 'failed',
+    status,
     endedAt,
     cacheUntil: new Date(Date.now() + TASK_CACHE_TTL_MS).toISOString(),
     items: settledItems,
     summary,
   });
+  trace(taskId, 'task_finalized', { status, endedAt, summary });
 }
 
 export async function createGeminiAdsHaBatchTask(input: {
@@ -363,12 +440,17 @@ export async function createGeminiAdsHaBatchTask(input: {
 
   const now = new Date().toISOString();
   const taskId = randomUUID();
+
+  pruneTaskTraces(TRACE_NAMESPACE);
+  const traceFile = taskTraceFileRelative(taskTraceFile(TRACE_NAMESPACE, taskId));
+
   const items: HaItem[] = prompts.map((prompt, index) => ({
     id: `${taskId}-${index + 1}`,
     index,
     prompt,
     status: 'pending',
     attempts: 0,
+    mediaUrls: [],
     imageUrls: [],
   }));
 
@@ -390,27 +472,39 @@ export async function createGeminiAdsHaBatchTask(input: {
     summary: computeSummary(items),
     prompts,
     items,
+    traceFile,
   };
   taskStore().set(taskId, task);
   persistTask(task);
 
+  trace(taskId, 'task_created', {
+    status: task.status,
+    settings: task.settings,
+    prompts: task.prompts,
+    items: task.items.map((i) => ({ id: i.id, index: i.index, prompt: i.prompt })),
+  });
+
   setTimeout(() => {
     runHaTask(taskId).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
+      trace(taskId, 'task_exception', { error: message });
       const current = taskStore().get(taskId);
       if (!current) return;
+      const endedAt = new Date().toISOString();
       const failedItems = current.items.map((item) =>
         item.status === 'success' || item.status === 'failed'
           ? item
-          : { ...item, status: 'failed' as const, error: message, endedAt: new Date().toISOString() }
+          : { ...item, status: 'failed' as const, error: message, endedAt }
       );
+      const summary = computeSummary(failedItems);
       updateTask(taskId, {
         status: 'failed',
-        endedAt: new Date().toISOString(),
+        endedAt,
         cacheUntil: new Date(Date.now() + TASK_CACHE_TTL_MS).toISOString(),
         items: failedItems,
-        summary: computeSummary(failedItems),
+        summary,
       });
+      trace(taskId, 'task_finalized', { status: 'failed', endedAt, summary, error: message });
     });
   }, 0);
 
@@ -441,5 +535,6 @@ export function cancelGeminiAdsHaBatchTask(taskId: string) {
   const task = getGeminiAdsHaBatchTask(taskId);
   if (!task) return undefined;
   if (isTerminal(task.status)) return task;
+  trace(taskId, 'cancel_requested', { status: task.status });
   return updateTask(taskId, { cancelRequested: true });
 }

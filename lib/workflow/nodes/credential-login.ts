@@ -1,12 +1,12 @@
-import type { Page } from 'playwright';
+import type { Cookie, Page } from 'playwright';
 import type { CredentialLoginParams, NodeResult, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
 import { getPlatformSessionCookie } from '@/lib/analysis/platform-session';
 
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://okkgchwzppghiyfgmrlj.supabase.co';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ra2djaHd6cHBnaGl5ZmdtcmxqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0OTY1NDA1MCwiZXhwIjoyMDY1MjMwMDUwfQ.tyKEsDr9lq2WtowiN0lBwKU2sxkKdRk6phBswiK88rE';
+  '';
 
 function cookieDomain(platform: 'douyin' | 'xhs' | 'gemini'): string {
   if (platform === 'xhs') return '.xiaohongshu.com';
@@ -14,24 +14,33 @@ function cookieDomain(platform: 'douyin' | 'xhs' | 'gemini'): string {
   return '.douyin.com';
 }
 
-function parseCookieStr(cookieStr: string, domain: string): import('playwright').Cookie[] {
-  return cookieStr
-    .split(';')
-    .map(item => item.trim())
-    .filter(Boolean)
-    .map(item => {
-      const idx = item.indexOf('=');
-      if (idx <= 0) return null;
-      return {
-        name: item.slice(0, idx).trim(),
-        value: item.slice(idx + 1).trim(),
-        domain,
-        path: '/',
-        secure: true,
-        sameSite: 'None' as const,
-      };
-    })
-    .filter((item): item is import('playwright').Cookie => !!item?.name && !!item?.value);
+function parseCookieStr(cookieStr: string, domain: string): Cookie[] {
+  const cookies: Cookie[] = [];
+
+  for (const raw of cookieStr.split(';')) {
+    const item = raw.trim();
+    if (!item) continue;
+
+    const idx = item.indexOf('=');
+    if (idx <= 0) continue;
+
+    const name = item.slice(0, idx).trim();
+    const value = item.slice(idx + 1).trim();
+    if (!name || !value) continue;
+
+    cookies.push({
+      name,
+      value,
+      domain,
+      path: '/',
+      secure: true,
+      httpOnly: false,
+      expires: -1,
+      sameSite: 'None',
+    });
+  }
+
+  return cookies;
 }
 
 async function fetchCookieStr(platform: 'douyin' | 'xhs' | 'gemini', credentialId: string): Promise<string | null> {

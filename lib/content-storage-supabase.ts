@@ -255,9 +255,9 @@ export async function getXhsPostById(id: string): Promise<SavedXhsPost | null> {
  */
 export async function deleteXhsPost(id: string): Promise<void> {
   try {
-    const SUPABASE_URL = process.env.SUPABASE_URL || 'https://okkgchwzppghiyfgmrlj.supabase.co';
+    const SUPABASE_URL = process.env.SUPABASE_URL || '';
     const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ra2djaHd6cHBnaGl5ZmdtcmxqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0OTY1NDA1MCwiZXhwIjoyMDY1MjMwMDUwfQ.tyKEsDr9lq2WtowiN0lBwKU2sxkKdRk6phBswiK88rE';
+      '';
     
     const res = await fetch(`${SUPABASE_URL}/rest/v1/rpa_xhs_posts?id=eq.${encodeURIComponent(id)}`, {
       method: 'DELETE',

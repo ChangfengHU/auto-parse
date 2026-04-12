@@ -1,8 +1,8 @@
 import { SavedXhsPost, XhsStoredComment } from './content-storage';
 
-const SUPABASE_URL = process.env.SUPABASE_URL || 'https://okkgchwzppghiyfgmrlj.supabase.co';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ra2djaHd6cHBnaGl5ZmdtcmxqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0OTY1NDA1MCwiZXhwIjoyMDY1MjMwMDUwfQ.tyKEsDr9lq2WtowiN0lBwKU2sxkKdRk6phBswiK88rE';
+  '';
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -14,6 +14,21 @@ function pickCount(...values: unknown[]): number {
     if (Number.isFinite(num) && num > 0) return num;
   }
   return 0;
+}
+
+function toStringOrEmpty(value: unknown): string {
+  return value == null ? '' : typeof value === 'string' ? value : String(value);
+}
+
+function toOptionalNumber(value: unknown): number | undefined {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function toOptionalStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const arr = value.filter((v): v is string => typeof v === 'string');
+  return arr.length ? arr : undefined;
 }
 
 function normalizeComments(comments: unknown): XhsStoredComment[] {
@@ -427,7 +442,7 @@ export async function saveXhsPost(postData: RawNoteData): Promise<SavedXhsPost> 
     console.log('🔄 Supabase不可用，使用本地存储:', error);
     // 回退到本地存储
     const { saveXhsPost: saveLocal } = await import('./content-storage');
-    return saveLocal(postData, postData.original_url);
+    return saveLocal({ ...postData, time: postData.time ?? undefined }, postData.original_url);
   }
 }
 
@@ -451,25 +466,26 @@ export async function getAllXhsPosts(): Promise<SavedXhsPost[]> {
       
       // 为每个帖子查询关联的图片
       const postsWithImages = await Promise.all((posts as Array<Record<string, unknown>>).map(async (post) => {
-        const images = await getImagesByPostId(post.id);
+        const postId = toStringOrEmpty(post.id);
+        const images = postId ? await getImagesByPostId(postId) : [];
         return {
-          id: post.id,
-          note_id: post.note_id,
-          title: post.title,
-          content: post.content,
-          author_name: post.author_name,
-          author_id: post.author_id,
-          author_avatar: post.author_avatar,
-          tags: post.tags,
-          like_count: post.like_count,
-          comment_count: post.comment_count,
-          share_count: post.share_count,
-          collect_count: post.collect_count,
-          original_url: post.original_url,
-          location: post.location,
-          publish_time: post.publish_time,
-          saved_at: post.saved_at,
-          parsed_at: post.parsed_at,
+          id: postId,
+          note_id: toStringOrEmpty(post.note_id),
+          title: toStringOrEmpty(post.title),
+          content: typeof post.content === 'string' ? post.content : undefined,
+          author_name: typeof post.author_name === 'string' ? post.author_name : undefined,
+          author_id: typeof post.author_id === 'string' ? post.author_id : undefined,
+          author_avatar: typeof post.author_avatar === 'string' ? post.author_avatar : undefined,
+          tags: toOptionalStringArray(post.tags),
+          like_count: toOptionalNumber(post.like_count),
+          comment_count: toOptionalNumber(post.comment_count),
+          share_count: toOptionalNumber(post.share_count),
+          collect_count: toOptionalNumber(post.collect_count),
+          original_url: typeof post.original_url === 'string' ? post.original_url : undefined,
+          location: typeof post.location === 'string' ? post.location : undefined,
+          publish_time: typeof post.publish_time === 'string' ? post.publish_time : undefined,
+          saved_at: toStringOrEmpty(post.saved_at) || new Date().toISOString(),
+          parsed_at: typeof post.parsed_at === 'string' ? post.parsed_at : undefined,
           images
         };
       }));
@@ -504,31 +520,32 @@ export async function getXhsPostById(id: string): Promise<SavedXhsPost | null> {
       const posts = await response.json();
       if (posts.length === 0) return null;
       
-      const post = posts[0];
-      const images = await getImagesByPostId(post.id);
-      const comments = await getCommentsByPostId(post.id);
-      const video = await getVideoByPostId(post.id);
+      const post = posts[0] as Record<string, unknown>;
+      const postId = toStringOrEmpty(post.id);
+      const images = postId ? await getImagesByPostId(postId) : [];
+      const comments = postId ? await getCommentsByPostId(postId) : [];
+      const video = postId ? await getVideoByPostId(postId) : null;
       
       return {
-        id: post.id,
-        note_id: post.note_id,
-        title: post.title,
-        content: post.content,
-        author_name: post.author_name,
-        author_id: post.author_id,
-        author_avatar: post.author_avatar,
-        tags: post.tags,
-        like_count: post.like_count,
-        comment_count: post.comment_count,
-        share_count: post.share_count,
-        collect_count: post.collect_count,
-        original_url: post.original_url,
-        location: post.location,
-        publish_time: post.publish_time,
-        saved_at: post.saved_at,
-        parsed_at: post.parsed_at,
+        id: postId,
+        note_id: toStringOrEmpty(post.note_id),
+        title: toStringOrEmpty(post.title),
+        content: typeof post.content === 'string' ? post.content : undefined,
+        author_name: typeof post.author_name === 'string' ? post.author_name : undefined,
+        author_id: typeof post.author_id === 'string' ? post.author_id : undefined,
+        author_avatar: typeof post.author_avatar === 'string' ? post.author_avatar : undefined,
+        tags: toOptionalStringArray(post.tags),
+        like_count: toOptionalNumber(post.like_count),
+        comment_count: toOptionalNumber(post.comment_count),
+        share_count: toOptionalNumber(post.share_count),
+        collect_count: toOptionalNumber(post.collect_count),
+        original_url: typeof post.original_url === 'string' ? post.original_url : undefined,
+        location: typeof post.location === 'string' ? post.location : undefined,
+        publish_time: typeof post.publish_time === 'string' ? post.publish_time : undefined,
+        saved_at: toStringOrEmpty(post.saved_at) || new Date().toISOString(),
+        parsed_at: typeof post.parsed_at === 'string' ? post.parsed_at : undefined,
         images,
-        video,
+        video: video || undefined,
         comments
       };
     } else {

@@ -3,6 +3,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import type { XhsPostData } from '@/lib/analysis/xhs-fetch';
+import {
+  ArrowPathIcon,
+  ClipboardIcon,
+  EyeIcon,
+  FolderOpenIcon,
+  PaperAirplaneIcon,
+  SparklesIcon,
+  TrashIcon,
+} from '@heroicons/react/24/outline';
 
 interface Material {
   id: string;
@@ -53,6 +62,13 @@ function extractXsecToken(url?: string) {
   }
 }
 
+function proxyXhsImage(url?: string) {
+  if (!url) return '';
+  const normalized = url.startsWith('//') ? `https:${url}` : url.startsWith('http://') ? `https://${url.slice(7)}` : url;
+  if (!normalized.includes('xhscdn.com') && !normalized.includes('xiaohongshu.com')) return normalized;
+  return `/api/proxy/image?url=${encodeURIComponent(normalized)}`;
+}
+
 export default function MaterialsPage() {
   const [materials, setMaterials] = useState<Material[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,6 +83,7 @@ export default function MaterialsPage() {
   const [linkedFilter, setLinkedFilter] = useState<'all' | 'linked' | 'unlinked'>('all');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<'video' | 'image' | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'grid' | 'compact'>('grid');
 
   const [parsingMaterial, setParsingMaterial] = useState<Material | null>(null);
   const [parseLoading, setParseLoading] = useState(false);
@@ -237,41 +254,155 @@ export default function MaterialsPage() {
     }
   }
 
+  const iconBtnClass =
+    'inline-flex items-center justify-center h-7 w-7 rounded-md border border-border bg-background/90 text-muted-foreground hover:text-foreground hover:bg-muted transition disabled:opacity-30';
+  const compactIconBtnClass =
+    'inline-flex items-center justify-center h-6 w-6 rounded-md border border-border bg-background/90 text-muted-foreground hover:text-foreground hover:bg-muted transition disabled:opacity-30';
+
+  const renderMaterialActions = (m: Material, isVideo: boolean) => (
+    <>
+      {isVideo && (
+        <button
+          onClick={() => handlePublish(m)}
+          className={iconBtnClass}
+          title="立即发布"
+          aria-label="立即发布"
+        >
+          <PaperAirplaneIcon className="h-4 w-4" />
+        </button>
+      )}
+      <button
+        onClick={() => {
+          setPreviewUrl(m.ossUrl);
+          setPreviewType(isVideo ? 'video' : 'image');
+        }}
+        className={iconBtnClass}
+        title="放大查看"
+        aria-label="放大查看"
+      >
+        <EyeIcon className="h-4 w-4" />
+      </button>
+      <button
+        onClick={() => copyUrl(m.ossUrl)}
+        className={iconBtnClass}
+        title="复制链接"
+        aria-label="复制链接"
+      >
+        <ClipboardIcon className="h-4 w-4" />
+      </button>
+      {m.relatedContentId ? (
+        <a
+          href={`/content-library/detail?id=${m.relatedContentId}`}
+          className={iconBtnClass}
+          title="查看作品素材"
+          aria-label="查看作品素材"
+        >
+          <FolderOpenIcon className="h-4 w-4" />
+        </a>
+      ) : (
+        m.platform === 'xiaohongshu' &&
+        m.mediaType === 'image' && (
+          <button
+            onClick={() => void startParseFlow(m)}
+            className={iconBtnClass}
+            title="解析到作品素材"
+            aria-label="解析到作品素材"
+          >
+            <SparklesIcon className="h-4 w-4" />
+          </button>
+        )
+      )}
+    </>
+  );
+
+  const renderGridPrimaryActions = (m: Material, isVideo: boolean) => (
+    <>
+      <button
+        onClick={() => {
+          setPreviewUrl(m.ossUrl);
+          setPreviewType(isVideo ? 'video' : 'image');
+        }}
+        className={compactIconBtnClass}
+        title="放大查看"
+        aria-label="放大查看"
+      >
+        <EyeIcon className="h-3.5 w-3.5" />
+      </button>
+      <button
+        onClick={() => copyUrl(m.ossUrl)}
+        className={compactIconBtnClass}
+        title="复制链接"
+        aria-label="复制链接"
+      >
+        <ClipboardIcon className="h-3.5 w-3.5" />
+      </button>
+    </>
+  );
+
+  const renderGridSecondaryActions = (m: Material, isVideo: boolean) => (
+    <>
+      {isVideo && (
+        <button
+          onClick={() => handlePublish(m)}
+          className={compactIconBtnClass}
+          title="立即发布"
+          aria-label="立即发布"
+        >
+          <PaperAirplaneIcon className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {m.relatedContentId ? (
+        <a
+          href={`/content-library/detail?id=${m.relatedContentId}`}
+          className={compactIconBtnClass}
+          title="查看作品素材"
+          aria-label="查看作品素材"
+        >
+          <FolderOpenIcon className="h-3.5 w-3.5" />
+        </a>
+      ) : (
+        m.platform === 'xiaohongshu' &&
+        m.mediaType === 'image' && (
+          <button
+            onClick={() => void startParseFlow(m)}
+            className={compactIconBtnClass}
+            title="解析到作品素材"
+            aria-label="解析到作品素材"
+          >
+            <SparklesIcon className="h-3.5 w-3.5" />
+          </button>
+        )
+      )}
+    </>
+  );
+
   return (
-    <div className="max-w-5xl mx-auto px-4 py-10">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
+    <div className="max-w-[1560px] mx-auto px-3 sm:px-4 py-6">
+      <div className="flex items-end justify-between gap-3 mb-2">
         <div>
           <h1 className="text-2xl font-bold text-foreground">素材库</h1>
-          <p className="mt-1 text-muted-foreground text-sm">支持标题检索、关联状态筛选与二次解析确认保存</p>
         </div>
-        <button
-          onClick={() => void refresh()}
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
-        >
-          刷新
-        </button>
       </div>
 
-      <div className="mb-4 inline-flex flex-wrap rounded-xl bg-muted p-1 gap-1">
-        <button
-          onClick={() => setActiveTab('video')}
-          className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
-            activeTab === 'video' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
-          }`}
-        >
-          视频 ({counts.video})
-        </button>
-        <button
-          onClick={() => setActiveTab('image')}
-          className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition ${
-            activeTab === 'image' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
-          }`}
-        >
-          图片 ({counts.image})
-        </button>
-      </div>
-
-      <div className="mb-5 flex flex-wrap items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        <div className="inline-flex rounded-lg bg-muted p-1 gap-1">
+          <button
+            onClick={() => setActiveTab('video')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${
+              activeTab === 'video' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
+            }`}
+          >
+            视频 ({counts.video})
+          </button>
+          <button
+            onClick={() => setActiveTab('image')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-md transition ${
+              activeTab === 'image' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'
+            }`}
+          >
+            图片 ({counts.image})
+          </button>
+        </div>
         <input
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
@@ -279,11 +410,11 @@ export default function MaterialsPage() {
             if (e.key === 'Enter') setKeyword(searchInput.trim());
           }}
           placeholder="按标题搜索"
-          className="w-full sm:w-56 px-3 py-2 text-sm rounded-lg border border-border bg-background"
+          className="w-full sm:w-56 md:w-64 px-3 py-1.5 text-xs rounded-lg border border-border bg-background"
         />
         <button
           onClick={() => setKeyword(searchInput.trim())}
-          className="px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted"
+          className="px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted"
         >
           查询
         </button>
@@ -292,19 +423,47 @@ export default function MaterialsPage() {
             setSearchInput('');
             setKeyword('');
           }}
-          className="px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted"
+          className="px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted"
         >
           清空
         </button>
         <select
           value={linkedFilter}
           onChange={(e) => setLinkedFilter(e.target.value as 'all' | 'linked' | 'unlinked')}
-          className="px-3 py-2 text-xs rounded-lg border border-border bg-background"
+          className="px-3 py-1.5 text-xs rounded-lg border border-border bg-background"
         >
           <option value="all">关联状态：全部</option>
           <option value="linked">已解析到作品素材</option>
           <option value="unlinked">未解析到作品素材</option>
         </select>
+        <div className="ml-auto inline-flex rounded-lg border border-border overflow-hidden">
+          <button
+            onClick={() => setViewMode('list')}
+            className={`px-3 py-1.5 text-xs ${viewMode === 'list' ? 'bg-muted font-semibold' : 'bg-background text-muted-foreground'}`}
+          >
+            列表
+          </button>
+          <button
+            onClick={() => setViewMode('grid')}
+            className={`px-3 py-1.5 text-xs border-l border-border ${viewMode === 'grid' ? 'bg-muted font-semibold' : 'bg-background text-muted-foreground'}`}
+          >
+            网格
+          </button>
+          <button
+            onClick={() => setViewMode('compact')}
+            className={`px-3 py-1.5 text-xs border-l border-border ${viewMode === 'compact' ? 'bg-muted font-semibold' : 'bg-background text-muted-foreground'}`}
+          >
+            紧凑
+          </button>
+        </div>
+        <button
+          onClick={() => void refresh()}
+          className="inline-flex items-center justify-center h-7 w-7 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+          title="刷新"
+          aria-label="刷新"
+        >
+          <ArrowPathIcon className="h-4 w-4" />
+        </button>
       </div>
 
       {loading && materials.length === 0 && <div className="py-12 text-sm text-muted-foreground">正在加载素材...</div>}
@@ -316,103 +475,137 @@ export default function MaterialsPage() {
         </div>
       )}
 
-      <div className="grid gap-4">
-        {materials.map((m) => {
-          const isVideo = (m.mediaType ?? 'video') === 'video';
-          return (
-            <div key={m.id} className="group bg-card border border-border rounded-2xl p-4 flex flex-col sm:flex-row gap-4 sm:gap-5">
-              <div className="w-full sm:w-32 h-44 sm:h-20 flex-shrink-0 bg-black rounded-xl overflow-hidden">
-                {isVideo ? (
-                  <video src={m.ossUrl + '#t=1'} className="w-full h-full object-cover" preload="metadata" muted />
-                ) : (
-                  <img src={m.ossUrl} className="w-full h-full object-cover" alt={m.title} loading="lazy" />
-                )}
-              </div>
-
-              <div className="flex-1 min-w-0 flex flex-col justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-foreground truncate flex-1">{m.title || '（无标题）'}</p>
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-primary/10 text-primary">
-                      {isVideo ? '视频' : '图片'}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span className="truncate">{m.ossUrl}</span>
-                    <span>·</span>
-                    <span>{timeAgo(m.parsedAt)}</span>
-                  </div>
-                  {(m.sourceNoteId || m.sourcePostUrl) && (
-                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                      {m.sourceNoteId && <span>来源ID: {m.sourceNoteId}</span>}
-                      {m.sourcePostUrl && (
-                        <a href={m.sourcePostUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
-                          原始链接
-                        </a>
-                      )}
-                    </div>
+      {viewMode === 'list' && (
+        <div className="grid gap-4">
+          {materials.map((m) => {
+            const isVideo = (m.mediaType ?? 'video') === 'video';
+            return (
+              <div key={m.id} className="group bg-card border border-border rounded-2xl p-4 flex flex-col sm:flex-row gap-4 sm:gap-5">
+                <div className="w-full sm:w-32 h-44 sm:h-20 flex-shrink-0 bg-black rounded-xl overflow-hidden">
+                  {isVideo ? (
+                    <video src={m.ossUrl + '#t=1'} className="w-full h-full object-cover" preload="metadata" muted />
+                  ) : (
+                    <img src={m.ossUrl} className="w-full h-full object-cover" alt={m.title} loading="lazy" />
                   )}
                 </div>
 
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3">
-                  <div className="flex gap-2 flex-wrap">
-                    {isVideo && (
-                      <button
-                        onClick={() => handlePublish(m)}
-                        className="px-3 py-1.5 bg-primary text-white hover:bg-primary/90 rounded-lg text-xs font-semibold"
-                      >
-                        立即发布
-                      </button>
-                    )}
-                    <button
-                      onClick={() => {
-                        setPreviewUrl(m.ossUrl);
-                        setPreviewType(isVideo ? 'video' : 'image');
-                      }}
-                      className="px-3 py-1.5 bg-muted hover:bg-border/50 rounded-lg text-xs font-semibold"
-                    >
-                      放大查看
-                    </button>
-                    <button
-                      onClick={() => copyUrl(m.ossUrl)}
-                      className="px-3 py-1.5 bg-muted hover:bg-border/50 rounded-lg text-xs font-semibold"
-                    >
-                      复制URL
-                    </button>
-                    {m.relatedContentId ? (
-                      <a
-                        href={`/content-library/detail?id=${m.relatedContentId}`}
-                        className="px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-xs font-semibold"
-                      >
-                        查看作品素材
-                      </a>
-                    ) : (
-                      m.platform === 'xiaohongshu' &&
-                      m.mediaType === 'image' && (
-                        <button
-                          onClick={() => void startParseFlow(m)}
-                          className="px-3 py-1.5 bg-primary/10 text-primary hover:bg-primary/20 rounded-lg text-xs font-semibold"
-                        >
-                          解析到作品素材
-                        </button>
-                      )
+                <div className="flex-1 min-w-0 flex flex-col justify-between">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-foreground truncate flex-1">{m.title || '（无标题）'}</p>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-primary/10 text-primary">
+                        {isVideo ? '视频' : '图片'}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <span>{timeAgo(m.parsedAt)}</span>
+                    </div>
+                    {(m.sourceNoteId || m.sourcePostUrl) && (
+                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                        {m.sourceNoteId && <span>来源ID: {m.sourceNoteId}</span>}
+                        {m.sourcePostUrl && (
+                          <a href={m.sourcePostUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                            原始链接
+                          </a>
+                        )}
+                      </div>
                     )}
                   </div>
-                  <button
-                    onClick={() => void handleDelete(m.id)}
-                    disabled={deletingId === m.id}
-                    className="p-1.5 text-muted-foreground hover:text-red-500 disabled:opacity-30"
-                  >
-                    删除
-                  </button>
+
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mt-3">
+                    <div className="flex gap-2 flex-wrap">{renderMaterialActions(m, isVideo)}</div>
+                    <button
+                      onClick={() => void handleDelete(m.id)}
+                      disabled={deletingId === m.id}
+                      title="删除"
+                      aria-label="删除"
+                      className={iconBtnClass}
+                    >
+                      <TrashIcon className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
-       {total > 0 && (
+      {viewMode === 'grid' && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+          {materials.map((m) => {
+            const isVideo = (m.mediaType ?? 'video') === 'video';
+            return (
+              <div key={m.id} className="group bg-card border border-border rounded-xl overflow-hidden">
+                <div className="aspect-[3/4] bg-black relative">
+                  {isVideo ? (
+                    <video src={m.ossUrl + '#t=1'} className="w-full h-full object-cover" preload="metadata" muted />
+                  ) : (
+                    <img src={m.ossUrl} className="w-full h-full object-cover" alt={m.title} loading="lazy" />
+                  )}
+                  <div className="absolute top-1.5 left-1.5 flex items-center gap-1 rounded-md bg-black/35 p-1 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                    {renderGridSecondaryActions(m, isVideo)}
+                  </div>
+                  <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-black/55 text-white text-[10px]">
+                    {isVideo ? '视频' : '图片'}
+                  </span>
+                </div>
+                <div className="p-2 space-y-1.5">
+                  <p className="text-xs font-medium line-clamp-2 leading-4 min-h-8">{m.title || '（无标题）'}</p>
+                  <div className="flex items-center justify-between gap-1.5">
+                    <p className="text-[10px] text-muted-foreground">{timeAgo(m.parsedAt)}</p>
+                    <div className="flex items-center gap-1">{renderGridPrimaryActions(m, isVideo)}</div>
+                    <button
+                      onClick={() => void handleDelete(m.id)}
+                      disabled={deletingId === m.id}
+                      title="删除"
+                      aria-label="删除"
+                      className={compactIconBtnClass}
+                    >
+                      <TrashIcon className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {viewMode === 'compact' && (
+        <div className="bg-card border border-border rounded-2xl divide-y divide-border">
+          {materials.map((m) => {
+            const isVideo = (m.mediaType ?? 'video') === 'video';
+            return (
+              <div key={m.id} className="p-2.5 flex items-center gap-2.5">
+                <div className="w-14 h-10 rounded-md bg-black overflow-hidden flex-shrink-0">
+                  {isVideo ? (
+                    <video src={m.ossUrl + '#t=1'} className="w-full h-full object-cover" preload="metadata" muted />
+                  ) : (
+                    <img src={m.ossUrl} className="w-full h-full object-cover" alt={m.title} loading="lazy" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-medium truncate">{m.title || '（无标题）'}</div>
+                  <div className="text-[10px] text-muted-foreground">{timeAgo(m.parsedAt)}</div>
+                </div>
+                <div className="flex items-center gap-1">{renderMaterialActions(m, isVideo)}</div>
+                <button
+                  onClick={() => void handleDelete(m.id)}
+                  disabled={deletingId === m.id}
+                  title="删除"
+                  aria-label="删除"
+                  className={iconBtnClass}
+                >
+                  <TrashIcon className="h-4 w-4" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+        {total > 0 && (
          <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-muted-foreground">
           <span>
             第 {page}/{totalPages} 页 · 共 {total} 条
@@ -494,7 +687,12 @@ export default function MaterialsPage() {
                 {parseData.images?.length > 0 && (
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     {parseData.images.slice(0, 8).map((img) => (
-                      <img key={img.index} src={img.previewUrl} alt="" className="w-full aspect-square object-cover rounded-md border border-border" />
+                      <img
+                        key={img.index}
+                        src={proxyXhsImage(img.previewUrl || img.originalUrl)}
+                        alt=""
+                        className="w-full aspect-square object-cover rounded-md border border-border"
+                      />
                     ))}
                   </div>
                 )}

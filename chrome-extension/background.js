@@ -1,10 +1,28 @@
-const SERVER = 'https://parse.vyibc.com';
+const DEFAULT_SERVER = 'https://parse.vyibc.com';
+const PARSE_SERVER_KEY = 'parseServerBase';
 const ALARM_NAME = 'douyinKeepAlive';
 const CLIENT_ID_KEYS = {
   douyin: 'douyinClientId',
   xhs: 'xhsClientId',
   gemini: 'geminiClientId',
 };
+
+function normalizeServerBase(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return null;
+  const withProto = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const u = new URL(withProto);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return null;
+  }
+}
+
+async function getServerBase() {
+  const store = await chrome.storage.local.get(PARSE_SERVER_KEY);
+  return normalizeServerBase(store[PARSE_SERVER_KEY]) || DEFAULT_SERVER;
+}
 
 async function ensurePlatformClientIds() {
   const store = await chrome.storage.local.get(Object.values(CLIENT_ID_KEYS));
@@ -27,6 +45,9 @@ const COOKIE_KEYS = [
   'ttwid', 'passport_csrf_token', 'passport_csrf_token_default',
   's_v_web_id', 'UIFID', 'is_dash_user', 'login_time', 'bit_env',
 ];
+const XHS_COOKIE_KEYS = [
+  'a1', 'web_session', 'gid', 'id_token', 'xsecappid', 'webId', 'websectiga', 'webBuild',
+];
 
 // ── 读取抖音 Cookies ──────────────────────────────────────
 async function getDouyinCookies() {
@@ -41,6 +62,29 @@ async function getDouyinCookies() {
       })
     )
   );
+  return results;
+}
+
+async function getXhsCookies() {
+  const results = {};
+  await Promise.all(
+    XHS_COOKIE_KEYS.map(name =>
+      new Promise(resolve => {
+        chrome.cookies.get({ url: 'https://www.xiaohongshu.com', name }, cookie => {
+          if (cookie) results[name] = cookie.value;
+          resolve();
+        });
+      })
+    )
+  );
+  const allCookies = await new Promise(resolve => {
+    chrome.cookies.getAll({}, cookies => resolve(cookies || []));
+  });
+  allCookies
+    .filter(cookie => cookie?.domain?.includes('xiaohongshu.com'))
+    .forEach(cookie => {
+      if (!results[cookie.name]) results[cookie.name] = cookie.value;
+    });
   return results;
 }
 
@@ -78,12 +122,14 @@ async function pingDouyin() {
 
 // ── Supabase 同步（发布平台凭证）────────────────────────
 const SUPABASE_URL = 'https://okkgchwzppghiyfgmrlj.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ra2djaHd6cHBnaGl5ZmdtcmxqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk2NTQwNTAsImV4cCI6MjA2NTIzMDA1MH0.LMhY-7H3ySiXEZt2cjLXhhicL4idx0A6xurvxynqJf8';
+const SUPABASE_ANON_KEY = '';
 
-async function syncToSupabase(cookieStr) {
+async function syncToSupabase(cookieStr, platform = 'douyin') {
   try {
     await ensurePlatformClientIds();
-    const { douyinClientId: clientId } = await chrome.storage.local.get(CLIENT_ID_KEYS.douyin);
+    const clientIdKey = CLIENT_ID_KEYS[platform] || CLIENT_ID_KEYS.douyin;
+    const store = await chrome.storage.local.get(clientIdKey);
+    const clientId = store[clientIdKey];
     if (!clientId) return false;
 
     const res = await fetch(`${SUPABASE_URL}/rest/v1/douyin_sessions`, {
@@ -108,15 +154,22 @@ async function syncToSupabase(cookieStr) {
 }
 
 // ── 2. 同步 Cookie 到解析平台 ────────────────────────────
-async function syncToParseServer(cookieStr) {
+async function syncToParseServer(cookieStr, platform = 'douyin') {
   try {
-    const res = await fetch(`${SERVER}/api/cookie`, {
+    const server = await getServerBase();
+    const apiUrl = platform === 'xhs' ? `${server}/api/analysis/xhs/cookie` : `${server}/api/cookie`;
+    await ensurePlatformClientIds();
+    const clientIdKey = CLIENT_ID_KEYS[platform] || CLIENT_ID_KEYS.douyin;
+    const store = await chrome.storage.local.get(clientIdKey);
+    const clientId = store[clientIdKey];
+    const payload = platform === 'xhs' ? { cookie: cookieStr, clientId } : { cookie: cookieStr };
+    const res = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cookie: cookieStr }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
-    return data.success === true;
+    return data.success === true || data.ok === true;
   } catch (e) {
     console.warn('[keepAlive] 同步解析平台失败:', e.message);
     return false;
@@ -143,10 +196,10 @@ async function keepAliveSync() {
   const douyinOk = pingResult === true;
 
   // Step 2: 同步最新 cookie 到解析平台
-  const serverOk = await syncToParseServer(cookieStr);
+  const serverOk = await syncToParseServer(cookieStr, 'douyin');
 
   // Step 3: 同步到发布平台（Supabase，自动）
-  const supabaseOk = await syncToSupabase(cookieStr);
+  const supabaseOk = await syncToSupabase(cookieStr, 'douyin');
   if (supabaseOk) chrome.storage.local.set({ lastPublishSync: Date.now() });
 
   const now = Date.now();
@@ -184,20 +237,24 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 
   if (msg.type === 'SYNC_TO_SUPABASE') {
-    const { cookieStr } = msg;
-    syncToSupabase(cookieStr).then(ok => sendResponse({ ok }));
+    const { cookieStr, platform = 'douyin' } = msg;
+    syncToSupabase(cookieStr, platform).then(ok => sendResponse({ ok }));
     return true;
   }
 
   if (msg.type === 'AUTO_SYNC_ON_LOGIN') {
     // 登录状态变化时：读取最新 cookie 同步到 Supabase + 解析服务器
     (async () => {
-      const cookies = await getDouyinCookies();
+      const platform = msg.platform || 'douyin';
+      const cookies = platform === 'xhs' ? await getXhsCookies() : await getDouyinCookies();
       const cookieStr = Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ');
-      if (!cookieStr.includes('sessionid=')) { sendResponse({ ok: false }); return; }
+      const hasSession = platform === 'xhs'
+        ? cookieStr.length > 0
+        : cookieStr.includes('sessionid=');
+      if (!hasSession) { sendResponse({ ok: false }); return; }
       const [supabaseOk, parseOk] = await Promise.all([
-        syncToSupabase(cookieStr),
-        syncToParseServer(cookieStr),
+        syncToSupabase(cookieStr, platform),
+        syncToParseServer(cookieStr, platform),
       ]);
       if (supabaseOk) chrome.storage.local.set({ lastPublishSync: Date.now() });
       sendResponse({ ok: supabaseOk || parseOk });

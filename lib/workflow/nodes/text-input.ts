@@ -8,13 +8,35 @@ export async function executeTextInput(
   ctx: WorkflowContext
 ): Promise<NodeResult> {
   const log: string[] = [];
+
+  const requestedMode = (params as Partial<TextInputParams>).inputMode;
   const useHumanType = ctx.humanOptions?.humanType ?? false;
+  // 默认：fill；但为兼容既有行为，如果未指定 inputMode 且开启 humanType，则按 type 执行
+  const mode: 'fill' | 'type' = requestedMode === 'type' || requestedMode === 'fill'
+    ? requestedMode
+    : (useHumanType ? 'type' : 'fill');
 
   try {
-    log.push(`✏️ 填入文本到 ${params.selector}`);
-    const el = page.locator(params.selector).first();
-    await el.waitFor({ state: 'visible', timeout: 10_000 });
     const value = String(params.value ?? '');
+
+    const resolveTarget = async () => {
+      const sel = String(params.selector || '').trim();
+      if (sel) {
+        const loc = page.locator(sel).first();
+        const ok = await loc.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false);
+        if (ok) {
+          return { el: loc, selectorUsed: sel, fallback: false };
+        }
+        log.push(`⚠️ 未找到输入框：${sel}，尝试自动定位...`);
+      }
+      // Fallback：尽量自动找到“可输入框”（Gemini/各类 WebApp 的输入框经常是 contenteditable 或 shadow-dom）
+      const loc = page.locator('textarea:visible, [contenteditable="true"]:visible, input[type="text"]:visible').last();
+      await loc.waitFor({ state: 'visible', timeout: 10_000 });
+      return { el: loc, selectorUsed: '(auto)', fallback: true };
+    };
+
+    const { el, selectorUsed, fallback } = await resolveTarget();
+    log.push(`✏️ 填入文本到 ${selectorUsed}${fallback ? '（自动定位）' : ''}`);
     const isContentEditable = await el
       .evaluate((node) => node instanceof HTMLElement && node.isContentEditable)
       .catch(() => false);
@@ -31,7 +53,7 @@ export async function executeTextInput(
       );
     }
 
-    if (useHumanType) {
+    if (mode === 'type' && useHumanType) {
       // 逐字符输入，每个字符延迟随机波动（模拟真人打字节奏）
       const baseDelay = params.delay ?? 80;
       for (let i = 0; i < value.length; i++) {
@@ -50,19 +72,30 @@ export async function executeTextInput(
         }
         await page.waitForTimeout(delay);
       }
-      log.push(`⌨️ 人工逐键输入完成（${value.length} 字）`);
-    } else if (params.delay && params.delay > 0) {
+      log.push(`⌨️ type(human) 输入完成（${value.length} 字）`);
+    } else if (mode === 'type') {
+      const delay = params.delay && params.delay > 0 ? params.delay : 0;
       if (isContentEditable) {
-        await page.keyboard.type(value, { delay: params.delay });
+        await page.keyboard.type(value, { delay });
       } else {
-        await el.pressSequentially(value, { delay: params.delay });
+        await el.pressSequentially(value, { delay });
       }
+      log.push(`⌨️ type 输入完成（${value.length} 字）`);
     } else {
+      // fill
       if (isContentEditable) {
-        await page.keyboard.type(value, { delay: 0 });
+        // contentEditable 没有可靠的 fill，这里用 DOM 直写 + 触发 input/change
+        await el.evaluate((node, nextValue) => {
+          const el = node as HTMLElement;
+          el.focus();
+          el.textContent = String(nextValue ?? '');
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }, value);
       } else {
         await el.fill(value);
       }
+      log.push(`🧾 fill 输入完成（${value.length} 字）`);
     }
 
     log.push(`✅ 已填入：${value.slice(0, 30)}${value.length > 30 ? '...' : ''}`);

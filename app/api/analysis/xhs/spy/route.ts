@@ -10,7 +10,7 @@ function errorMessage(error: unknown) {
 
 export async function POST(req: Request) {
   try {
-    const { userId } = await req.json();
+    const { userId, cursor } = await req.json();
     if (!userId) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
     }
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     }
 
     try {
-      notesData = await getXhsUserPostsByCli(cookie, userId);
+      notesData = await getXhsUserPostsByCli(cookie, userId, typeof cursor === 'string' ? cursor : '');
     } catch (error: unknown) {
       console.error(`[Spy API] Notes fetch exception:`, errorMessage(error));
     }

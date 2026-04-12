@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 type Platform = 'douyin' | 'xiaohongshu';
@@ -160,10 +160,14 @@ function DouyinCookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean
 // ── 小红书 Cookie 管理组件 ─────────────────────────────────
 function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: boolean) => void }) {
   const [status, setStatus] = useState<CookieStatus | null>(null);
+  const [mode, setMode] = useState<'credential' | 'cookie'>('credential');
   const [input, setInput] = useState('');
+  const [pluginClientId, setPluginClientId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [msg, setMsg] = useState('');
   const [showInput, setShowInput] = useState(false);
+  const autoLoginTriedRef = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -180,6 +184,57 @@ function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: bool
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      if (event.data?.type !== 'PLATFORM_CLIENT_ID' || event.data?.platform !== 'xhs') return;
+      const id = typeof event.data?.clientId === 'string' ? event.data.clientId.trim() : '';
+      if (!id) return;
+      setPluginClientId(id);
+      setInput(prev => prev || id);
+    };
+    window.addEventListener('message', handler);
+    window.postMessage({ type: 'PLATFORM_GET_CLIENT_ID', platform: 'xhs' }, '*');
+    const timer = window.setTimeout(() => {
+      window.removeEventListener('message', handler);
+    }, 2000);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('message', handler);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pluginClientId || autoLoginTriedRef.current || status?.set) return;
+    autoLoginTriedRef.current = true;
+    const run = async () => {
+      setSaving(true);
+      setMsg('');
+      try {
+        const res = await fetch('/api/analysis/xhs/cookie', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId: pluginClientId }),
+        });
+        const d = await res.json();
+        if (d.ok) {
+          setMode('credential');
+          setInput('');
+          setShowInput(false);
+          setMsg('✅ 已自动读取插件凭证并登录');
+          await refresh();
+        } else {
+          setMsg('⚠️ 检测到插件凭证，但自动登录失败：' + (d.error ?? '未知错误'));
+        }
+      } catch (e) {
+        setMsg('⚠️ 检测到插件凭证，但自动登录请求失败：' + (e instanceof Error ? e.message : '未知错误'));
+      } finally {
+        setSaving(false);
+      }
+    };
+    void run();
+  }, [pluginClientId, refresh, status?.set]);
+
   const save = async () => {
     if (!input.trim()) return;
     setSaving(true);
@@ -188,7 +243,7 @@ function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: bool
       const res = await fetch('/api/analysis/xhs/cookie', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cookie: input.trim() }),
+        body: JSON.stringify(mode === 'credential' ? { clientId: input.trim() } : { cookie: input.trim() }),
       });
       const d = await res.json();
       if (d.ok) {
@@ -215,10 +270,28 @@ function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: bool
     }
   };
 
+  const testLogin = async () => {
+    setTesting(true);
+    setMsg('');
+    try {
+      const res = await fetch('/api/analysis/xhs/cookie/test', { cache: 'no-store' });
+      const d = await res.json();
+      if (res.ok && d.valid) {
+        setMsg('✅ 当前登录信息有效');
+      } else {
+        setMsg('❌ ' + (d.error ?? '登录信息无效'));
+      }
+    } catch (e) {
+      setMsg('❌ 测试失败: ' + (e instanceof Error ? e.message : '未知错误'));
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-border bg-card p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <span className="text-base font-semibold text-foreground">小红书 Cookie 设置</span>
+        <span className="text-base font-semibold text-foreground">小红书登录设置</span>
         <div className="flex items-center gap-3">
           {status?.set && (
             <button 
@@ -241,6 +314,13 @@ function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: bool
       {status?.set && status.preview && !showInput && (
         <div className="flex items-center gap-2 text-xs text-muted-foreground p-2 bg-muted/30 rounded-lg border border-dashed border-border">
           <span className="font-mono flex-1 truncate opacity-70 italic">{status.preview}</span>
+          <button
+            onClick={testLogin}
+            disabled={testing}
+            className="text-primary hover:text-primary/80 shrink-0 font-medium disabled:opacity-50"
+          >
+            {testing ? '测试中...' : '测试登录'}
+          </button>
           <button onClick={clear} className="text-red-500 hover:text-red-600 shrink-0 font-medium">
             清除
           </button>
@@ -255,14 +335,14 @@ function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: bool
               <span className="text-2xl flex-shrink-0">🔌</span>
               <div className="flex-1 space-y-2">
                 <p className="text-sm font-medium text-pink-900 dark:text-pink-200">
-                  推荐：使用浏览器插件自动获取 Cookie
+                  推荐：先用插件同步，再在这里输入凭证 ID 或 Cookie
                 </p>
                 <p className="text-xs text-pink-700 dark:text-pink-300 leading-relaxed">
                   1. 安装浏览器插件 "vyibc-auto-parse"<br />
                   2. 登录小红书网页版（www.xiaohongshu.com）<br />
                   3. 点击插件图标，选择"小红书"标签页<br />
-                  4. 点击"一键读取小红书登录信息"<br />
-                  5. 点击"复制"后粘贴到下方输入框，或直接点击插件中的"同步"按钮
+                  4. 在插件里复制凭证 ID（xhs_ 开头）或 Cookie<br />
+                  5. 粘贴到下方输入框并登录
                 </p>
               </div>
             </div>
@@ -270,16 +350,51 @@ function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: bool
 
           {/* 手动输入 */}
           <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setMode('credential')}
+                className={`px-3 py-1.5 text-xs rounded-md border ${
+                  mode === 'credential'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background text-muted-foreground border-border'
+                }`}
+              >
+                使用凭证
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode('cookie')}
+                className={`px-3 py-1.5 text-xs rounded-md border ${
+                  mode === 'cookie'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'bg-background text-muted-foreground border-border'
+                }`}
+              >
+                使用 Cookie
+              </button>
+            </div>
             <p className="text-xs text-muted-foreground">
-              或手动获取：在小红书网页版登录后，打开 Chrome 开发者工具 → Application → Cookies → www.xiaohongshu.com，
-              复制 <code className="bg-muted px-1 rounded text-xs">web_session</code> 的值粘贴到下方：
+              {mode === 'credential' ? (
+                <>
+                  输入凭证 ID（示例：
+                  <code className="bg-muted px-1 rounded text-xs ml-1">xhs_4cbc57e24e94447a912c0f8acc2ed2b9</code>）
+                </>
+              ) : (
+                <>粘贴完整 Cookie 字符串（如包含 web_session、a1 等字段）</>
+              )}
             </p>
+            {pluginClientId && mode === 'credential' && (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                已从插件检测到凭证：<span className="font-mono">{pluginClientId}</span>
+              </p>
+            )}
             <div className="flex gap-2">
               <input
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && save()}
-                placeholder="粘贴 web_session 值或完整 Cookie 字符串"
+                placeholder={mode === 'credential' ? '输入 xhs_ 开头凭证 ID' : '粘贴完整 Cookie 字符串'}
                 className="flex-1 px-3 py-2.5 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
                 autoFocus={showInput}
               />
@@ -288,16 +403,23 @@ function XiaohongshuCookiePanel({ onStatusChange }: { onStatusChange: (set: bool
                 disabled={saving || !input.trim()}
                 className="px-5 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg disabled:opacity-50 hover:opacity-90 transition-opacity"
               >
-                {saving ? '保存中...' : '保存'}
+                {saving ? '登录中...' : '保存/登录'}
+              </button>
+              <button
+                onClick={testLogin}
+                disabled={testing}
+                className="px-5 py-2.5 bg-muted border border-border text-foreground text-sm font-medium rounded-lg disabled:opacity-50 hover:bg-border/50 transition-opacity"
+              >
+                {testing ? '测试中...' : '测试登录'}
               </button>
             </div>
-            {msg && (
-              <p className={`text-xs ${msg.startsWith('✅') ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                {msg}
-              </p>
-            )}
           </div>
         </div>
+      )}
+      {msg && (
+        <p className={`text-xs ${msg.startsWith('✅') ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+          {msg}
+        </p>
       )}
     </div>
   );
@@ -316,7 +438,7 @@ export default function AnalysisPage() {
       <div>
         <h1 className="text-2xl font-bold text-foreground">平台解析配置</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          配置抖音或小红书的 Cookie，用于视频解析和数据采集
+          配置抖音 Cookie 与小红书凭证登录，用于内容解析和数据采集
         </p>
       </div>
 

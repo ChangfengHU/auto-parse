@@ -67,19 +67,34 @@ async function runCliCommand<T>(cookie: string, args: string[]): Promise<T> {
   }
 
   return withCliHome(cookie, async (homeDir) => {
-    const { stdout, stderr } = await execFileAsync(
-      XHS_CLI_PYTHON,
-      [...XHS_CLI_ENTRYPOINT, ...args, '--json'],
-      {
-        cwd: XHS_CLI_ROOT,
-        env: {
-          ...process.env,
-          HOME: homeDir,
-        },
-        timeout: 45_000,
-        maxBuffer: 8 * 1024 * 1024,
+    let stdout = '';
+    let stderr = '';
+
+    try {
+      const result = await execFileAsync(
+        XHS_CLI_PYTHON,
+        [...XHS_CLI_ENTRYPOINT, ...args, '--json'],
+        {
+          cwd: XHS_CLI_ROOT,
+          env: {
+            ...process.env,
+            HOME: homeDir,
+          },
+          timeout: 45_000,
+          maxBuffer: 8 * 1024 * 1024,
+        }
+      );
+      stdout = result.stdout;
+      stderr = result.stderr;
+    } catch (execErr) {
+      // execFile throws on non-zero exit code, but stdout may still contain JSON
+      const err = execErr as { stdout?: string; stderr?: string; message?: string };
+      stdout = err.stdout ?? '';
+      stderr = err.stderr ?? '';
+      if (!stdout.trim()) {
+        throw new Error(err.message ?? 'Python CLI 执行失败');
       }
-    );
+    }
 
     let payload: CliSuccessPayload<T>;
     try {

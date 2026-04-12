@@ -27,6 +27,12 @@ export async function POST(req: Request) {
         httpBaseUrl?: string;
         timeoutMs?: number;
       };
+      adsDispatcher?: {
+        maxQueueSize?: number;
+      };
+      browser?: {
+        headless?: boolean;
+      };
     };
 
     const config = await saveRuntimeBackendConfig(body);

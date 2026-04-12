@@ -25,6 +25,9 @@ interface TaskCheckpoint {
 }
 
 interface TaskResult {
+  mediaUrls: string[];
+  primaryMediaUrl: string | null;
+  primaryMediaType?: 'image' | 'video' | 'unknown';
   imageUrls: string[];
   primaryImageUrl: string | null;
   outputs: Record<string, unknown>;
@@ -81,17 +84,19 @@ function addCheckpoint(taskId: string, checkpoint: TaskCheckpoint) {
   updateTask(taskId, { checkpoints: [...task.checkpoints, checkpoint] });
 }
 
-function looksLikeImageUrl(value: string): boolean {
+function inferMediaKindFromUrl(value: string): 'image' | 'video' | 'unknown' {
   const v = value.trim();
-  if (!v.startsWith('http')) return false;
-  if (/\.(png|jpg|jpeg|webp|gif|bmp|svg)(\?|$)/i.test(v)) return true;
-  if (v.includes('oss-') || v.includes('.aliyuncs.com')) return true;
-  return /image|img|picture|photo/i.test(v);
+  if (!v.startsWith('http')) return 'unknown';
+  if (/\.(png|jpg|jpeg|webp|gif|bmp|svg|avif)(\?|$)/i.test(v)) return 'image';
+  if (/\.(mp4|webm|mov|m4v)(\?|$)/i.test(v)) return 'video';
+  if (/image|img|picture|photo/i.test(v)) return 'image';
+  if (/video|movie|clip/i.test(v)) return 'video';
+  return v.includes('oss-') || v.includes('.aliyuncs.com') ? 'image' : 'unknown';
 }
 
 function collectStringsDeep(input: unknown, acc: Set<string>) {
   if (typeof input === 'string') {
-    if (looksLikeImageUrl(input)) acc.add(input.trim());
+    if (inferMediaKindFromUrl(input) !== 'unknown') acc.add(input.trim());
     return;
   }
   if (Array.isArray(input)) {
@@ -105,7 +110,7 @@ function collectStringsDeep(input: unknown, acc: Set<string>) {
   }
 }
 
-function collectImageUrls(session: WorkflowSession): string[] {
+function collectMediaUrls(session: WorkflowSession): string[] {
   const urls = new Set<string>();
   for (const item of session.history) {
     collectStringsDeep(item.result.output, urls);
@@ -299,11 +304,16 @@ async function runTask(taskId: string) {
     if (final?.autoCloseTab) deleteSession(task.sessionId);
     return;
   }
-  const imageUrls = collectImageUrls(finalSession);
+  const mediaUrls = collectMediaUrls(finalSession);
+  const imageUrls = mediaUrls.filter((url) => inferMediaKindFromUrl(url) === 'image');
+  const primaryMediaUrl = mediaUrls[0] ?? null;
   const doneTask = updateTask(taskId, {
     status: 'success',
     endedAt: new Date().toISOString(),
     result: {
+      mediaUrls,
+      primaryMediaUrl,
+      primaryMediaType: primaryMediaUrl ? inferMediaKindFromUrl(primaryMediaUrl) : 'unknown',
       imageUrls,
       primaryImageUrl: imageUrls[0] ?? null,
       outputs: finalSession.history.reduce((acc, h) => ({ ...acc, ...(h.result.output ?? {}) }), {}),

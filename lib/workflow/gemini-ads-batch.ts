@@ -5,6 +5,13 @@ import path from 'path';
 import { createGeminiWebImageTask, getGeminiWebImageTask, cancelGeminiWebImageTask } from './gemini-web-image';
 import { getWorkflow, listWorkflows } from './workflow-db';
 import type { WorkflowDef } from './types';
+import {
+  appendTaskTrace,
+  pruneTaskTraces,
+  taskTraceFile,
+  taskTraceFileRelative,
+  type TaskTracePayload,
+} from './task-trace';
 
 type BatchStatus = 'queued' | 'running' | 'success' | 'failed' | 'cancelled';
 type BatchRunStatus = 'queued' | 'running' | 'success' | 'failed' | 'cancelled';
@@ -20,7 +27,9 @@ interface BatchRunState extends BatchRunInput {
   status: BatchRunStatus;
   attempts: number;
   taskId?: string;
+  mediaUrls: string[];
   imageUrls: string[];
+  primaryMediaType?: 'image' | 'video' | 'unknown';
   error?: string;
   startedAt?: string;
   endedAt?: string;
@@ -49,6 +58,7 @@ export interface GeminiAdsBatchTask {
   maxAttemptsPerRun: number;
   autoCloseTab: boolean;
   cacheUntil?: string;
+  traceFile?: string;
   summary: BatchSummary;
   runs: BatchRunState[];
 }
@@ -66,6 +76,12 @@ function taskStore() {
 
 const TASK_CACHE_TTL_MS = Number(process.env.GEMINI_ADS_BATCH_TASK_CACHE_TTL_MS || 30 * 60 * 1000);
 const TASK_CACHE_DIR = path.join(os.tmpdir(), 'gemini-ads-batch-task-cache');
+
+const TRACE_NAMESPACE = 'gemini-ads-batch';
+
+function trace(taskId: string, event: string, payload: TaskTracePayload = {}) {
+  appendTaskTrace(TRACE_NAMESPACE, taskId, event, payload);
+}
 
 function cacheFile(taskId: string) {
   return path.join(TASK_CACHE_DIR, `${taskId}.json`);
@@ -204,7 +220,9 @@ async function runBatchTask(taskId: string) {
     return;
   }
 
-  updateTask(taskId, { status: 'running', startedAt: new Date().toISOString() });
+  const startedAt = new Date().toISOString();
+  updateTask(taskId, { status: 'running', startedAt });
+  trace(taskId, 'task_started', { startedAt });
   let cursor = 0;
 
   const worker = async () => {
@@ -218,7 +236,8 @@ async function runBatchTask(taskId: string) {
 
       const run = fresh.runs[index];
       const startedAt = new Date().toISOString();
-      updateRun(taskId, index, { status: 'running', startedAt, error: undefined, endedAt: undefined, imageUrls: [] });
+      updateRun(taskId, index, { status: 'running', startedAt, error: undefined, endedAt: undefined, mediaUrls: [], imageUrls: [] });
+      trace(taskId, 'run_started', { index, browserInstanceId: run.browserInstanceId, prompt: run.prompt, startedAt });
 
       try {
         const vars = buildRunVars({
@@ -227,7 +246,9 @@ async function runBatchTask(taskId: string) {
         });
         const maxAttempts = Math.max(1, fresh.maxAttemptsPerRun || 1);
         let finalStatus: BatchRunStatus = 'failed';
+        let finalMediaUrls: string[] = [];
         let finalImageUrls: string[] = [];
+        let finalPrimaryMediaType: BatchRunState['primaryMediaType'];
         let finalError: string | undefined;
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -245,6 +266,7 @@ async function runBatchTask(taskId: string) {
             autoCloseTab: fresh.autoCloseTab,
           });
           updateRun(taskId, index, { taskId: child.id, attempts: attempt, status: 'running' });
+          trace(taskId, 'child_task_created', { index, attempt, childTaskId: child.id, browserInstanceId: run.browserInstanceId });
 
           while (true) {
             const latest = taskStore().get(taskId);
@@ -264,25 +286,39 @@ async function runBatchTask(taskId: string) {
             }
 
             if (childTask.status === 'success') {
+              const mediaUrls = childTask.result?.mediaUrls ?? childTask.result?.imageUrls ?? [];
               const imageUrls = childTask.result?.imageUrls ?? [];
-              if (imageUrls.length > 0) {
+              if (mediaUrls.length > 0) {
                 finalStatus = 'success';
+                finalMediaUrls = mediaUrls;
                 finalImageUrls = imageUrls;
+                finalPrimaryMediaType = childTask.result?.primaryMediaType;
                 finalError = undefined;
               } else {
                 finalStatus = 'failed';
+                finalMediaUrls = [];
                 finalImageUrls = [];
-                finalError = '任务完成但未返回图片 URL';
+                finalPrimaryMediaType = undefined;
+                finalError = '任务完成但未返回媒体 URL';
               }
             } else if (childTask.status === 'cancelled') {
               finalStatus = 'cancelled';
+              finalMediaUrls = [];
               finalImageUrls = [];
+              finalPrimaryMediaType = undefined;
               finalError = undefined;
             } else {
               finalStatus = 'failed';
+              finalMediaUrls = childTask.result?.mediaUrls ?? childTask.result?.imageUrls ?? [];
               finalImageUrls = childTask.result?.imageUrls ?? [];
+              finalPrimaryMediaType = childTask.result?.primaryMediaType;
               finalError = childTask.error || '子任务失败';
             }
+            break;
+          }
+
+          if (finalStatus === 'failed' && finalError && finalError.includes('FAIL_FAST:')) {
+            trace(taskId, 'child_task_fail_fast', { index, attempt, error: finalError });
             break;
           }
 
@@ -291,16 +327,48 @@ async function runBatchTask(taskId: string) {
           }
         }
 
+        const runEndedAt = new Date().toISOString();
+        trace(taskId, 'run_settled', {
+          index,
+          browserInstanceId: run.browserInstanceId,
+          prompt: run.prompt,
+          status: finalStatus,
+          attempts: Math.max(1, Math.min(fresh.maxAttemptsPerRun || 1, Number(fresh.runs[index]?.attempts || 0) || 0)),
+          mediaUrl: finalMediaUrls[0] || null,
+          imageUrl: finalImageUrls[0] || null,
+          error: finalStatus === 'failed' ? finalError : undefined,
+          endedAt: runEndedAt,
+        });
+
+        if (finalStatus === 'success' && (finalMediaUrls[0] || finalImageUrls[0])) {
+          const primary = finalMediaUrls[0] || finalImageUrls[0];
+          const latest = taskStore().get(taskId);
+          const dup = latest?.runs.find((r) => r.index !== index && (r.mediaUrls?.[0] === primary || r.imageUrls?.[0] === primary));
+          if (dup) {
+            trace(taskId, 'duplicate_primary_media_detected', {
+              primary,
+              currentIndex: index,
+              currentPrompt: run.prompt,
+              previousIndex: dup.index,
+              previousPrompt: dup.prompt,
+            });
+          }
+        }
+
         updateRun(taskId, index, {
           status: finalStatus,
+          mediaUrls: finalMediaUrls,
           imageUrls: finalImageUrls,
+          primaryMediaType: finalPrimaryMediaType,
           error: finalStatus === 'failed' ? finalError : undefined,
-          endedAt: new Date().toISOString(),
+          endedAt: runEndedAt,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        trace(taskId, 'run_exception', { index, browserInstanceId: run.browserInstanceId, prompt: run.prompt, error: message });
         updateRun(taskId, index, {
           status: 'failed',
+          mediaUrls: [],
           imageUrls: [],
           error: message,
           endedAt: new Date().toISOString(),
@@ -323,13 +391,15 @@ async function runBatchTask(taskId: string) {
         ? { ...item, status: 'cancelled' as const, endedAt: item.endedAt || endedAt }
         : item
     );
+    const summary = computeSummary(remaining);
     updateTask(taskId, {
       status: 'cancelled',
       endedAt,
       cacheUntil: new Date(Date.now() + TASK_CACHE_TTL_MS).toISOString(),
       runs: remaining,
-      summary: computeSummary(remaining),
+      summary,
     });
+    trace(taskId, 'task_finalized', { status: 'cancelled', endedAt, summary });
     return;
   }
 
@@ -340,6 +410,7 @@ async function runBatchTask(taskId: string) {
     cacheUntil: new Date(Date.now() + TASK_CACHE_TTL_MS).toISOString(),
     summary,
   });
+  trace(taskId, 'task_finalized', { status: nextStatus, endedAt, summary });
 }
 
 export async function createGeminiAdsBatchTask(input: {
@@ -375,6 +446,10 @@ export async function createGeminiAdsBatchTask(input: {
   const maxAttemptsPerRun = Math.max(1, Math.min(5, Number(input.maxAttemptsPerRun ?? 1) || 1));
   const taskId = randomUUID();
   const now = new Date().toISOString();
+
+  pruneTaskTraces(TRACE_NAMESPACE);
+  const traceFile = taskTraceFileRelative(taskTraceFile(TRACE_NAMESPACE, taskId));
+
   const runStates: BatchRunState[] = runs.map((item, index) => ({
     index,
     browserInstanceId: item.browserInstanceId,
@@ -382,6 +457,7 @@ export async function createGeminiAdsBatchTask(input: {
     browserWsUrl: item.browserWsUrl,
     status: 'queued',
     attempts: 0,
+    mediaUrls: [],
     imageUrls: [],
   }));
 
@@ -399,9 +475,20 @@ export async function createGeminiAdsBatchTask(input: {
     autoCloseTab: input.autoCloseTab === true,
     runs: runStates,
     summary: computeSummary(runStates),
+    traceFile,
   };
   taskStore().set(taskId, task);
   persistTask(task);
+
+  trace(taskId, 'task_created', {
+    status: task.status,
+    workflowId: task.workflowId,
+    workflowName: task.workflowName,
+    promptVarName: task.promptVarName,
+    maxConcurrency: task.maxConcurrency,
+    maxAttemptsPerRun: task.maxAttemptsPerRun,
+    runs: task.runs.map((r) => ({ index: r.index, browserInstanceId: r.browserInstanceId, prompt: r.prompt })),
+  });
 
   setTimeout(() => {
     runBatchTask(taskId).catch((error) => {
@@ -451,5 +538,8 @@ export function cancelGeminiAdsBatchTask(taskId: string) {
   if (!task) return undefined;
   if (isTerminal(task.status)) return task;
   const updated = updateTask(taskId, { cancelRequested: true });
+  if (updated) {
+    trace(taskId, 'cancel_requested', { status: task.status });
+  }
   return updated;
 }

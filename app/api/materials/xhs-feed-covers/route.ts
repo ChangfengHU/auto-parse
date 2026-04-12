@@ -52,9 +52,12 @@ export async function POST(req: NextRequest) {
     let savedCount = 0;
     let skippedCount = 0;
     const errors: string[] = [];
+    const savedIds: string[] = [];
+    const existedIds: string[] = [];
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
+      const noteId = String(item.id || '').trim();
       const sourceUrl = pickCoverUrl(item.note_card?.cover);
       if (!sourceUrl) {
         skippedCount += 1;
@@ -63,6 +66,7 @@ export async function POST(req: NextRequest) {
 
       if (getMaterialBySourceUrl(sourceUrl)) {
         skippedCount += 1;
+        if (noteId) existedIds.push(noteId);
         continue;
       }
 
@@ -84,12 +88,13 @@ export async function POST(req: NextRequest) {
           ossUrl,
           coverUrl: ossUrl,
           sourceUrl,
-          sourceNoteId: item.id,
-          sourcePostUrl: item.id
-            ? `https://www.xiaohongshu.com/explore/${item.id}${item.xsec_token ? `?xsec_token=${item.xsec_token}&xsec_source=pc_feed` : ''}`
+          sourceNoteId: noteId || item.id,
+          sourcePostUrl: noteId
+            ? `https://www.xiaohongshu.com/explore/${noteId}${item.xsec_token ? `?xsec_token=${item.xsec_token}&xsec_source=pc_feed` : ''}`
             : undefined,
         });
         savedCount += 1;
+        if (noteId) savedIds.push(noteId);
       } catch (error) {
         errors.push(`第 ${i + 1} 条封面保存失败：${error instanceof Error ? error.message : String(error)}`);
       }
@@ -99,6 +104,8 @@ export async function POST(req: NextRequest) {
       ok: true,
       savedCount,
       skippedCount,
+      savedIds,
+      existedIds,
       errors,
     });
   } catch (error) {

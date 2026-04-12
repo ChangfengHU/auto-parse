@@ -21,11 +21,15 @@
 import { getSession, updateSession } from '@/lib/workflow/session-store';
 import { executeNode } from '@/lib/workflow/engine';
 import { getPersistentContext } from '@/lib/persistent-browser';
+import { nodeRequiresBrowser } from '@/lib/workflow/node-runtime';
 import type { NavigateParams, NodeDef, WorkflowContext, StepHistory } from '@/lib/workflow/types';
 import { chromium, type Browser, type Page } from 'playwright';
 
 async function ensureSessionPage(session: ReturnType<typeof getSession>, node: NodeDef) {
   if (!session) return { page: null as Page | null, tempBrowser: undefined as Browser | undefined };
+  if (!nodeRequiresBrowser(node)) {
+    return { page: null as Page | null, tempBrowser: undefined as Browser | undefined };
+  }
   if (session._page) return { page: session._page, tempBrowser: undefined as Browser | undefined };
 
   const isAdsPowerNavigate = node.type === 'navigate' && !!((node.params ?? {}) as Partial<NavigateParams>).useAdsPower;
@@ -49,6 +53,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     skip?: boolean;
     stepIndex?: number;
     reset?: boolean;
+    vars?: Record<string, unknown>;
     params?: Record<string, unknown>;
     node?: Partial<NodeDef>;
   };
@@ -83,6 +88,44 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           session.status = 'paused';
           session.history = [];
           send('log', '🔁 已重置执行状态：从第 1 步重新开始');
+        }
+
+        // ── 同步运行时变量（重要：session 创建后变量可能被用户修改） ─────────────
+        const incomingVars = (() => {
+          const v = body.vars;
+          if (!v || typeof v !== 'object') return null;
+          const cleaned: Record<string, string> = {};
+
+          const toVarString = (raw: unknown): string => {
+            if (raw === null || raw === undefined) return '';
+            if (typeof raw === 'string') return raw.trim();
+            if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
+            if (Array.isArray(raw)) {
+              if (raw.length === 0) return '';
+              // UI TagInput 常见是 string[]，这里统一序列化以便模板/节点解析
+              return JSON.stringify(raw);
+            }
+            if (typeof raw === 'object') {
+              try {
+                return JSON.stringify(raw);
+              } catch {
+                return '';
+              }
+            }
+            return '';
+          };
+
+          for (const [k, raw] of Object.entries(v)) {
+            if (!k || k.startsWith('__')) continue;
+            const s = toVarString(raw);
+            if (s) cleaned[k] = s;
+          }
+          return Object.keys(cleaned).length > 0 ? cleaned : null;
+        })();
+        if (incomingVars) {
+          session.vars = { ...(session.vars ?? {}), ...incomingVars };
+          updateSession(sessionId, { vars: session.vars });
+          send('log', `🧩 已同步运行时变量（${Object.keys(incomingVars).length} 个）`);
         }
 
         // ── 确定要执行的步骤 ──────────────────────────────────────────────────
@@ -164,18 +207,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         }
 
         const { page: runtimePage, tempBrowser } = await ensureSessionPage(session, activeNode);
-        if (!runtimePage) {
-          send('error', '浏览器 Tab 未初始化');
-          return;
+        if (nodeRequiresBrowser(activeNode)) {
+          if (!runtimePage) {
+            send('error', '浏览器 Tab 未初始化');
+            return;
+          }
+          if (tempBrowser) {
+            send('log', `🫥 首步为 AdsPower 导航，已跳过本地可见浏览器预热`);
+          }
+          send('log', `🌐 当前页面：${runtimePage.url() || '(空白)'}`);
+        } else {
+          send('log', `🧠 当前节点无需浏览器，跳过页面预热`);
         }
 
-        if (tempBrowser) {
-          send('log', `🫥 首步为 AdsPower 导航，已跳过本地可见浏览器预热`);
-        }
-
-        send('log', `🌐 当前页面：${runtimePage.url() || '(空白)'}`);
-
-        const result = await executeNode(runtimePage, activeNode, ctx);
+        const result = await executeNode((runtimePage ?? ({} as Page)), activeNode, ctx);
         // 把节点内部产出的结构化日志逐条透传给前端，避免只在 done 里一次性返回。
         for (const line of result.log ?? []) {
           send('log', line);
@@ -199,7 +244,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           if (tempBrowser) {
             await tempBrowser.close().catch(() => {});
           }
-        } else if (tempBrowser) {
+        } else if (tempBrowser && runtimePage) {
           session._page = runtimePage;
           updateSession(sessionId, { _page: runtimePage });
         }

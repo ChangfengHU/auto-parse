@@ -1,34 +1,79 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface NoteItem {
   note_id?: string;
   id?: string;
   xsec_token?: string;
-    note_card: {
-      display_title: string;
-      type: string;
-      liked_count: string | number;
-      cover: {
-        url_default?: string;
-        url?: string;
-        info_list?: Array<{ url?: string; image_scene?: string }>;
-        height: number;
-        width: number;
-      };
-      user?: { nickname: string; avatar: string; xsec_token?: string };
-      interact_info?: { liked_count: string | number };
+  note_card: {
+    display_title: string;
+    type: string;
+    liked_count: string | number;
+    cover: {
+      url_default?: string;
+      url?: string;
+      info_list?: Array<{ url?: string; image_scene?: string }>;
+      height: number;
+      width: number;
     };
+    user?: { nickname: string; avatar: string; xsec_token?: string };
+    interact_info?: { liked_count: string | number };
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : null;
+}
+
+function getString(obj: Record<string, unknown> | null, key: string): string {
+  const v = obj?.[key];
+  return typeof v === 'string' ? v : '';
+}
+
+function toNumberLike(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return 0;
+  const raw = value.trim();
+  if (!raw) return 0;
+
+  const normalized = raw.replace(/,/g, '').toLowerCase();
+  const unitMatch = normalized.match(/^([0-9]+(?:\.[0-9]+)?)(w|万)$/i);
+  if (unitMatch) {
+    const base = parseFloat(unitMatch[1]);
+    if (!Number.isFinite(base)) return 0;
+    return Math.round(base * 10000);
+  }
+
+  const num = parseInt(normalized.replace(/[^0-9-]/g, ''), 10);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function getNumber(obj: Record<string, unknown> | null, key: string): number {
+  return toNumberLike(obj?.[key]);
+}
+
+function getArray(obj: Record<string, unknown> | null, key: string): unknown[] {
+  const v = obj?.[key];
+  return Array.isArray(v) ? v : [];
+}
+
+function isNoteItem(item: unknown): item is NoteItem {
+  const rec = asRecord(item);
+  return Boolean(rec && asRecord(rec.note_card));
 }
 
 export default function XhsSpyTab({ 
   onSelectNote,
-  userId: initialUserId = ''
+  userId: initialUserId = '',
+  density = 'compact'
 }: { 
   onSelectNote?: (url: string) => void;
   userId?: string;
+  density?: 'compact' | 'comfortable';
 }) {
+  const compact = density === 'compact';
+
   const proxyXhsImage = (url?: string) => {
     if (!url) return '';
     const normalized = url.startsWith('//') ? `https:${url}` : url.startsWith('http://') ? `https://${url.slice(7)}` : url;
@@ -47,29 +92,125 @@ export default function XhsSpyTab({
   };
 
   const [userId, setUserId] = useState(initialUserId);
+  const [resolvedUserId, setResolvedUserId] = useState('');
   const [loading, setLoading] = useState(false);
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<Record<string, unknown> | null>(null);
   const [notes, setNotes] = useState<NoteItem[]>([]);
+  const [cursor, setCursor] = useState('');
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [autoLoadingAll, setAutoLoadingAll] = useState(false);
+
+  const autoStopRef = useRef(false);
+  const cursorRef = useRef('');
+  const hasMoreRef = useRef(false);
+  const loadingMoreRef = useRef(false);
+
+  useEffect(() => {
+    cursorRef.current = cursor;
+  }, [cursor]);
+
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
+
+  useEffect(() => {
+    loadingMoreRef.current = loadingMore;
+  }, [loadingMore]);
   const [error, setError] = useState('');
 
-  // 自动触发侦测逻辑
-  useEffect(() => {
-    if (initialUserId) {
-      setUserId(initialUserId);
-      handleSpy(initialUserId);
-    }
-  }, [initialUserId]);
-
-  const handleSpy = async (overrideId?: string) => {
-    let finalId = (overrideId || userId).trim();
-    const profileMatch = finalId.match(/profile\/([a-zA-Z0-9]+)/);
+  const resolveUserProfileId = (value: string) => {
+    let finalId = value.trim();
+    const profileMatch = finalId.match(/profile\/([a-zA-Z0-9_-]+)/);
     if (profileMatch) finalId = profileMatch[1];
+    return finalId;
+  };
+
+  const extractNotes = (notesData: Record<string, unknown> | null): NoteItem[] => {
+    if (!notesData) return [];
+    const directCandidates = ['notes', 'items', 'list', 'note_list', 'noteList'];
+    for (const key of directCandidates) {
+      const arr = getArray(notesData, key).filter(isNoteItem);
+      if (arr.length > 0) return arr;
+    }
+
+    const nestedData = asRecord(notesData.data);
+    if (nestedData) {
+      for (const key of directCandidates) {
+        const arr = getArray(nestedData, key).filter(isNoteItem);
+        if (arr.length > 0) return arr;
+      }
+    }
+
+    return [];
+  };
+
+  const extractCursor = (notesData: Record<string, unknown> | null): { cursor: string; hasMore: boolean } => {
+    if (!notesData) return { cursor: '', hasMore: false };
+    const candidates = ['next_cursor', 'nextCursor', 'cursor', 'page_cursor', 'pageCursor'];
+    const recs = [notesData, asRecord(notesData.data)].filter(Boolean) as Record<string, unknown>[];
+
+    let next = '';
+    for (const rec of recs) {
+      for (const key of candidates) {
+        const v = rec[key];
+        if (typeof v === 'string' && v.trim()) {
+          next = v.trim();
+          break;
+        }
+        if (typeof v === 'number' && Number.isFinite(v) && v !== 0) {
+          next = String(v);
+          break;
+        }
+      }
+      if (next) break;
+    }
+
+    const hasMoreFlag = (() => {
+      for (const rec of recs) {
+        const v = rec.has_more ?? rec.hasMore;
+        if (typeof v === 'boolean') return v;
+        if (typeof v === 'number') return v !== 0;
+        if (typeof v === 'string') return v === '1' || v.toLowerCase() === 'true';
+      }
+      return undefined;
+    })();
+
+    const hasMore = typeof hasMoreFlag === 'boolean' ? hasMoreFlag : Boolean(next);
+    return { cursor: next, hasMore };
+  };
+
+  const fetchMore = async (opts: { userId: string; cursor: string }) => {
+    const res = await fetch('/api/analysis/xhs/spy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: opts.userId, cursor: opts.cursor }),
+    });
+    const d = await res.json() as { ok?: boolean; error?: string; data?: unknown };
+    if (!d.ok) throw new Error(d.error ?? '加载更多失败');
+
+    const data = asRecord(d.data);
+    const notesWrap = asRecord(data?.notes);
+    const notesData = asRecord(notesWrap?.data) ?? notesWrap;
+    return {
+      items: extractNotes(notesData),
+      next: extractCursor(notesData),
+    };
+  };
+
+  const handleSpy = useCallback(async (overrideId?: string) => {
+    const finalId = resolveUserProfileId(overrideId || userId);
     if (!finalId) return;
+    setResolvedUserId(finalId);
 
     setLoading(true);
     setError('');
+    autoStopRef.current = true;
+    setAutoLoadingAll(false);
     setProfile(null);
     setNotes([]);
+    setCursor('');
+    setHasMore(false);
 
     try {
       const res = await fetch('/api/analysis/xhs/spy', {
@@ -77,22 +218,36 @@ export default function XhsSpyTab({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: finalId })
       });
-      const d = await res.json();
-      if (!d.ok) throw new Error(d.error);
+      const d = await res.json() as { ok?: boolean; error?: string; data?: unknown };
+      if (!d.ok) throw new Error(d.error ?? '侦测失败');
 
-      // 核心修正：Python 原样返回 XHS 结构，所以是 d.data.profile.data 和 d.data.notes.data.notes
-      const profData = d.data.profile?.data || d.data.profile;
-      const notesContainer = d.data.notes?.data || d.data.notes;
-      const rawNotes: NoteItem[] = (notesContainer?.notes ?? []).filter((n: any) => n?.note_card);
+      const data = asRecord(d.data);
+      const profWrap = asRecord(data?.profile);
+      const profData = asRecord(profWrap?.data) ?? profWrap;
 
-      setProfile(profData);
+      const notesWrap = asRecord(data?.notes);
+      const notesData = asRecord(notesWrap?.data) ?? notesWrap;
+      const rawNotes = extractNotes(notesData);
+      const next = extractCursor(notesData);
+
+      setProfile(profData ?? null);
       setNotes(rawNotes);
-    } catch (e: any) {
-      setError(e.message);
+      setCursor(next.cursor);
+      setHasMore(next.hasMore);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
+
+  // 自动触发侦测逻辑
+  useEffect(() => {
+    if (initialUserId) {
+      setUserId(initialUserId);
+      void handleSpy(initialUserId);
+    }
+  }, [initialUserId, handleSpy]);
 
   const formatLikes = (val: string | number) => {
     const num = typeof val === 'string' ? parseInt(val, 10) : val;
@@ -101,27 +256,59 @@ export default function XhsSpyTab({
     return num;
   };
 
-  const getProfileFields = (p: any) => {
+  const getProfileFields = (p: Record<string, unknown> | null) => {
     if (!p) return null;
-    const basic = p.basic_info ?? p;
-    const interactions = p.interactions ?? [];
-    const fansInfo = interactions.find((i: any) => i.type === 'fans') ?? {};
-    const followsInfo = interactions.find((i: any) => i.type === 'follows') ?? {};
-    const likesInfo = interactions.find((i: any) => i.type === 'interaction') ?? {};
+
+    const basicInfo = asRecord(p.basic_info) ?? (asRecord(asRecord(p.data)?.basic_info) ?? null) ?? p;
+    const profileId =
+      getString(basicInfo, 'user_id') ||
+      getString(basicInfo, 'userId') ||
+      getString(p, 'user_id') ||
+      getString(p, 'userId') ||
+      resolvedUserId;
+    const interactions = [
+      ...getArray(p, 'interactions'),
+      ...getArray(asRecord(p.data), 'interactions'),
+    ]
+      .map(asRecord)
+      .filter(Boolean) as Record<string, unknown>[];
+
+    const findCount = (types: string[]) => {
+      for (const type of types) {
+        const hit = interactions.find((i) => getString(i, 'type') === type);
+        const count = hit ? getNumber(hit, 'count') : 0;
+        if (count) return count;
+      }
+      return 0;
+    };
+
+    const fans = findCount(['fans', 'fan', 'follower', 'followers']) || getNumber(p, 'fans') || getNumber(p, 'fansCount') || getNumber(p, 'fans_count');
+    const follows = findCount(['follows', 'follow', 'following']) || getNumber(p, 'follows') || getNumber(p, 'followCount') || getNumber(p, 'follows_count');
+
+    const likedCollect =
+      findCount(['interaction', 'liked_and_collected', 'likedAndCollected', 'like_and_collect']) ||
+      getNumber(p, 'liked_count') ||
+      getNumber(p, 'likedCount') ||
+      getNumber(p, 'like_count') ||
+      getNumber(p, 'collected_count') ||
+      getNumber(p, 'collect_count');
+
     return {
-      nickname: basic.nickname ?? '未知博主',
-      desc: basic.desc ?? basic.bio ?? '',
-      avatar: basic.imageb ?? basic.avatar ?? '',
-      fans: fansInfo.count ?? p.fans ?? 0,
-      follows: followsInfo.count ?? p.follows ?? 0,
-      liked: likesInfo.count ?? p.liked_count ?? 0,
+      profileId,
+      profileUrl: profileId ? `https://www.xiaohongshu.com/user/profile/${profileId}` : '',
+      nickname: getString(basicInfo, 'nickname') || getString(basicInfo, 'name') || '未知博主',
+      desc: getString(basicInfo, 'desc') || getString(basicInfo, 'bio') || getString(basicInfo, 'description'),
+      avatar: getString(basicInfo, 'imageb') || getString(basicInfo, 'avatar') || getString(basicInfo, 'image') || getString(basicInfo, 'imageB'),
+      fans,
+      follows,
+      liked: likedCollect,
     };
   };
 
   const prof = getProfileFields(profile);
 
   return (
-    <div className="space-y-5">
+    <div className={compact ? 'space-y-3' : 'space-y-5'}>
       {/* 输入栏 */}
       <div className="flex gap-2">
         <input
@@ -129,7 +316,10 @@ export default function XhsSpyTab({
           onChange={e => setUserId(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleSpy()}
           placeholder="粘贴对标博主首页链接 或 User ID"
-          className="flex-1 px-4 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 transition"
+          className={compact
+            ? 'flex-1 px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 transition'
+            : 'flex-1 px-4 py-2.5 rounded-xl border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/40 transition'
+          }
         />
         <button
           onClick={() => handleSpy()}
@@ -154,16 +344,28 @@ export default function XhsSpyTab({
 
       {/* 博主档案卡片 */}
       {prof && (
-        <div className="flex items-start gap-5 p-5 border border-border bg-card rounded-2xl">
+        <div className={compact ? 'flex items-start gap-3 p-3 border border-border bg-card rounded-xl' : 'flex items-start gap-5 p-5 border border-border bg-card rounded-2xl'}>
           <img
             src={proxyXhsImage(prof.avatar)}
-            className="w-20 h-20 rounded-full border-2 border-rose-100 object-cover shadow-md flex-shrink-0"
+            className={compact ? 'w-14 h-14 rounded-full border border-border object-cover bg-muted flex-shrink-0' : 'w-20 h-20 rounded-full border-2 border-rose-100 object-cover shadow-md flex-shrink-0'}
             alt={prof.nickname}
           />
           <div className="flex-1 min-w-0">
-            <h2 className="text-lg font-bold truncate">{prof.nickname}</h2>
+            {prof.profileUrl ? (
+              <a
+                href={prof.profileUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-lg font-bold truncate hover:underline underline-offset-2"
+                title="打开小红书原博主页"
+              >
+                {prof.nickname}
+              </a>
+            ) : (
+              <h2 className="text-lg font-bold truncate">{prof.nickname}</h2>
+            )}
             <p className="text-sm text-muted-foreground mt-0.5 line-clamp-2">{prof.desc || '这位博主很神秘，没有简介'}</p>
-            <div className="flex gap-6 mt-3">
+            <div className={compact ? 'flex gap-4 mt-2' : 'flex gap-6 mt-3'}>
               {[
                 { label: '粉丝', value: prof.fans },
                 { label: '关注', value: prof.follows },
@@ -182,8 +384,108 @@ export default function XhsSpyTab({
       {/* 笔记网格 */}
       {notes.length > 0 && (
         <div>
-          <p className="text-xs text-muted-foreground mb-3">近期发布 {notes.length} 篇，悬停可解析</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs text-muted-foreground">已加载 {notes.length} 篇，悬停可解析</p>
+            {hasMore && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!cursor || loadingMore || !resolvedUserId) return;
+                    setLoadingMore(true);
+                    try {
+                      const { items, next } = await fetchMore({ userId: resolvedUserId, cursor });
+                      setNotes((prev) => {
+                        const seen = new Set(prev.map((item) => item.note_id ?? item.id ?? ''));
+                        const merged = [...prev];
+                        for (const item of items) {
+                          const id = item.note_id ?? item.id ?? '';
+                          if (id && !seen.has(id)) merged.push(item);
+                        }
+                        return merged;
+                      });
+                      cursorRef.current = next.cursor;
+                      hasMoreRef.current = next.hasMore;
+                      setCursor(next.cursor);
+                      setHasMore(next.hasMore);
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setLoadingMore(false);
+                    }
+                  }}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-muted disabled:opacity-50"
+                  disabled={loadingMore || !cursor || !resolvedUserId}
+                >
+                  {loadingMore ? '加载中...' : '加载更多'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!resolvedUserId || !cursor) return;
+                    if (autoLoadingAll) {
+                      autoStopRef.current = true;
+                      setAutoLoadingAll(false);
+                      return;
+                    }
+
+                    autoStopRef.current = false;
+                    setAutoLoadingAll(true);
+
+                    void (async () => {
+                      while (!autoStopRef.current && cursorRef.current && hasMoreRef.current) {
+                        if (loadingMoreRef.current) {
+                          await new Promise((r) => setTimeout(r, 300));
+                          continue;
+                        }
+
+                        const c = cursorRef.current;
+                        if (!c) break;
+
+                        setLoadingMore(true);
+                        try {
+                          const { items, next } = await fetchMore({ userId: resolvedUserId, cursor: c });
+                          setNotes((prev) => {
+                            const seen = new Set(prev.map((item) => item.note_id ?? item.id ?? ''));
+                            const merged = [...prev];
+                            for (const item of items) {
+                              const id = item.note_id ?? item.id ?? '';
+                              if (id && !seen.has(id)) merged.push(item);
+                            }
+                            return merged;
+                          });
+                          cursorRef.current = next.cursor;
+                          hasMoreRef.current = next.hasMore;
+                          setCursor(next.cursor);
+                          setHasMore(next.hasMore);
+                        } catch (e) {
+                          setError(e instanceof Error ? e.message : String(e));
+                          autoStopRef.current = true;
+                          break;
+                        } finally {
+                          setLoadingMore(false);
+                        }
+
+                        // 轻微节流，避免请求过猛
+                        await new Promise((r) => setTimeout(r, 600));
+                      }
+                      setAutoLoadingAll(false);
+                    })();
+                  }}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border bg-card hover:bg-muted disabled:opacity-50"
+                  disabled={!cursor || !resolvedUserId}
+                  title="分批慢慢拉取全部作品"
+                >
+                  {autoLoadingAll ? '停止拉取' : '持续拉取'}
+                </button>
+              </div>
+            )}
+          </div>
+          <div className={compact
+            ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 xl:grid-cols-7 2xl:grid-cols-8 gap-2'
+            : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3'
+          }>
             {notes.map((item) => {
               const card = item.note_card;
               const noteId = item.note_id ?? item.id ?? '';

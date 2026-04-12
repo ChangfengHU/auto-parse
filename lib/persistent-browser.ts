@@ -8,6 +8,7 @@
  */
 
 import { chromium, BrowserContext } from 'playwright';
+import { getRuntimeBackendConfigSync } from '@/lib/runtime/backend-config';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
@@ -17,8 +18,49 @@ export const BROWSER_DATA_DIR =
   process.env.DOUYIN_BROWSER_DATA_DIR ??
   path.join(os.homedir(), '.douyin-browser-data');
 
-export const IS_HEADLESS = process.env.BROWSER_HEADLESS !== 'false';
+export function getConfiguredBrowserHeadless(): boolean {
+  try {
+    return Boolean(getRuntimeBackendConfigSync().browser?.headless);
+  } catch {
+    return process.env.BROWSER_HEADLESS !== 'false';
+  }
+}
 export const IS_IDLE_SIMULATION = process.env.BROWSER_IDLE_SIMULATION === 'true';
+
+/**
+ * 解析代理配置
+ * 支持两种格式：
+ *   - 标准 URL:  http://user:pass@host:port
+ *   - 简写格式:  host:port:user:pass
+ */
+function parseBrowserProxy(raw: string): { server: string; username?: string; password?: string } | undefined {
+  const s = raw.trim();
+  if (!s) return undefined;
+  // 标准 URL 格式
+  if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('socks5://')) {
+    try {
+      const u = new URL(s);
+      return {
+        server: `${u.protocol}//${u.hostname}:${u.port}`,
+        username: u.username || undefined,
+        password: u.password || undefined,
+      };
+    } catch { return { server: s }; }
+  }
+  // 简写格式: host:port:user:pass
+  const parts = s.split(':');
+  if (parts.length >= 2) {
+    const server = `http://${parts[0]}:${parts[1]}`;
+    return {
+      server,
+      username: parts[2] || undefined,
+      password: parts[3] || undefined,
+    };
+  }
+  return { server: s };
+}
+
+export const BROWSER_PROXY = parseBrowserProxy(process.env.BROWSER_PROXY_SERVER ?? '');
 
 const ANTI_BOT_SCRIPT = () => {
   // 隐藏 webdriver
@@ -48,7 +90,6 @@ const ANTI_BOT_SCRIPT = () => {
 
   // 修复权限查询
   const oq = window.navigator.permissions.query.bind(window.navigator.permissions);
-  // @ts-expect-error override permission query for anti-bot compatibility
   window.navigator.permissions.query = (p: PermissionDescriptor) =>
     p.name === 'notifications'
       ? Promise.resolve({ state: Notification.permission } as PermissionStatus)
@@ -66,8 +107,12 @@ const ANTI_BOT_SCRIPT = () => {
 // 用 global 跨热重载保持实例
 declare global {
   var __douyinBrowserCtx: BrowserContext | undefined;
+  var __douyinBrowserHeadless: boolean | undefined;
   var __browserIdleSim: IdleSimulator | undefined;
   var __debugScratchPage: import('playwright').Page | undefined;
+  // 单节点调试时，如发生 CDP 接管（AdsPower / connectOverCDP），需要保留 Browser 引用，
+  // 否则连接可能在请求结束后被 GC/断开，导致下一节点看起来“没接力”。
+  var __debugScratchBrowser: import('playwright').Browser | undefined;
 }
 
 /**
@@ -120,13 +165,19 @@ export async function getPersistentContext(): Promise<BrowserContext> {
   launching = true;
   try {
     patchChromePreferences(BROWSER_DATA_DIR);
-    console.log(`[Browser] 启动持久化浏览器  headless=${IS_HEADLESS}  dataDir=${BROWSER_DATA_DIR}`);
+    const configuredHeadless = getConfiguredBrowserHeadless();
+    console.log(`[Browser] 启动持久化浏览器  headless=${configuredHeadless}  dataDir=${BROWSER_DATA_DIR}`);
 
     const channel = process.env.BROWSER_CHANNEL as 'chrome' | 'msedge' | undefined;
 
+    if (BROWSER_PROXY) {
+      console.log(`[Browser] 代理已启用: ${BROWSER_PROXY.server}${BROWSER_PROXY.username ? ` (用户: ${BROWSER_PROXY.username})` : ''}`);
+    }
+
     const ctx = await chromium.launchPersistentContext(BROWSER_DATA_DIR, {
       channel,
-      headless: IS_HEADLESS,
+      headless: configuredHeadless,
+      ...(BROWSER_PROXY ? { proxy: BROWSER_PROXY } : {}),
       env: {
         ...process.env,
         DISPLAY: process.env.DISPLAY || ':99',
@@ -160,6 +211,7 @@ export async function getPersistentContext(): Promise<BrowserContext> {
     });
 
     global.__douyinBrowserCtx = ctx;
+    global.__douyinBrowserHeadless = configuredHeadless;
 
     if (IS_IDLE_SIMULATION) {
       const pages = ctx.pages();
@@ -227,20 +279,49 @@ export async function getDebugScratchPage(): Promise<import('playwright').Page> 
       return global.__debugScratchPage;
     } catch {
       global.__debugScratchPage = undefined;
+      global.__debugScratchBrowser = undefined;
     }
   }
   const page = await ctx.newPage();
   page.on('dialog', d => d.accept());
-  page.on('close', () => { global.__debugScratchPage = undefined; });
+  page.on('close', () => {
+    global.__debugScratchPage = undefined;
+    global.__debugScratchBrowser = undefined;
+  });
   global.__debugScratchPage = page;
+  global.__debugScratchBrowser = undefined;
   return page;
 }
 
-export function setDebugScratchPage(page: import('playwright').Page): void {
+export function setDebugScratchPage(
+  page: import('playwright').Page,
+  browser?: import('playwright').Browser
+): void {
+  const prevBrowser = global.__debugScratchBrowser;
   global.__debugScratchPage = page;
+  global.__debugScratchBrowser = browser;
+
+  // 避免 CDP 连接泄漏：切换到新 Browser 时，尽量断开旧连接（不会关闭远端浏览器）
+  if (prevBrowser && browser && prevBrowser !== browser) {
+    void prevBrowser.close().catch(() => {});
+  }
+
   page.on('close', () => {
     if (global.__debugScratchPage === page) {
       global.__debugScratchPage = undefined;
+    }
+    if (global.__debugScratchBrowser === browser) {
+      global.__debugScratchBrowser = undefined;
+    }
+  });
+
+  browser?.on('disconnected', () => {
+    if (global.__debugScratchBrowser === browser) {
+      global.__debugScratchBrowser = undefined;
+      // 连接断开时，page 往往也会失效，避免下次误复用
+      if (global.__debugScratchPage === page) {
+        global.__debugScratchPage = undefined;
+      }
     }
   });
 }
@@ -250,17 +331,28 @@ export async function resetDebugScratchPage(): Promise<void> {
     await global.__debugScratchPage.close().catch(() => {});
     global.__debugScratchPage = undefined;
   }
+  if (global.__debugScratchBrowser) {
+    await global.__debugScratchBrowser.close().catch(() => {});
+    global.__debugScratchBrowser = undefined;
+  }
 }
 
 export async function closePersistentBrowser(): Promise<void> {
   if (global.__douyinBrowserCtx) {
     await global.__douyinBrowserCtx.close().catch(() => {});
     global.__douyinBrowserCtx = undefined;
+    global.__douyinBrowserHeadless = undefined;
   }
 }
 
 export function browserStatus() {
   const alive = !!global.__douyinBrowserCtx;
   const pageCount = alive ? global.__douyinBrowserCtx!.pages().length : 0;
-  return { alive, headless: IS_HEADLESS, dataDir: BROWSER_DATA_DIR, openPages: pageCount };
+  return {
+    alive,
+    configuredHeadless: getConfiguredBrowserHeadless(),
+    runningHeadless: global.__douyinBrowserHeadless,
+    dataDir: BROWSER_DATA_DIR,
+    openPages: pageCount,
+  };
 }

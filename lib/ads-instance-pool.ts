@@ -71,7 +71,7 @@ export function resolvePoolInstanceIds(explicit?: string[]): string[] {
     .map((item) => item.trim())
     .filter(Boolean);
   if (fromEnv.length > 0) return fromEnv;
-  return ['k1b908rw', 'k1bc2kj2', 'k1bc2kja'];
+  return ['k1b908rw', 'k1bdaoa7', 'k1ba8vac'];
 }
 
 function findSessionOccupancy(instanceId: string): InstanceStatus | null {
@@ -89,19 +89,19 @@ function findSessionOccupancy(instanceId: string): InstanceStatus | null {
         return '';
       }
     })();
-    const runningByTab = isWorkingTabUrl(sessionUrl);
-    const runningByState = session.status === 'running';
-    if (!runningByTab && !runningByState) continue;
+    const reusablePoolTab = isWorkingTabUrl(sessionUrl);
+    const blockingByState = session.status === 'running' || session.status === 'paused';
+    if (!blockingByState) continue;
     return {
       instanceId,
       state: 'busy',
-      tabOpen: runningByTab,
+      tabOpen: reusablePoolTab,
       active: true,
       locked: false,
       source: 'session',
       sessionId: session.id,
       sessionStatus: session.status,
-      detail: runningByTab ? `会话占用工作页：${sessionUrl}` : `会话状态为 ${session.status}`,
+      detail: reusablePoolTab ? `会话占用工作页：${sessionUrl}` : `会话状态为 ${session.status}`,
     };
   }
   return null;
@@ -141,8 +141,8 @@ function truncateUrl(url: string) {
 
 function summarizeWorkingTabs(urls: string[]) {
   if (urls.length === 0) return '未检测到工作标签页';
-  if (urls.length === 1) return `工作标签页: ${truncateUrl(urls[0])}`;
-  return `工作标签页 ${urls.length} 个，首个: ${truncateUrl(urls[0])}`;
+  if (urls.length === 1) return `Gemini 工作页已就绪: ${truncateUrl(urls[0])}`;
+  return `Gemini 工作页 ${urls.length} 个，默认按可复用处理，首个: ${truncateUrl(urls[0])}`;
 }
 
 async function inspectByAdsPower(instanceId: string): Promise<Pick<InstanceStatus, 'active' | 'tabOpen' | 'source' | 'detail'>> {
@@ -171,8 +171,12 @@ async function inspectByAdsPower(instanceId: string): Promise<Pick<InstanceStatu
   }
 
   const wsEndpoint = data.data?.ws?.puppeteer?.trim() || '';
+  const rawStatus = String(data.data?.status || '').trim().toLowerCase();
   if (!wsEndpoint) {
-    return { active: true, tabOpen: false, source: 'adspower', detail: '分身激活但未提供 ws' };
+    if (rawStatus === 'inactive') {
+      return { active: false, tabOpen: false, source: 'none', detail: '分身未激活（AdsPower 未返回 ws）' };
+    }
+    return { active: false, tabOpen: false, source: 'none', detail: '分身未提供可用 ws，当前不可调度' };
   }
 
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
@@ -192,12 +196,12 @@ async function inspectByAdsPower(instanceId: string): Promise<Pick<InstanceStatu
         })
         .filter((url) => isWorkingTabUrl(url))
     );
-    const tabOpen = workingTabs.length > 0;
+    const hasReusableGeminiTab = workingTabs.length > 0;
     return {
       active: true,
-      tabOpen,
+      tabOpen: false,
       source: 'adspower',
-      detail: tabOpen
+      detail: hasReusableGeminiTab
         ? summarizeWorkingTabs(workingTabs)
         : '仅检测到空白/默认标签页，判定为空闲',
     };
@@ -246,32 +250,73 @@ export async function getInstanceStatus(instanceId: string): Promise<InstanceSta
   };
 }
 
+export async function getDispatchableInstanceStatus(instanceId: string): Promise<InstanceStatus> {
+  pruneExpiredLeases();
+  const lock = leaseStore().get(instanceId);
+  const adsInspect = await inspectByAdsPower(instanceId);
+  const state: InstanceState = lock ? 'busy' : 'idle';
+
+  return {
+    instanceId,
+    state,
+    tabOpen: false,
+    active: adsInspect.active,
+    locked: Boolean(lock),
+    leaseId: lock?.leaseId,
+    lockJobId: lock?.jobId,
+    source: adsInspect.source,
+    detail: lock ? `实例已被调度器锁定：${lock.jobId}` : adsInspect.detail,
+  };
+}
+
 export async function listInstanceStatuses(instanceIds: string[]): Promise<InstanceStatus[]> {
   const unique = Array.from(new Set(instanceIds.map((item) => item.trim()).filter(Boolean)));
   return Promise.all(unique.map((id) => getInstanceStatus(id)));
 }
 
-export async function acquireInstanceLease(instanceId: string, jobId: string): Promise<{ ok: boolean; reason?: string; leaseId?: string; status: InstanceStatus }> {
-  const current = await getInstanceStatus(instanceId);
+export async function listDispatchableInstanceStatuses(instanceIds: string[]): Promise<InstanceStatus[]> {
+  const unique = Array.from(new Set(instanceIds.map((item) => item.trim()).filter(Boolean)));
+  return Promise.all(unique.map((id) => getDispatchableInstanceStatus(id)));
+}
+
+export async function acquireInstanceLease(
+  instanceId: string,
+  jobId: string,
+  options?: { mode?: 'default' | 'dispatcher' }
+): Promise<{ ok: boolean; reason?: string; leaseId?: string; status: InstanceStatus }> {
+  const useDispatcherMode = options?.mode === 'dispatcher';
+  const current = useDispatcherMode
+    ? await getDispatchableInstanceStatus(instanceId)
+    : await getInstanceStatus(instanceId);
   if (current.state !== 'idle') {
     return { ok: false, reason: `实例当前为 ${current.state}`, status: current };
   }
   const store = leaseStore();
   if (store.has(instanceId)) {
-    const now = await getInstanceStatus(instanceId);
+    const now = useDispatcherMode
+      ? await getDispatchableInstanceStatus(instanceId)
+      : await getInstanceStatus(instanceId);
     return { ok: false, reason: '实例已被其他任务锁定', status: now };
   }
   const leaseId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   store.set(instanceId, { leaseId, jobId, acquiredAt: Date.now() });
-  const status = await getInstanceStatus(instanceId);
+  const status = useDispatcherMode
+    ? await getDispatchableInstanceStatus(instanceId)
+    : await getInstanceStatus(instanceId);
   return { ok: true, leaseId, status };
 }
 
-export async function releaseInstanceLease(instanceId: string, leaseId?: string): Promise<InstanceStatus> {
+export async function releaseInstanceLease(
+  instanceId: string,
+  leaseId?: string,
+  options?: { mode?: 'default' | 'dispatcher' }
+): Promise<InstanceStatus> {
   const store = leaseStore();
   const current = store.get(instanceId);
   if (current && (!leaseId || current.leaseId === leaseId)) {
     store.delete(instanceId);
   }
-  return getInstanceStatus(instanceId);
+  return options?.mode === 'dispatcher'
+    ? getDispatchableInstanceStatus(instanceId)
+    : getInstanceStatus(instanceId);
 }

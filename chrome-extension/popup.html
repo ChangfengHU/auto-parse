@@ -21,6 +21,11 @@
       align-items: center;
       gap: 10px;
     }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
     .sync-icon-btn {
       background: none; border: 1px solid #2a2a2b; border-radius: 6px;
       color: #6b7280; cursor: pointer; padding: 4px 7px; font-size: 13px;
@@ -243,7 +248,10 @@
       <div class="title">vyibc-auto-parse</div>
       <div class="subtitle" id="platformSubtitle">抖音 Cookie 管理</div>
     </div>
-    <button class="sync-icon-btn" id="manualSyncBtn" title="立即同步到发布平台">☁</button>
+    <div class="header-actions">
+      <button class="sync-icon-btn" id="serverConfigBtn" title="配置解析服务器地址">⚙</button>
+      <button class="sync-icon-btn" id="manualSyncBtn" title="立即远程同步（解析平台 + 凭证库）">☁</button>
+    </div>
   </div>
 
   <!-- Platform Tabs -->
@@ -301,17 +309,17 @@
         </span>
       </div>
       <div class="status-row">
-        <span class="status-label">服务器 Cookie</span>
+        <span class="status-label">解析平台 Cookie</span>
         <span id="serverStatus" class="badge badge-gray">
           <span class="dot dot-gray"></span> 未知
         </span>
       </div>
       <div class="status-row">
-        <span class="status-label">上次同步（发布平台）</span>
+        <span class="status-label">上次远程同步</span>
         <span id="lastPublishSync" class="status-value">—</span>
       </div>
       <div class="status-row" style="margin-top:8px;padding-top:8px;border-top:1px solid #2a2a2b;">
-        <span class="status-label">发布平台凭证</span>
+        <span class="status-label">远程凭证 ID</span>
         <span id="clientIdDisplay" class="status-value" style="font-family:monospace;font-size:10px;color:#e94d8a;cursor:pointer;" title="点击复制">—</span>
       </div>
     </div>

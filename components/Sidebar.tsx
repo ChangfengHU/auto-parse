@@ -35,6 +35,25 @@ const NAV = [
     ),
   },
   {
+    href: '/ads-dispatcher',
+    label: '调度任务',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+      </svg>
+    ),
+  },
+  {
+    href: '/visual-story',
+    label: '视觉故事',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M5 6.5A2.5 2.5 0 017.5 4H19v14H7.5A2.5 2.5 0 015 15.5v-9z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8.5 8h7M8.5 12h5M5 15.5A2.5 2.5 0 017.5 13H19" />
+      </svg>
+    ),
+  },
+  {
     href: '/topic-ideas',
     label: '今日选题',
     icon: (

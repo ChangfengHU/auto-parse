@@ -1,4 +1,5 @@
-const SERVER = 'https://parse.vyibc.com';
+const DEFAULT_SERVER = 'https://parse.vyibc.com';
+const PARSE_SERVER_KEY = 'parseServerBase';
 
 // ── 全局状态 ───────────────────────────────────────────────
 let currentPlatform = 'douyin'; // 'douyin' | 'xhs' | 'gemini'
@@ -31,10 +32,28 @@ function getPlatformName(platform) {
   return '抖音';
 }
 
-function getCookieApiUrl(platform) {
-  if (platform === 'xhs') return `${SERVER}/api/analysis/xhs/cookie`;
-  if (platform === 'gemini') return `${SERVER}/api/analysis/gemini/cookie`;
-  return `${SERVER}/api/cookie`;
+function normalizeServerBase(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return null;
+  const withProto = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const u = new URL(withProto);
+    return `${u.protocol}//${u.host}`;
+  } catch {
+    return null;
+  }
+}
+
+async function getServerBase() {
+  const store = await chrome.storage.local.get(PARSE_SERVER_KEY);
+  return normalizeServerBase(store[PARSE_SERVER_KEY]) || DEFAULT_SERVER;
+}
+
+async function getCookieApiUrl(platform) {
+  const server = await getServerBase();
+  if (platform === 'xhs') return `${server}/api/analysis/xhs/cookie`;
+  if (platform === 'gemini') return `${server}/api/analysis/gemini/cookie`;
+  return `${server}/api/cookie`;
 }
 
 async function getCurrentClientId(platform) {
@@ -283,6 +302,9 @@ async function checkLoginStatus() {
   const el = document.getElementById('loginStatus');
   el.className = 'badge badge-gray';
   el.innerHTML = '<span class="dot dot-gray"></span> 验证中...';
+  const lastLoginStateKey = `lastLoginState:${currentPlatform}`;
+  const stateStore = await chrome.storage.local.get([lastLoginStateKey]);
+  const lastLoginState = !!stateStore[lastLoginStateKey];
 
   if (currentPlatform === 'xhs') {
     // 小红书：检查是否读取到了 cookies
@@ -295,6 +317,22 @@ async function checkLoginStatus() {
     } else {
       el.className = 'badge badge-red';
       el.innerHTML = '<span class="dot dot-red"></span> 未登录';
+    }
+    await chrome.storage.local.set({ [lastLoginStateKey]: hasSession });
+    if (!lastLoginState && hasSession) {
+      showToast('🔄 检测到小红书登录，正在自动同步...');
+      chrome.runtime.sendMessage({ type: 'AUTO_SYNC_ON_LOGIN', platform: 'xhs' }, syncRes => {
+        if (syncRes?.ok) {
+          const now = Date.now();
+          chrome.storage.local.set({ lastPublishSync: now });
+          const syncEl = document.getElementById('lastPublishSync');
+          if (syncEl) syncEl.textContent = formatTime(now);
+          showToast('✅ 小红书已自动远程同步');
+          checkServerStatus();
+        } else {
+          showToast('❌ 小红书自动同步失败');
+        }
+      });
     }
     return hasSession;
   }
@@ -311,9 +349,6 @@ async function checkLoginStatus() {
     }
     return hasSession;
   }
-
-  // 抖音：读取上次记录的登录状态
-  const { lastLoginState } = await chrome.storage.local.get('lastLoginState');
 
   return new Promise(resolve => {
     chrome.runtime.sendMessage({ type: 'CHECK_LOGIN_STATUS' }, async res => {
@@ -334,7 +369,7 @@ async function checkLoginStatus() {
       }
 
       // 持久化当前状态
-      await chrome.storage.local.set({ lastLoginState: nowLoggedIn });
+      await chrome.storage.local.set({ [lastLoginStateKey]: nowLoggedIn });
 
       // 检测到"未登录 → 已登录（已验证）"：立即同步到 Supabase + 解析服务器
       if (!lastLoginState && nowLoggedIn && res?.reason === 'ok') {
@@ -345,7 +380,7 @@ async function checkLoginStatus() {
             chrome.storage.local.set({ lastPublishSync: now });
             const syncEl = document.getElementById('lastPublishSync');
             if (syncEl) syncEl.textContent = formatTime(now);
-            showToast('✅ 已自动同步到发布平台');
+            showToast('✅ 已自动远程同步');
             checkServerStatus();
           }
         });
@@ -413,12 +448,12 @@ async function manualSyncToPublish() {
   btn.disabled = true;
   btn.textContent = '⟳';
 
-  let cookies, cookieStr, apiUrl;
+  let cookies, cookieStr;
   const platformClientId = await getCurrentClientId(currentPlatform);
+  const apiUrl = await getCookieApiUrl(currentPlatform);
   if (currentPlatform === 'douyin') {
     cookies = await getDouyinCookies();
     cookieStr = cookiesToString(cookies);
-    apiUrl = getCookieApiUrl('douyin');
     if (!cookieStr || !cookieStr.includes('sessionid=')) {
       showToast('未检测到抖音登录，无法同步');
       btn.disabled = false; btn.textContent = '☁';
@@ -427,7 +462,6 @@ async function manualSyncToPublish() {
   } else if (currentPlatform === 'xhs') {
     cookies = await getXhsCookies();
     cookieStr = cookiesToString(cookies);
-    apiUrl = getCookieApiUrl('xhs');
     if (!cookieStr || cookieStr.length === 0) {
       showToast('未检测到小红书登录，无法同步');
       btn.disabled = false; btn.textContent = '☁';
@@ -436,7 +470,6 @@ async function manualSyncToPublish() {
   } else {
     cookies = await getGeminiCookies();
     cookieStr = cookiesToString(cookies);
-    apiUrl = getCookieApiUrl('gemini');
     if (!cookieStr || cookieStr.length === 0) {
       showToast('未检测到 Gemini 登录信息，无法同步');
       btn.disabled = false; btn.textContent = '☁';
@@ -444,7 +477,7 @@ async function manualSyncToPublish() {
     }
   }
 
-  // 同时同步两个目标（抖音同时同步解析服务器和Supabase，小红书只同步解析服务器）
+  // 同时同步两个目标（抖音和小红书都同步解析服务器+Supabase）
   const tasks = [
     // 1. 解析服务器（服务器 Cookie）
     fetch(apiUrl, {
@@ -454,11 +487,11 @@ async function manualSyncToPublish() {
     }).then(r => r.json()).catch(() => null),
   ];
 
-  // 2. 抖音额外同步发布平台 Supabase
-  if (currentPlatform === 'douyin') {
+  // 2. 抖音/小红书同步发布平台 Supabase
+  if (currentPlatform === 'douyin' || currentPlatform === 'xhs') {
     tasks.push(
       new Promise(resolve => {
-        chrome.runtime.sendMessage({ type: 'SYNC_TO_SUPABASE', cookieStr }, resolve);
+        chrome.runtime.sendMessage({ type: 'SYNC_TO_SUPABASE', cookieStr, platform: currentPlatform }, resolve);
       })
     );
   }
@@ -468,7 +501,8 @@ async function manualSyncToPublish() {
   const supabaseRes = results[1];
 
   const parseOk = parseRes?.success === true || parseRes?.ok === true;
-  const supabaseOk = currentPlatform !== 'douyin' || supabaseRes?.ok === true;
+  const needsSupabase = currentPlatform === 'douyin' || currentPlatform === 'xhs';
+  const supabaseOk = !needsSupabase || supabaseRes?.ok === true;
 
   if (parseOk || supabaseOk) {
     const now = Date.now();
@@ -476,8 +510,8 @@ async function manualSyncToPublish() {
     const el = document.getElementById('lastPublishSync');
     if (el) el.textContent = formatTime(now);
     const msg = parseOk && supabaseOk ? '✅ 全部同步成功'
-      : parseOk ? '✅ 解析服务器已同步（发布平台失败）'
-      : '✅ 发布平台已同步（解析服务器失败）';
+      : parseOk ? '✅ 解析平台已同步（凭证库失败）'
+      : '✅ 凭证库已同步（解析平台失败）';
     showToast(msg);
     checkServerStatus();
   } else {
@@ -492,7 +526,7 @@ async function checkServerStatus() {
   const el = document.getElementById('serverStatus');
   if (!el) return;
   try {
-    const apiUrl = getCookieApiUrl(currentPlatform);
+    const apiUrl = await getCookieApiUrl(currentPlatform);
     const res = await fetch(apiUrl, { cache: 'no-store' });
     const data = await res.json();
     const valid = currentPlatform === 'douyin' ? data.valid : data.set;
@@ -511,6 +545,30 @@ async function checkServerStatus() {
     el.className = 'badge badge-gray';
     el.innerHTML = '<span class="dot dot-gray"></span> 未知';
   }
+}
+
+async function configureParseServer() {
+  const current = await getServerBase();
+  const input = window.prompt(
+    '配置解析服务器地址（例如：https://parse.vyibc.com 或 http://127.0.0.1:1007）',
+    current
+  );
+  if (input === null) return;
+  const trimmed = input.trim();
+  if (!trimmed) {
+    await chrome.storage.local.set({ [PARSE_SERVER_KEY]: DEFAULT_SERVER });
+    showToast(`✅ 已恢复默认解析服务器: ${DEFAULT_SERVER}`, 3500);
+    await checkServerStatus();
+    return;
+  }
+  const normalized = normalizeServerBase(trimmed);
+  if (!normalized) {
+    showToast('❌ 地址格式无效');
+    return;
+  }
+  await chrome.storage.local.set({ [PARSE_SERVER_KEY]: normalized });
+  showToast(`✅ 解析服务器已更新: ${normalized}`, 3500);
+  await checkServerStatus();
 }
 
 // ── 切换平台 ──────────────────────────────────────────────
@@ -593,4 +651,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadClientId();
   document.getElementById('manualSyncBtn')?.addEventListener('click', manualSyncToPublish);
+  document.getElementById('serverConfigBtn')?.addEventListener('click', configureParseServer);
 });

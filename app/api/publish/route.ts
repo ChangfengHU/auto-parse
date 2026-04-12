@@ -44,8 +44,8 @@ export async function POST(req: NextRequest) {
         let clientIdFailed = false; // clientId 提供了但 Supabase 没拿到数据
         if (clientId && !resolvedCookieStr) {
           try {
-            const SUPABASE_URL = process.env.SUPABASE_URL || 'https://okkgchwzppghiyfgmrlj.supabase.co';
-            const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ra2djaHd6cHBnaGl5ZmdtcmxqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0OTY1NDA1MCwiZXhwIjoyMDY1MjMwMDUwfQ.tyKEsDr9lq2WtowiN0lBwKU2sxkKdRk6phBswiK88rE';
+            const SUPABASE_URL = process.env.SUPABASE_URL || '';
+            const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
             const r = await fetch(`${SUPABASE_URL}/rest/v1/douyin_sessions?client_id=eq.${encodeURIComponent(clientId)}&select=cookie_str&limit=1`, {
               headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
             });

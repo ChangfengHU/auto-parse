@@ -11,6 +11,7 @@ const NODE_ICONS: Record<string, string> = {
   screenshot: '📸', file_upload: '📤', wait_condition: '⏳', qrcode: '📱',
   vertex_ai: '🖼️',
   topic_picker_agent: '🧠',
+  agent_react: '🤖',
 };
 
 const NODE_COLORS: Record<string, string> = {
@@ -19,6 +20,7 @@ const NODE_COLORS: Record<string, string> = {
   wait_condition: 'bg-yellow-500', qrcode: 'bg-pink-500',
   vertex_ai: 'bg-indigo-500',
   topic_picker_agent: 'bg-emerald-500',
+  agent_react: 'bg-teal-500',
 };
 
 export default function WorkflowsPage() {
