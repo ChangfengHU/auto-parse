@@ -56,9 +56,11 @@ const DEFAULT_ADS_BROWSER_INSTANCE_ID = 'k1b908rw';
 const DEFAULT_TOPIC_GOAL =
   '给我当前最具价值的 3 个选题，目标是提升曝光量、播放量和粉丝增长；优先抖音语境，可直接执行落地';
 const DEFAULT_TOPIC_SOURCES = 'douyin,bilibili,baidu,toutiao,thepaper';
+const DEFAULT_SOURCE_IMAGE_URL =
+  'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a9/Example.jpg/800px-Example.jpg';
 const DEFAULT_SOURCE_IMAGE_URLS = JSON.stringify([
-  'https://articel.oss-cn-hangzhou.aliyuncs.com/uploads/2026/04/06/0e6ad92b-bdbe-4c6d-b5fd-03772025de21.jpeg',
-  'https://articel.oss-cn-hangzhou.aliyuncs.com/uploads/2026/04/06/ce5ae766-d1e1-43a6-ba79-b7d671f1a487.jpeg',
+  DEFAULT_SOURCE_IMAGE_URL,
+  'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/640px-Fronalpstock_big.jpg',
 ]);
 const STANDARD_CONTEXT_KEYS = ['videoUrl', 'title', 'tags', 'clientId'] as const;
 function ts() { return new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
@@ -118,6 +120,7 @@ function fieldPlaceholder(key: string) {
     key === 'goal' ? DEFAULT_TOPIC_GOAL :
     key === 'count' ? '3' :
     key === 'sources' ? DEFAULT_TOPIC_SOURCES :
+    key === 'sourceImageUrl' ? DEFAULT_SOURCE_IMAGE_URL :
     key === 'sourceImageUrls' ? DEFAULT_SOURCE_IMAGE_URLS :
     `请输入 ${key}`
   );
@@ -2125,6 +2128,10 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
       }
       if (key === 'sources') {
         seeded[key] = DEFAULT_TOPIC_SOURCES;
+        continue;
+      }
+      if (key === 'sourceImageUrl') {
+        seeded[key] = DEFAULT_SOURCE_IMAGE_URL;
         continue;
       }
       if (key === 'sourceImageUrls') {

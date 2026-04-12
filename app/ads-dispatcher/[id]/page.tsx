@@ -18,6 +18,7 @@ interface DispatcherItem {
   attempts: number;
   browserInstanceId?: string;
   batchTaskId?: string;
+  batchTaskHistory?: string[];
   mediaUrls: string[];
   imageUrls: string[];
   primaryMediaType?: 'image' | 'video' | 'unknown';
@@ -166,6 +167,284 @@ function truncate(s: string, n = 60) {
   return s.length > n ? s.slice(0, n) + '…' : s;
 }
 
+/* ─── Child task types ─── */
+interface Checkpoint {
+  stepIndex: number;
+  name: string;
+  status: 'running' | 'ok' | 'error' | 'cancelled';
+  message: string;
+  timestamp: string;
+}
+
+interface WebImageTask {
+  id: string;
+  status: string;
+  workflowName: string;
+  error?: string;
+  startedAt?: string;
+  endedAt?: string;
+  checkpoints: Checkpoint[];
+}
+
+interface BatchTaskRun {
+  index: number;
+  taskId?: string;
+  browserInstanceId: string;
+  status: string;
+  attempts: number;
+  primaryMediaUrl: string | null;
+  primaryMediaType: string | null;
+  primaryImageUrl: string | null;
+  error?: string;
+  startedAt?: string;
+  endedAt?: string;
+}
+
+interface BatchTask {
+  id: string;
+  status: string;
+  workflowName: string;
+  startedAt?: string;
+  endedAt?: string;
+  result?: { runs: BatchTaskRun[] };
+}
+
+const CP_ICON: Record<string, string> = { ok: '✓', error: '✗', cancelled: '✕', running: '⟳' };
+const CP_COLOR: Record<string, string> = {
+  ok: 'text-green-400',
+  error: 'text-red-400',
+  cancelled: 'text-gray-400',
+  running: 'text-blue-400',
+};
+
+function CheckpointTimeline({ checkpoints }: { checkpoints: Checkpoint[] }) {
+  // Keep last checkpoint per stepIndex (running → ok/error)
+  const stepMap = new Map<number, Checkpoint>();
+  for (const cp of checkpoints) stepMap.set(cp.stepIndex, cp);
+  const steps = Array.from(stepMap.values()).sort((a, b) => a.stepIndex - b.stepIndex);
+
+  if (steps.length === 0) {
+    return <div className="text-xs text-muted-foreground">等待工作流启动…</div>;
+  }
+
+  return (
+    <div className="space-y-1">
+      {steps.map(cp => (
+        <div key={cp.stepIndex} className="flex items-start gap-2 text-xs">
+          <span className={`shrink-0 w-4 text-center font-bold ${CP_COLOR[cp.status] ?? 'text-muted-foreground'} ${cp.status === 'running' ? 'animate-spin' : ''}`}>
+            {CP_ICON[cp.status] ?? '·'}
+          </span>
+          <span className="shrink-0 text-muted-foreground w-5 text-right">{cp.stepIndex + 1}</span>
+          <span className={`font-medium ${cp.status === 'running' ? 'text-foreground' : cp.status === 'ok' ? 'text-foreground/70' : 'text-foreground'}`}>
+            {cp.name}
+          </span>
+          <span className={`flex-1 ${CP_COLOR[cp.status] ?? 'text-muted-foreground'}`}>{cp.message}</span>
+          <span className="shrink-0 text-muted-foreground tabular-nums">
+            {new Date(cp.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function HistoricalAttempt({ attemptIndex, batchTaskId }: { attemptIndex: number; batchTaskId: string }) {
+  const [detail, setDetail] = useState<{ status: string; error?: string; workflowName?: string; startedAt?: string; endedAt?: string } | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/gemini-web/image/ads-batch/tasks/${batchTaskId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((bt: any) => {
+        if (!bt) return;
+        const run = bt.result?.runs?.[0];
+        setDetail({
+          status: bt.status,
+          workflowName: bt.workflowName,
+          error: run?.error || bt.error,
+          startedAt: bt.startedAt,
+          endedAt: bt.endedAt,
+        });
+      })
+      .catch(() => null);
+  }, [batchTaskId]);
+
+  return (
+    <div className="flex items-start gap-3 bg-red-500/5 border border-red-500/15 rounded-lg px-3 py-2 text-xs">
+      <span className="shrink-0 text-red-400 font-medium">第 {attemptIndex} 次</span>
+      <div className="flex-1 min-w-0 space-y-0.5">
+        <div className="flex items-center gap-2">
+          <code className="font-mono text-muted-foreground">{batchTaskId.slice(0, 12)}…</code>
+          {detail?.workflowName && <span className="text-muted-foreground">{detail.workflowName}</span>}
+          {detail && <StatusBadge status={detail.status} />}
+        </div>
+        {detail?.error && (
+          <div className="text-red-400 break-all">{detail.error}</div>
+        )}
+        {detail?.endedAt && (
+          <div className="text-muted-foreground">结束：{formatTime(detail.endedAt)}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ItemExpandedDetail({ item }: { item: DispatcherItem }) {
+  const [batchTask, setBatchTask] = useState<BatchTask | null>(null);
+  const [webTask, setWebTask] = useState<WebImageTask | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  const fetchAll = useCallback(async () => {
+    if (!item.batchTaskId) return;
+    try {
+      const bRes = await fetch(`/api/gemini-web/image/ads-batch/tasks/${item.batchTaskId}`);
+      if (!bRes.ok) { setFetchError(`batch task ${bRes.status}`); return; }
+      const bt: BatchTask = await bRes.json();
+      setBatchTask(bt);
+
+      const run = bt.result?.runs?.[0];
+      if (run?.taskId) {
+        const wRes = await fetch(`/api/gemini-web/image/tasks/${run.taskId}`);
+        if (wRes.ok) setWebTask(await wRes.json());
+      }
+      setFetchError(null);
+    } catch (e) {
+      setFetchError(String(e));
+    }
+  }, [item.batchTaskId]);
+
+  useEffect(() => { void fetchAll(); }, [fetchAll]);
+
+  // Poll while running
+  const isActive = item.status === 'running' ||
+    (webTask !== null && !['success', 'failed', 'cancelled'].includes(webTask.status));
+  useEffect(() => {
+    if (!isActive) return;
+    const t = setInterval(() => void fetchAll(), 2000);
+    return () => clearInterval(t);
+  }, [isActive, fetchAll]);
+
+  const run = batchTask?.result?.runs?.[0];
+
+  return (
+    <div className="space-y-4 text-xs">
+      {/* Meta row */}
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted-foreground">
+        <span>开始：{formatTime(item.startedAt)}</span>
+        <span>结束：{formatTime(item.endedAt)}</span>
+        {item.browserInstanceId && (
+          <span>实例：<code className="font-mono text-foreground">{item.browserInstanceId}</code></span>
+        )}
+        {item.batchTaskId && (
+          <span>Batch：<code className="font-mono text-primary">{item.batchTaskId.slice(0, 12)}…</code></span>
+        )}
+        {run?.taskId && (
+          <span>WebTask：<code className="font-mono text-primary">{run.taskId.slice(0, 12)}…</code></span>
+        )}
+        {batchTask && (
+          <span>工作流：<span className="text-foreground">{batchTask.workflowName}</span></span>
+        )}
+      </div>
+
+      {/* 历史尝试记录 */}
+      {item.batchTaskHistory && item.batchTaskHistory.length > 0 && (
+        <div>
+          <div className="font-medium text-muted-foreground mb-2">历史尝试（{item.batchTaskHistory.length} 次失败）</div>
+          <div className="space-y-1.5">
+            {item.batchTaskHistory.map((prevBatchId, i) => (
+              <HistoricalAttempt key={prevBatchId} attemptIndex={i + 1} batchTaskId={prevBatchId} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Prompt history */}
+      {item.promptHistory && item.promptHistory.length > 1 && (
+        <div>
+          <div className="text-muted-foreground mb-1.5 font-medium">Prompt 改写历史</div>
+          <div className="space-y-1.5">
+            {item.promptHistory.map((p, i) => (
+              <div key={i} className="flex gap-2">
+                <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${i === 0 ? 'bg-muted text-muted-foreground' : 'bg-amber-500/20 text-amber-400'}`}>
+                  {i === 0 ? '原始' : `改写 ${i}`}
+                </span>
+                <span className="text-foreground/80 leading-relaxed">{p}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Workflow checkpoint timeline */}
+      {item.batchTaskId && (
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <span className="font-medium text-muted-foreground">工作流执行日志</span>
+            {isActive && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-blue-400">
+                <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse" />
+                实时
+              </span>
+            )}
+            {webTask && (
+              <StatusBadge status={webTask.status} />
+            )}
+          </div>
+          {fetchError ? (
+            <div className="text-red-400">{fetchError}</div>
+          ) : !batchTask ? (
+            <div className="text-muted-foreground">加载中…</div>
+          ) : !run?.taskId ? (
+            <div className="text-muted-foreground">子任务启动中…</div>
+          ) : !webTask ? (
+            <div className="text-muted-foreground">加载工作流详情…</div>
+          ) : (
+            <div className="bg-muted/20 rounded-lg p-3 border border-border">
+              <CheckpointTimeline checkpoints={webTask.checkpoints} />
+              {webTask.status === 'running' && (
+                <div className="mt-2 text-blue-400 flex items-center gap-1.5">
+                  <span className="animate-spin">⟳</span>
+                  <span>执行中…</span>
+                </div>
+              )}
+              {webTask.error && (
+                <div className="mt-2 bg-red-500/10 border border-red-500/20 rounded p-2 text-red-400">
+                  {webTask.error}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Media result */}
+      {(item.mediaUrls?.length > 0 || item.imageUrls?.length > 0) && (
+        <div>
+          <div className="font-medium text-muted-foreground mb-1.5">生成结果</div>
+          <div className="flex flex-wrap gap-3">
+            {(item.mediaUrls?.length > 0 ? item.mediaUrls : item.imageUrls).map((url, i) => (
+              <a key={i} href={url} target="_blank" rel="noreferrer" className="group">
+                <img
+                  src={url}
+                  alt={`result-${i}`}
+                  className="w-24 h-24 object-cover rounded-lg border border-border group-hover:border-primary transition-colors"
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Error detail */}
+      {item.error && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-2 text-red-400">
+          {item.error}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Sub-components ─── */
 function ProgressSection({ summary }: { summary: TaskSummary }) {
   const done = summary.success + summary.failed + summary.cancelled;
@@ -224,51 +503,8 @@ function ItemRow({ item, expanded, onToggle }: { item: DispatcherItem; expanded:
       </tr>
       {expanded && (
         <tr className="bg-muted/20">
-          <td colSpan={7} className="px-4 py-3">
-            <div className="space-y-3 text-xs">
-              {/* Timestamps */}
-              <div className="flex gap-6 text-muted-foreground">
-                <span>开始：{formatTime(item.startedAt)}</span>
-                <span>结束：{formatTime(item.endedAt)}</span>
-                {item.browserInstanceId && <span>实例：<code className="font-mono">{item.browserInstanceId}</code></span>}
-                {item.batchTaskId && <span>子任务：<code className="font-mono text-primary">{item.batchTaskId.slice(0, 12)}…</code></span>}
-              </div>
-              {/* Prompt history */}
-              {item.promptHistory && item.promptHistory.length > 1 && (
-                <div>
-                  <div className="text-muted-foreground mb-1.5 font-medium">Prompt 改写历史</div>
-                  <div className="space-y-1">
-                    {item.promptHistory.map((p, i) => (
-                      <div key={i} className="flex gap-2">
-                        <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${i === 0 ? 'bg-muted text-muted-foreground' : 'bg-amber-500/20 text-amber-400'}`}>
-                          {i === 0 ? '原始' : `改写 ${i}`}
-                        </span>
-                        <span className="text-foreground/80 leading-relaxed">{p}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {/* Media URLs */}
-              {(item.mediaUrls?.length > 0 || item.imageUrls?.length > 0) && (
-                <div>
-                  <div className="text-muted-foreground mb-1.5 font-medium">媒体文件</div>
-                  <div className="flex flex-wrap gap-2">
-                    {(item.mediaUrls?.length > 0 ? item.mediaUrls : item.imageUrls).map((url, i) => (
-                      <a key={i} href={url} target="_blank" rel="noreferrer" className="text-primary hover:underline truncate max-w-[300px]">
-                        {url.split('/').pop() || url}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {/* Error detail */}
-              {item.error && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-2 text-red-400">
-                  {item.error}
-                </div>
-              )}
-            </div>
+          <td colSpan={7} className="px-5 py-4">
+            <ItemExpandedDetail item={item} />
           </td>
         </tr>
       )}

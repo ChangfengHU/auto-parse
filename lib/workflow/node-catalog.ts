@@ -229,7 +229,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
     desc: '将图片 URL 下载后注入剪贴板，并在目标输入框执行粘贴（用于 Gemini 图片编辑）',
     defaultParams: {
       imageUrls: [],
-      imageUrl: '{{imageUrl}}',
+      imageUrl: '{{sourceImageUrl}}',
       targetSelector: 'div[contenteditable="true"]',
       waitAfterPaste: 1200,
       // 默认开启“真校验 + 自动降级”，避免出现“日志成功但其实没上传”的假阳性
@@ -1635,5 +1635,7 @@ export const WORKFLOW_VARS_META: Record<string, string> = {
   goal: '任务目标（例如：最具价值的 3 个选题）',
   count: '输出数量（建议 3-5）',
   sources: '热点来源列表（数组或逗号分隔）',
+  sourceImageUrl: '参考图 URL（单张）',
+  sourceImageUrls: '参考图 URL 列表（JSON 数组或逗号分隔）',
   topicIdeas: '选题节点输出结果（JSON 字符串）',
 };

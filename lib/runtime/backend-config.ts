@@ -4,6 +4,8 @@ import { join } from 'path';
 
 export type XhsBackendSource = 'cli' | 'http';
 
+export type FastFailStrategy = 'llm_rewrite' | 'direct_retry' | 'skip';
+
 export interface RuntimeBackendConfig {
   xhs: {
     source: XhsBackendSource;
@@ -12,6 +14,7 @@ export interface RuntimeBackendConfig {
   };
   adsDispatcher: {
     maxQueueSize: number;
+    fastFailStrategy: FastFailStrategy;
   };
   browser: {
     headless: boolean;
@@ -51,6 +54,13 @@ function normalizeMaxQueueSize(value: unknown): number {
   return Math.max(1, Math.min(200, parsed));
 }
 
+function normalizeFastFailStrategy(value: unknown): FastFailStrategy {
+  if (value === 'llm_rewrite' || value === 'direct_retry' || value === 'skip') return value;
+  const env = process.env.GEMINI_ADS_DISPATCHER_FAST_FAIL_STRATEGY;
+  if (env === 'llm_rewrite' || env === 'direct_retry' || env === 'skip') return env;
+  return 'llm_rewrite';
+}
+
 function normalizeHeadless(value: unknown): boolean {
   if (value === true || value === 'true' || value === 1 || value === '1') return true;
   if (value === false || value === 'false' || value === 0 || value === '0') return false;
@@ -66,6 +76,7 @@ function buildDefaultConfig(): RuntimeBackendConfig {
     },
     adsDispatcher: {
       maxQueueSize: normalizeMaxQueueSize(undefined),
+      fastFailStrategy: normalizeFastFailStrategy(undefined),
     },
     browser: {
       headless: normalizeHeadless(undefined),
@@ -84,6 +95,7 @@ function mergeConfig(partial?: PartialRuntimeBackendConfig): RuntimeBackendConfi
     },
     adsDispatcher: {
       maxQueueSize: normalizeMaxQueueSize(partial?.adsDispatcher?.maxQueueSize ?? defaults.adsDispatcher.maxQueueSize),
+      fastFailStrategy: normalizeFastFailStrategy(partial?.adsDispatcher?.fastFailStrategy ?? defaults.adsDispatcher.fastFailStrategy),
     },
     browser: {
       headless: normalizeHeadless(partial?.browser?.headless ?? defaults.browser.headless),

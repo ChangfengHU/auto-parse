@@ -90,6 +90,8 @@ export interface GeminiAdsDispatcherItem {
   attempts: number;
   browserInstanceId?: string;
   batchTaskId?: string;
+  /** 历史所有 batch task IDs（按尝试顺序，不含当前 batchTaskId） */
+  batchTaskHistory?: string[];
   mediaUrls: string[];
   imageUrls: string[];
   primaryMediaType?: 'image' | 'video' | 'unknown';
@@ -1249,6 +1251,9 @@ async function assignNextItem(taskId: string, instanceId: string) {
           : {
               ...item,
               batchTaskId: child.id,
+              batchTaskHistory: item.batchTaskId
+                ? [...(item.batchTaskHistory ?? []), item.batchTaskId]
+                : (item.batchTaskHistory ?? []),
             }
       );
       const instances = task.instances.map((item) =>
@@ -1405,7 +1410,14 @@ async function reconcileRunningInstances(taskId: string) {
         ? undefined
         : run?.error || (mediaUrls.length === 0 ? '任务未返回媒体 URL' : '子任务失败');
     const item = fresh.items.find((entry) => entry.id === currentItemId);
-    const exhausted = !success && !cancelled && (item?.attempts || 0) >= fresh.settings.maxAttemptsPerPrompt;
+
+    // Fast-fail 策略处理
+    const isFastFail = !success && !cancelled && Boolean(message?.includes('FAIL_FAST:'));
+    const fastFailStrategy = isFastFail
+      ? (getRuntimeBackendConfigSync().adsDispatcher?.fastFailStrategy ?? 'llm_rewrite')
+      : 'direct_retry';
+    const forceExhausted = isFastFail && fastFailStrategy === 'skip';
+    const exhausted = !success && !cancelled && (forceExhausted || (item?.attempts || 0) >= fresh.settings.maxAttemptsPerPrompt);
     const endedAt = nowIso();
 
     trace(taskId, 'child_task_terminal', {
@@ -1426,7 +1438,21 @@ async function reconcileRunningInstances(taskId: string) {
     let retryPromptHistory = item ? normalizePromptHistory(item) : undefined;
     let retryOptimizedCount = item?.promptOptimizedCount;
     if (!success && !cancelled && !exhausted && item) {
-      const opt = await computeRetryPromptWithOptimization(taskId, fresh, item, message || '子任务失败');
+      // fast-fail + llm_rewrite 策略：强制 LLM 改写，即使 optimizePromptOnRetry=false
+      const forceLlmRewrite = isFastFail && fastFailStrategy === 'llm_rewrite';
+      const taskForOpt = forceLlmRewrite && !fresh.settings.optimizePromptOnRetry
+        ? { ...fresh, settings: { ...fresh.settings, optimizePromptOnRetry: true } }
+        : fresh;
+      if (isFastFail && fastFailStrategy !== 'direct_retry') {
+        trace(taskId, 'fast_fail_retry_strategy', {
+          itemId: currentItemId,
+          strategy: fastFailStrategy,
+          forceLlmRewrite,
+          attempts: item.attempts,
+          message,
+        });
+      }
+      const opt = await computeRetryPromptWithOptimization(taskId, taskForOpt, item, message || '子任务失败');
       retryPrompt = opt.prompt;
       retryPromptHistory = opt.history;
       retryOptimizedCount = opt.optimizedCount;
