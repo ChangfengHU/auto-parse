@@ -48,7 +48,19 @@ async function detectFailFast(
   page: Page,
   params: ExtractImageClipboardParams
 ): Promise<string | null> {
-  const includes = (params.failFastTextIncludes ?? []).map(s => String(s).trim()).filter(Boolean);
+  // 安全处理 failFastTextIncludes：支持数组、对象或其他类型
+  let includes: string[] = [];
+  if (params.failFastTextIncludes) {
+    if (Array.isArray(params.failFastTextIncludes)) {
+      includes = params.failFastTextIncludes.map(s => String(s).trim()).filter(Boolean);
+    } else if (typeof params.failFastTextIncludes === 'object') {
+      // 如果被误传成了对象，尝试从对象中提取数组
+      const val = Object.values(params.failFastTextIncludes as Record<string, unknown>);
+      if (Array.isArray(val) && val.length > 0) {
+        includes = val.map(s => String(s).trim()).filter(Boolean);
+      }
+    }
+  }
   const selector = String(params.failFastSelector ?? '').trim();
 
   if (selector) {

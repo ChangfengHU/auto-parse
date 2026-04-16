@@ -6,7 +6,7 @@ import type { NodeType } from './types';
 export interface ParamMeta {
   label: string       // 显示名称
   desc: string        // 悬浮说明
-  type: 'string' | 'number' | 'boolean' | 'selector' | 'url' | 'template' | 'array' | 'select'
+  type: 'string' | 'number' | 'boolean' | 'selector' | 'url' | 'template' | 'array' | 'select' | 'hotkey' | 'elements'
   required?: boolean
   example?: string
   options?: Array<{ label: string; value: string }>
@@ -154,7 +154,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
     icon: '👆',
     category: 'basic',
     desc: '点击页面上的按钮或链接。优先用 text（文字定位），其次用 selector',
-    defaultParams: { text: '', selector: '', useSelector: false },
+    defaultParams: { text: '', selector: '', useSelector: false, elements: [] },
     paramMeta: {
       useSelector: {
         label: '使用选择器模式',
@@ -171,6 +171,11 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         ...SELECTOR_META,
         required: false,
         desc: '元素的 CSS 选择器或 XPath。开启“选择器模式”后，点击时使用这个字段定位元素',
+      },
+      elements: {
+        label: '多候选元素',
+        desc: '💡 推荐：支持填写多个候选目标（文字或选择器）。执行时从上至下尝试，点击成功第一个即可。适用于中英文文案差异或 UI 变动。',
+        type: 'elements',
       },
       nth: {
         label: '第几个匹配',
@@ -228,9 +233,13 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
     category: 'basic',
     desc: '将图片 URL 下载后注入剪贴板，并在目标输入框执行粘贴（用于 Gemini 图片编辑）',
     defaultParams: {
-      imageUrls: [],
+      imageUrls: '{{sourceImageUrls}}',
       imageUrl: '{{sourceImageUrl}}',
+      mode: 'auto',
       targetSelector: 'div[contenteditable="true"]',
+      pasteHotkey: 'ControlOrMeta+V',
+      ensurePageFocused: true,
+      fallbackOnNoEffect: true,
       waitAfterPaste: 1200,
       // 默认开启“真校验 + 自动降级”，避免出现“日志成功但其实没上传”的假阳性
       verifyAttachment: true,
@@ -256,10 +265,39 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         required: false,
         example: 'http://articel.oss-cn-hangzhou.aliyuncs.com/xhs/feed-covers/xx.jpg',
       },
+      mode: {
+        label: '执行模式',
+        desc: 'auto=先尝试“剪贴板粘贴”，失败再自动上传；upload=直接上传（不走粘贴/快捷键）；paste=仅粘贴（不上传）',
+        type: 'select',
+        required: false,
+        options: [
+          { label: 'auto（推荐）', value: 'auto' },
+          { label: 'upload（直接上传）', value: 'upload' },
+          { label: 'paste（仅粘贴）', value: 'paste' },
+        ],
+        example: 'upload',
+      },
       targetSelector: {
         ...SELECTOR_META,
         required: false,
         desc: '接收粘贴动作的输入框选择器（会先点击聚焦再执行 Ctrl/Cmd+V）。为空则自动定位可输入框',
+      },
+      pasteHotkey: {
+        label: '粘贴快捷键（录入）',
+        desc: '点击后直接按下组合键即可录入。Esc=恢复 auto；Backspace/Delete=清空。推荐用 ControlOrMeta+V，跨 mac/Windows/Linux 更一致；auto=mac 用 Meta+V，其它用 Control+V。也可粘贴/手填 Meta+V / Control+V / ControlOrMeta+V 等（Playwright 键盘语法）',
+        type: 'hotkey',
+        required: false,
+        example: 'ControlOrMeta+V（推荐）或 auto',
+      },
+      ensurePageFocused: {
+        label: '确保页面聚焦',
+        desc: '默认开启。会尝试 page.bringToFront() + window.focus()，避免快捷键打到别处（AdsPower/远程调试时很常见）',
+        type: 'boolean',
+      },
+      fallbackOnNoEffect: {
+        label: '无效果时自动换键',
+        desc: '默认开启。比如 Meta+V 无效时自动再试 Control+V（或相反），成功后才继续；都失败才走上传降级',
+        type: 'boolean',
       },
       waitAfterPaste: {
         label: '粘贴后等待（ms）',
@@ -308,6 +346,83 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         desc: '把本次粘贴的源图片 URL 数组写入此变量，供后续节点复用',
         type: 'string',
         example: 'pastedImageUrls',
+      },
+    },
+  },
+
+  {
+    type: 'press_hotkey',
+    label: '快捷键',
+    icon: '⌨️',
+    category: 'basic',
+    desc: '聚焦到指定输入框后执行快捷键（用于验证键盘事件/选中/触发上传入口等）',
+    defaultParams: {
+      targetSelector: 'div[contenteditable="true"]',
+      hotkey: 'ControlOrMeta+A',
+      clickToFocus: true,
+      ensurePageFocused: true,
+      waitBefore: 0,
+      waitAfter: 200,
+      repeat: 1,
+      verifySelection: true,
+      fallbackOnNoEffect: true,
+      domSelectAllFallback: true,
+    },
+    paramMeta: {
+      targetSelector: {
+        ...SELECTOR_META,
+        required: false,
+        desc: '可选：先聚焦该元素再按快捷键；为空则直接在当前焦点执行按键',
+      },
+      hotkey: {
+        label: '快捷键（录入）',
+        desc: '点击后直接按下组合键即可录入。也可手动填 Playwright 键盘语法（如 Alt+A / ControlOrMeta+A / Meta+V）',
+        type: 'hotkey',
+        required: true,
+        example: 'Alt+A',
+      },
+      clickToFocus: {
+        label: '点击以聚焦',
+        desc: '默认开启。true=先 click；false=调用 focus() 聚焦（对某些元素更温和）',
+        type: 'boolean',
+      },
+      ensurePageFocused: {
+        label: '确保页面聚焦',
+        desc: '默认开启。会尝试 page.bringToFront() + window.focus()，避免快捷键打到别处（AdsPower/远程调试时很常见）',
+        type: 'boolean',
+      },
+      waitBefore: {
+        label: '按键前等待（ms）',
+        desc: '聚焦后，按键前额外等待时间',
+        type: 'number',
+        example: '0',
+      },
+      waitAfter: {
+        label: '按键后等待（ms）',
+        desc: '按键后额外等待时间',
+        type: 'number',
+        example: '200',
+      },
+      repeat: {
+        label: '重复次数',
+        desc: '重复按下快捷键的次数（用于连按）',
+        type: 'number',
+        example: '1',
+      },
+      verifySelection: {
+        label: '校验选区变化',
+        desc: '默认开启。会检测是否真的出现“选中内容”。如果没变化，将触发 fallback（例如 Meta/Control 替代、DOM 强制全选）',
+        type: 'boolean',
+      },
+      fallbackOnNoEffect: {
+        label: '无效果时自动换键',
+        desc: '默认开启。比如 Meta+A 无效时自动再试 Control+A（或相反），用于排查/兼容不同浏览器映射',
+        type: 'boolean',
+      },
+      domSelectAllFallback: {
+        label: 'DOM 强制全选兜底',
+        desc: '默认开启（仅对 A 生效）。在键盘无效时，直接用 Selection API 对目标元素全选，以验证“元素确实可被选中”',
+        type: 'boolean',
       },
     },
   },

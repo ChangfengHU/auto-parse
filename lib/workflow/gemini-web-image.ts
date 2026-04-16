@@ -94,6 +94,11 @@ function inferMediaKindFromUrl(value: string): 'image' | 'video' | 'unknown' {
   return v.includes('oss-') || v.includes('.aliyuncs.com') ? 'image' : 'unknown';
 }
 
+const INPUT_MEDIA_NODE_TYPES = new Set([
+  'paste_image_clipboard',
+  'file_upload',
+]);
+
 function collectStringsDeep(input: unknown, acc: Set<string>) {
   if (typeof input === 'string') {
     if (inferMediaKindFromUrl(input) !== 'unknown') acc.add(input.trim());
@@ -113,9 +118,23 @@ function collectStringsDeep(input: unknown, acc: Set<string>) {
 function collectMediaUrls(session: WorkflowSession): string[] {
   const urls = new Set<string>();
   for (const item of session.history) {
+    if (INPUT_MEDIA_NODE_TYPES.has(item.nodeType as string)) continue;
     collectStringsDeep(item.result.output, urls);
   }
-  collectStringsDeep(session.vars, urls);
+  if (urls.size > 0) return Array.from(urls);
+
+  // Fallback: 某些工作流可能只把最终结果写回 vars，没有显式输出到 history。
+  // 这里只读取“结果型”变量，避免把 sourceImageUrl/sourceImageUrls 之类的输入参考图带进去。
+  collectStringsDeep(
+    {
+      mediaUrl: session.vars.mediaUrl,
+      imageUrl: session.vars.imageUrl,
+      videoUrl: session.vars.videoUrl,
+      primaryMediaUrl: session.vars.primaryMediaUrl,
+      primaryImageUrl: session.vars.primaryImageUrl,
+    },
+    urls
+  );
   return Array.from(urls);
 }
 

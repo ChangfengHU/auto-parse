@@ -7,7 +7,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const { id } = await params;
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const reason = typeof body.reason === 'string' ? body.reason : undefined;
-  const task = cancelGeminiAdsDispatcherTask(id, reason);
+  const task = await cancelGeminiAdsDispatcherTask(id, reason);
   if (!task) {
     return NextResponse.json({ error: '任务不存在' }, { status: 404 });
   }

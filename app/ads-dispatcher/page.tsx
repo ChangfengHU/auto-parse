@@ -158,7 +158,13 @@ export default function AdsDispatcherPage() {
       if (!res.ok) throw new Error(await res.text());
       const task = await res.json();
       const s = task.settings ?? {};
-      const body: Record<string, unknown> = { prompts: task.prompts };
+      const runs = Array.isArray(task.items)
+        ? task.items.map((item: any) => ({
+            prompt: String(item?.prompt || ''),
+            sourceImageUrls: Array.isArray(item?.sourceImageUrls) ? item.sourceImageUrls : [],
+          }))
+        : [];
+      const body: Record<string, unknown> = runs.length > 0 ? { runs } : { prompts: task.prompts };
       if (s.instanceIds?.length) body.instanceIds = s.instanceIds;
       if (s.workflowId) body.workflowId = s.workflowId;
       if (s.promptVarName) body.promptVarName = s.promptVarName;

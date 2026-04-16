@@ -7,6 +7,7 @@ export type NodeType =
   | 'navigate'        // 基础：导航到 URL
   | 'text_input'      // 基础：文本填入
   | 'paste_image_clipboard' // 基础：将图片 URL 写入剪贴板并粘贴到目标输入区
+  | 'press_hotkey'    // 基础：执行快捷键（用于验证输入框聚焦/快捷键是否生效）
   | 'click'           // 基础：点击元素
   | 'scroll'          // 基础：滚动页面或滚动到元素
   | 'screenshot'      // 基础：截图快照
@@ -82,11 +83,42 @@ export interface TextInputParams {
   delay?: number    // 每字符延迟 ms（模拟人工输入，默认 0）
 }
 
+export interface PressHotkeyParams {
+  /** 可选：先聚焦该元素再按快捷键；为空则直接在当前焦点按键 */
+  targetSelector?: string
+  /** 要按下的快捷键（Playwright 键盘语法），例如 Alt+A / ControlOrMeta+A */
+  hotkey: string
+  /** 是否点击输入框以确保聚焦（默认 true） */
+  clickToFocus?: boolean
+  /** 是否尝试 bringToFront + window.focus（默认 true） */
+  ensurePageFocused?: boolean
+  /** 按键前等待（ms），默认 0 */
+  waitBefore?: number
+  /** 按键后等待（ms），默认 200 */
+  waitAfter?: number
+  /** 重复次数，默认 1 */
+  repeat?: number
+  /** 是否校验“选区确实发生变化”（默认 true）。失败时会走 fallback。 */
+  verifySelection?: boolean
+  /** 校验失败时：自动尝试 Meta/Control 的替代组合（默认 true） */
+  fallbackOnNoEffect?: boolean
+  /** 最后兜底：用 DOM Selection API 强制全选（默认 true，仅对 A 生效） */
+  domSelectAllFallback?: boolean
+}
+
 export interface PasteImageClipboardParams {
   imageUrl?: string
   imageUrls?: string[] | string
+  /** 执行模式：auto=先尝试粘贴，失败再上传；paste=仅粘贴；upload=仅上传（直接生成附件） */
+  mode?: 'auto' | 'paste' | 'upload'
   /** 优先使用该选择器定位输入框；为空时自动定位可输入框 */
   targetSelector?: string
+  /** 粘贴快捷键。auto=mac 用 Meta+V，其它用 Control+V；也可手动填如 Meta+V / Control+V / ControlOrMeta+V */
+  pasteHotkey?: string
+  /** 是否尝试 bringToFront + window.focus（默认 true） */
+  ensurePageFocused?: boolean
+  /** 校验失败时是否自动尝试 Meta/Control 的替代组合（默认 true） */
+  fallbackOnNoEffect?: boolean
   waitAfterPaste?: number
   /** 可选：粘贴/上传后用于校验“附件已出现”的选择器（为空则使用内置默认规则） */
   attachIndicatorSelector?: string
@@ -107,6 +139,11 @@ export interface ClickParams {
   useSelector?: boolean
   selector?: string
   text?: string     // 按文字找按钮（优先于 selector）
+  elements?: Array<{  // [NEW] 支持多个候选元素，由上至下尝试，成功一个即返回
+    text?: string
+    selector?: string
+    useSelector?: boolean
+  }>
   nth?: number      // 第几个匹配（默认 last）
   waitFor?: boolean // 等待元素出现（默认 true）
   timeout?: number

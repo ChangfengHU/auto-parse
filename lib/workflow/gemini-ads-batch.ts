@@ -20,6 +20,7 @@ interface BatchRunInput {
   browserInstanceId: string;
   prompt: string;
   browserWsUrl?: string;
+  sourceImageUrls?: string[] | string;
 }
 
 interface BatchRunState extends BatchRunInput {
@@ -178,11 +179,53 @@ async function resolveAdsWorkflow(workflowId?: string): Promise<WorkflowDef | nu
   return getWorkflow(byName.id);
 }
 
+function normalizeSourceImageUrls(value: unknown): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const pushToken = (token: string) => {
+    const trimmed = token.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+
+  const visit = (input: unknown) => {
+    if (Array.isArray(input)) {
+      for (const item of input) visit(item);
+      return;
+    }
+
+    const text = String(input || '').trim();
+    if (!text) return;
+
+    if (text.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          visit(parsed);
+          return;
+        }
+      } catch {
+        // fall through to split mode
+      }
+    }
+
+    for (const token of text.split(/[\n,]/)) {
+      pushToken(token);
+    }
+  };
+
+  visit(value);
+  return out;
+}
+
 function buildRunVars(input: {
   promptVarName: string;
   run: BatchRunInput;
 }) {
   const prompt = input.run.prompt.trim();
+  const sourceImageUrls = normalizeSourceImageUrls(input.run.sourceImageUrls);
   return {
     prompt,
     userPrompt: prompt,
@@ -194,7 +237,25 @@ function buildRunVars(input: {
     [input.promptVarName]: prompt,
     browserInstanceId: input.run.browserInstanceId.trim(),
     browserWsUrl: String(input.run.browserWsUrl || '').trim(),
+    sourceImageUrl: sourceImageUrls[0] || '',
+    sourceImageUrls: JSON.stringify(sourceImageUrls),
+    imageUrl: sourceImageUrls[0] || '',
+    imageUrls: JSON.stringify(sourceImageUrls),
   } as Record<string, string>;
+}
+
+function filterReferenceMediaUrls(urls: string[], sourceImageUrls: string[]): string[] {
+  if (!Array.isArray(urls) || urls.length === 0) return [];
+  const blocked = new Set((sourceImageUrls || []).map((item) => String(item || '').trim()).filter(Boolean));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of urls) {
+    const url = String(raw || '').trim();
+    if (!url || blocked.has(url) || seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+  return out;
 }
 
 function isTerminal(status: string) {
@@ -286,8 +347,14 @@ async function runBatchTask(taskId: string) {
             }
 
             if (childTask.status === 'success') {
-              const mediaUrls = childTask.result?.mediaUrls ?? childTask.result?.imageUrls ?? [];
-              const imageUrls = childTask.result?.imageUrls ?? [];
+              const mediaUrls = filterReferenceMediaUrls(
+                childTask.result?.mediaUrls ?? childTask.result?.imageUrls ?? [],
+                run.sourceImageUrls ? normalizeSourceImageUrls(run.sourceImageUrls) : []
+              );
+              const imageUrls = filterReferenceMediaUrls(
+                childTask.result?.imageUrls ?? [],
+                run.sourceImageUrls ? normalizeSourceImageUrls(run.sourceImageUrls) : []
+              );
               if (mediaUrls.length > 0) {
                 finalStatus = 'success';
                 finalMediaUrls = mediaUrls;
@@ -308,9 +375,17 @@ async function runBatchTask(taskId: string) {
               finalPrimaryMediaType = undefined;
               finalError = undefined;
             } else {
+              const filteredMediaUrls = filterReferenceMediaUrls(
+                childTask.result?.mediaUrls ?? childTask.result?.imageUrls ?? [],
+                run.sourceImageUrls ? normalizeSourceImageUrls(run.sourceImageUrls) : []
+              );
+              const filteredImageUrls = filterReferenceMediaUrls(
+                childTask.result?.imageUrls ?? [],
+                run.sourceImageUrls ? normalizeSourceImageUrls(run.sourceImageUrls) : []
+              );
               finalStatus = 'failed';
-              finalMediaUrls = childTask.result?.mediaUrls ?? childTask.result?.imageUrls ?? [];
-              finalImageUrls = childTask.result?.imageUrls ?? [];
+              finalMediaUrls = filteredMediaUrls;
+              finalImageUrls = filteredImageUrls;
               finalPrimaryMediaType = childTask.result?.primaryMediaType;
               finalError = childTask.error || '子任务失败';
             }
@@ -426,6 +501,7 @@ export async function createGeminiAdsBatchTask(input: {
       browserInstanceId: String(item.browserInstanceId || '').trim(),
       prompt: String(item.prompt || '').trim(),
       browserWsUrl: String(item.browserWsUrl || '').trim(),
+      sourceImageUrls: normalizeSourceImageUrls(item.sourceImageUrls),
     }))
     .filter((item) => item.browserInstanceId && item.prompt);
 
@@ -455,6 +531,7 @@ export async function createGeminiAdsBatchTask(input: {
     browserInstanceId: item.browserInstanceId,
     prompt: item.prompt,
     browserWsUrl: item.browserWsUrl,
+    sourceImageUrls: item.sourceImageUrls,
     status: 'queued',
     attempts: 0,
     mediaUrls: [],
@@ -487,7 +564,12 @@ export async function createGeminiAdsBatchTask(input: {
     promptVarName: task.promptVarName,
     maxConcurrency: task.maxConcurrency,
     maxAttemptsPerRun: task.maxAttemptsPerRun,
-    runs: task.runs.map((r) => ({ index: r.index, browserInstanceId: r.browserInstanceId, prompt: r.prompt })),
+    runs: task.runs.map((r) => ({
+      index: r.index,
+      browserInstanceId: r.browserInstanceId,
+      prompt: r.prompt,
+      sourceImageUrls: r.sourceImageUrls,
+    })),
   });
 
   setTimeout(() => {

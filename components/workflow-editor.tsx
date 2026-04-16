@@ -57,12 +57,29 @@ const DEFAULT_TOPIC_GOAL =
   '给我当前最具价值的 3 个选题，目标是提升曝光量、播放量和粉丝增长；优先抖音语境，可直接执行落地';
 const DEFAULT_TOPIC_SOURCES = 'douyin,bilibili,baidu,toutiao,thepaper';
 const DEFAULT_SOURCE_IMAGE_URL =
-  'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a9/Example.jpg/800px-Example.jpg';
+  'https://images.vyibc.com/f6a7035ab2814a9b9eb3029063a903a4.png';
 const DEFAULT_SOURCE_IMAGE_URLS = JSON.stringify([
   DEFAULT_SOURCE_IMAGE_URL,
   'https://upload.wikimedia.org/wikipedia/commons/thumb/3/3f/Fronalpstock_big.jpg/640px-Fronalpstock_big.jpg',
 ]);
+const DEFAULT_GEMINI_CHARACTER_PROMPT =
+  '以参考图中的同一位女生为唯一人物主体，保持五官、发型、脸型、肤色、年龄感、身材比例一致，不要改变人物身份。场景在海边日落时分，女生站在沙滩上微微侧身看向镜头，长发被海风轻轻吹起，脸上是自然放松的甜美微笑，一只手轻轻整理头发，另一只手自然下垂，背景是柔和海浪和金色夕阳，整体像高级感朋友圈打卡照片，真实摄影感，清透肤色，干净构图，生活方式大片，只输出一张静态图片，不要拼图，不要多人物，不要卡通。';
+const DEFAULT_WORKFLOW_DEBUG_PRESETS: Record<string, Record<string, unknown>> = {
+  '4a163587-6e5e-4176-8178-0915f0429ee0': {
+    browserInstanceId: DEFAULT_ADS_BROWSER_INSTANCE_ID,
+    noteUrl: DEFAULT_GEMINI_CHARACTER_PROMPT,
+    sourceImageUrl: DEFAULT_SOURCE_IMAGE_URL,
+    sourceImageUrls: [DEFAULT_SOURCE_IMAGE_URL],
+  },
+  'a8d3b8e1-427c-4b78-b896-afbe35ed026c': {
+    browserInstanceId: DEFAULT_ADS_BROWSER_INSTANCE_ID,
+    noteUrl: DEFAULT_GEMINI_CHARACTER_PROMPT,
+    sourceImageUrl: DEFAULT_SOURCE_IMAGE_URL,
+    sourceImageUrls: [DEFAULT_SOURCE_IMAGE_URL],
+  },
+};
 const STANDARD_CONTEXT_KEYS = ['videoUrl', 'title', 'tags', 'clientId'] as const;
+const STANDARD_CONTEXT_KEY_SET = new Set<string>(STANDARD_CONTEXT_KEYS);
 function ts() { return new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
 
 function shouldSeedDefaultAdsBrowserInstance(workflow: WorkflowDef): boolean {
@@ -215,6 +232,57 @@ function tokenizeCommaOrNewline(raw: string): string[] {
     .filter(Boolean);
 }
 
+function reviveStructuredString(raw: string): unknown {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  if (!text.startsWith('[') && !text.startsWith('{')) return raw;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return raw;
+  }
+}
+
+function serializeRuntimeVarsAsJson(values: Record<string, string>): string {
+  const payload: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(values)) {
+    const trimmed = String(value || '').trim();
+    if (!trimmed) continue;
+    payload[key] = reviveStructuredString(trimmed);
+  }
+  return JSON.stringify(payload, null, 2);
+}
+
+function normalizeJsonValueToString(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
+function extractRuntimeVarsFromJson(input: unknown): Record<string, unknown> | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const root = input as Record<string, unknown>;
+  const nestedVars = root.vars;
+  if (nestedVars && typeof nestedVars === 'object' && !Array.isArray(nestedVars)) {
+    return {
+      ...(nestedVars as Record<string, unknown>),
+      ...Object.fromEntries(
+        STANDARD_CONTEXT_KEYS
+          .filter((key) => Object.prototype.hasOwnProperty.call(root, key))
+          .map((key) => [key, root[key]])
+      ),
+    };
+  }
+  return root;
+}
+
+function getBuiltInWorkflowDebugInput(workflowId: string): string | null {
+  const preset = DEFAULT_WORKFLOW_DEBUG_PRESETS[workflowId];
+  if (!preset) return null;
+  return JSON.stringify(preset, null, 2);
+}
+
 function SourceImageUrlsTagInput({
   value,
   placeholder,
@@ -305,6 +373,13 @@ function RuntimeContextPanel({
   modeLabel,
   onChange,
   onResetAdsDefault,
+  jsonValue,
+  jsonError,
+  onJsonChange,
+  onApplyJson,
+  onResetJsonFromCurrent,
+  onLoadJsonDefault,
+  onSaveJsonDefault,
 }: {
   fieldKeys: string[];
   values: Record<string, string>;
@@ -315,8 +390,16 @@ function RuntimeContextPanel({
   modeLabel: string;
   onChange: (key: string, value: string) => void;
   onResetAdsDefault: () => void;
+  jsonValue: string;
+  jsonError: string | null;
+  onJsonChange: (value: string) => void;
+  onApplyJson: () => void;
+  onResetJsonFromCurrent: () => void;
+  onLoadJsonDefault: () => void;
+  onSaveJsonDefault: () => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [showJsonEditor, setShowJsonEditor] = useState(true);
   const autoCollapsedForSessionRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -328,6 +411,7 @@ function RuntimeContextPanel({
     if (autoCollapsedForSessionRef.current === sessionId) return;
     autoCollapsedForSessionRef.current = sessionId;
     setCollapsed(true);
+    setShowJsonEditor(false);
   }, [sessionId]);
 
   const previewPairs = fieldKeys
@@ -401,36 +485,111 @@ function RuntimeContextPanel({
           )}
         </div>
       ) : (
-        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          {fieldKeys.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border px-3 py-4 text-[11px] text-muted-foreground">
-              当前工作流没有声明运行时变量。
-            </div>
-          ) : (
-            fieldKeys.map((key) => (
-              <div key={key} className="rounded-xl border border-border bg-background px-3 py-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <label className="text-[11px] font-medium text-foreground">{key}</label>
-                  <span className="text-[10px] text-muted-foreground">{fieldHint(key)}</span>
+        <>
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {fieldKeys.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border px-3 py-4 text-[11px] text-muted-foreground">
+                当前工作流没有声明运行时变量。
+              </div>
+            ) : (
+              fieldKeys.map((key) => (
+                <div key={key} className="rounded-xl border border-border bg-background px-3 py-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-[11px] font-medium text-foreground">{key}</label>
+                    <span className="text-[10px] text-muted-foreground">{fieldHint(key)}</span>
+                  </div>
+                  {key === 'sourceImageUrls' ? (
+                    <SourceImageUrlsTagInput
+                      value={values[key] ?? ''}
+                      placeholder={fieldPlaceholder(key)}
+                      onChange={(v) => onChange(key, v)}
+                    />
+                  ) : (
+                    <input
+                      value={values[key] ?? ''}
+                      onChange={(e) => onChange(key, e.target.value)}
+                      placeholder={fieldPlaceholder(key)}
+                      className="mt-2 w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary"
+                    />
+                  )}
                 </div>
-                {key === 'sourceImageUrls' ? (
-                  <SourceImageUrlsTagInput
-                    value={values[key] ?? ''}
-                    placeholder={fieldPlaceholder(key)}
-                    onChange={(v) => onChange(key, v)}
-                  />
-                ) : (
-                  <input
-                    value={values[key] ?? ''}
-                    onChange={(e) => onChange(key, e.target.value)}
-                    placeholder={fieldPlaceholder(key)}
-                    className="mt-2 w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary"
-                  />
+              ))
+            )}
+          </div>
+
+          <div className="mt-3 rounded-xl border border-border bg-background">
+            <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+              <div>
+                <p className="text-[11px] font-semibold text-foreground">JSON 入参</p>
+                <p className="text-[10px] text-muted-foreground">
+                  调试前可直接粘贴整包对象；支持数组/对象字段，也兼容 <code className="font-mono">{'{"vars": {...}}'}</code> 结构。
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowJsonEditor((prev) => !prev)}
+                className="rounded-lg border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
+              >
+                {showJsonEditor ? '收起 JSON' : '展开 JSON'}
+              </button>
+            </div>
+
+            {showJsonEditor && (
+              <div className="border-t border-border px-3 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[10px] text-muted-foreground">
+                    应用时会覆盖当前运行时变量；`sourceImageUrls` 这类数组会自动转成工作流可用格式。
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={onLoadJsonDefault}
+                      className="rounded-lg border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
+                    >
+                      恢复默认
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onResetJsonFromCurrent}
+                      className="rounded-lg border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
+                    >
+                      从当前生成
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onSaveJsonDefault}
+                      className="rounded-lg border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
+                    >
+                      保存默认
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onApplyJson}
+                      className="rounded-lg bg-primary px-2.5 py-1.5 text-[11px] text-primary-foreground hover:bg-primary/90"
+                    >
+                      应用 JSON
+                    </button>
+                  </div>
+                </div>
+
+                <textarea
+                  value={jsonValue}
+                  onChange={(e) => onJsonChange(e.target.value)}
+                  spellCheck={false}
+                  rows={9}
+                  placeholder={`{\n  "prompt": "你的提示词",\n  "browserInstanceId": "k1b908rw",\n  "sourceImageUrls": ["https://example.com/a.png"]\n}`}
+                  className="mt-3 w-full rounded-xl border border-border bg-card px-3 py-2 text-[11px] font-mono outline-none focus:border-primary"
+                />
+
+                {jsonError && (
+                  <div className="mt-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">
+                    {jsonError}
+                  </div>
                 )}
               </div>
-            ))
-          )}
-        </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
@@ -448,6 +607,76 @@ function ParamEditor({
   compact?: boolean;
 }) {
   const catalog = nodeType ? getCatalogItem(nodeType) : undefined;
+
+  function ElementsEditor({
+    value = [],
+    onChange: onElementsChange
+  }: {
+    value: Array<{ text?: string, selector?: string, useSelector?: boolean }>;
+    onChange: (v: Array<{ text?: string, selector?: string, useSelector?: boolean }>) => void;
+  }) {
+    const list = Array.isArray(value) ? value : [];
+    
+    const addElement = () => {
+      onElementsChange([...list, { text: '', selector: '', useSelector: false }]);
+    };
+    
+    const removeElement = (index: number) => {
+      onElementsChange(list.filter((_, i) => i !== index));
+    };
+    
+    const updateElement = (index: number, updates: Partial<{ text: string, selector: string, useSelector: boolean }>) => {
+      onElementsChange(list.map((el, i) => i === index ? { ...el, ...updates } : el));
+    };
+
+    return (
+      <div className="space-y-3 p-3 rounded-xl border border-dashed border-border bg-muted/5">
+        {list.map((el, i) => (
+          <div key={i} className="relative space-y-2 p-3 rounded-lg border border-border bg-card shadow-sm">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[9px] font-bold text-primary/60 uppercase">候选目标 {i + 1}</span>
+              <button onClick={() => removeElement(i)} className="text-[9px] text-muted-foreground hover:text-red-400">删除</button>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <div
+                  className={`w-7 h-3.5 rounded-full transition-colors relative flex-shrink-0 ${el.useSelector ? 'bg-orange-500' : 'bg-muted'}`}
+                  onClick={() => updateElement(i, { useSelector: !el.useSelector })}
+                >
+                  <div className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white shadow-sm transition-transform ${el.useSelector ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </div>
+                <span className="text-[10px] text-muted-foreground">选择器模式</span>
+              </label>
+
+              {el.useSelector ? (
+                <input
+                  value={el.selector || ''}
+                  onChange={e => updateElement(i, { selector: e.target.value })}
+                  placeholder="input[type='file'] 或 //button..."
+                  className="w-full bg-background border border-orange-400/20 rounded-lg px-2 py-1 text-[10px] font-mono outline-none focus:border-orange-400"
+                />
+              ) : (
+                <input
+                  value={el.text || ''}
+                  onChange={e => updateElement(i, { text: e.target.value })}
+                  placeholder="按钮文字，如：Create image"
+                  className="w-full bg-background border border-border rounded-lg px-2 py-1 text-[10px] outline-none focus:border-primary"
+                />
+              )}
+            </div>
+          </div>
+        ))}
+        <button
+          onClick={addElement}
+          className="w-full py-2 flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-[10px] text-muted-foreground hover:bg-muted hover:text-primary transition-all"
+        >
+          <span>+</span>
+          <span>添加候选目标</span>
+        </button>
+      </div>
+    );
+  }
   
   // 将数据库中已有的参数名与该类型节点最新的所有的默认参数名进行全集并合，以此确保老节点在引入新特性时依然能显示在面板上
   const defaultKeys = Object.keys(catalog?.defaultParams ?? {});
@@ -499,12 +728,14 @@ function ParamEditor({
         const isSelector = meta?.type === 'selector' || k.toLowerCase().includes('selector');
         const isTemplate = meta?.type === 'template';
         const isSelect = meta?.type === 'select' && Array.isArray(meta.options) && meta.options.length > 0;
+        const isHotkey = meta?.type === 'hotkey';
         // 当 meta.type 是 boolean，或者当前值就是 boolean 时，渲染为开关
         const isBoolean = meta?.type === 'boolean' || typeof v === 'boolean';
+        const isElements = meta?.type === 'elements';
         return (
           <div key={k} className="space-y-0.5">
             <div className="flex items-center gap-1">
-              <span className={`text-[10px] font-semibold ${isSelector ? 'text-orange-400' : isTemplate ? 'text-purple-400' : 'text-muted-foreground'}`}>
+              <span className={`text-[10px] font-semibold ${isElements ? 'text-primary' : isSelector ? 'text-orange-400' : isTemplate ? 'text-purple-400' : 'text-muted-foreground'}`}>
                 {meta?.label ?? k}
               </span>
               {!compact && meta && (
@@ -518,7 +749,12 @@ function ParamEditor({
                 <button onClick={() => removeKey(k)} className="text-[9px] text-muted-foreground hover:text-red-400 transition-colors">✕</button>
               )}
             </div>
-            {isBoolean ? (
+            {isElements ? (
+              <ElementsEditor
+                value={v as any}
+                onChange={next => onChange({ ...params, [k]: next })}
+              />
+            ) : isBoolean ? (
               /* boolean 参数渲染为 Toggle 开关 */
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <div
@@ -543,6 +779,63 @@ function ParamEditor({
                   </option>
                 ))}
               </select>
+            ) : isHotkey ? (
+              <input
+                value={displayVal(v)}
+                readOnly
+                onPaste={(e) => {
+                  const text = e.clipboardData.getData('text/plain').trim();
+                  if (text) setVal(k, text);
+                }}
+                onKeyDown={(e) => {
+                  // Esc=auto, Backspace/Delete=清空
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setVal(k, 'auto');
+                    return;
+                  }
+                  if (e.key === 'Backspace' || e.key === 'Delete') {
+                    e.preventDefault();
+                    setVal(k, '');
+                    return;
+                  }
+
+                  // 纯修饰键不录入
+                  if (['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) return;
+
+                  e.preventDefault();
+
+                  const parts: string[] = [];
+                  const hasCtrl = e.ctrlKey;
+                  const hasMeta = e.metaKey;
+
+                  // 录入时优先归一化为跨平台写法：ControlOrMeta
+                  // - mac 按 ⌘V 会记录成 ControlOrMeta+V
+                  // - Windows/Linux 按 Ctrl+V 也会记录成 ControlOrMeta+V
+                  // 这样同一份工作流在不同系统更稳。
+                  const useControlOrMeta = (hasCtrl || hasMeta) && !(hasCtrl && hasMeta);
+                  if (useControlOrMeta) {
+                    parts.push('ControlOrMeta');
+                  } else {
+                    if (hasCtrl) parts.push('Control');
+                    if (hasMeta) parts.push('Meta');
+                  }
+
+                  if (e.altKey) parts.push('Alt');
+                  if (e.shiftKey) parts.push('Shift');
+
+                  let main = e.key;
+                  if (main === ' ') main = 'Space';
+                  if (main.length === 1) main = main.toUpperCase();
+
+                  parts.push(main);
+                  setVal(k, parts.join('+'));
+                }}
+                className={`w-full bg-background border rounded-lg px-2.5 py-1.5 text-[11px] font-mono outline-none focus:border-primary transition-colors ${
+                  'border-primary/40 focus:border-primary'
+                }`}
+                placeholder={meta?.example ?? '点击后按下组合键录入（Esc=auto）'}
+              />
             ) : (
               <input
                 value={displayVal(v)}
@@ -2140,6 +2433,10 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
     }
     return seeded;
   });
+  const runtimeJsonStorageKey = useMemo(() => `workflow.runtimeJson.default.${initialWorkflow.id}`, [initialWorkflow.id]);
+  const [runtimeJsonDraft, setRuntimeJsonDraft] = useState('');
+  const [runtimeJsonError, setRuntimeJsonError] = useState<string | null>(null);
+  const [, setRuntimeJsonDirty] = useState(false);
   const workflowVarKeys = useMemo(() => initialWorkflow.vars ?? [], [initialWorkflow.vars]);
   const adsWorkflowEnabled = useMemo(() => hasAdsNavigateNode(nodes), [nodes]);
   const runtimeContextKeys = useMemo(() => {
@@ -2162,6 +2459,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
       Object.entries(merged).filter(([, v]) => typeof v === 'string' && v.trim().length > 0)
     );
   }, [ctx, runtimeVars]);
+  const currentSessionVars = useMemo(() => collectSessionVars(), [collectSessionVars]);
 
   const logEndRef = useRef<HTMLDivElement>(null);
   useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
@@ -2208,6 +2506,135 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
     }
     setRuntimeVars(prev => ({ ...prev, [key]: value }));
   }
+
+  const applyExtractedRuntimeVars = useCallback((extracted: Record<string, unknown>) => {
+    const nextCtx: DebugCtx = {
+      videoUrl: '',
+      title: '',
+      tags: '',
+      clientId: '',
+    };
+    const nextRuntimeVars: Record<string, string> = {};
+
+    for (const [key, rawValue] of Object.entries(extracted)) {
+      const value = normalizeJsonValueToString(rawValue).trim();
+      if (STANDARD_CONTEXT_KEY_SET.has(key)) {
+        nextCtx[key as keyof DebugCtx] = value;
+        continue;
+      }
+      if (!value) continue;
+      nextRuntimeVars[key] = value;
+    }
+
+    setCtx(nextCtx);
+    setRuntimeVars(nextRuntimeVars);
+
+    const mergedForPreview: Record<string, string> = { ...nextRuntimeVars };
+    if (nextCtx.videoUrl) mergedForPreview.videoUrl = nextCtx.videoUrl;
+    if (nextCtx.title) mergedForPreview.title = nextCtx.title;
+    if (nextCtx.tags) mergedForPreview.tags = nextCtx.tags;
+    if (nextCtx.clientId) mergedForPreview.clientId = nextCtx.clientId;
+    return mergedForPreview;
+  }, []);
+
+  const loadRuntimeJsonDefault = useCallback(() => {
+    const fallback = getBuiltInWorkflowDebugInput(initialWorkflow.id) ?? serializeRuntimeVarsAsJson(currentSessionVars);
+    let next = fallback;
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = window.localStorage.getItem(runtimeJsonStorageKey);
+        if (saved?.trim()) next = saved;
+      } catch {
+        // ignore
+      }
+    }
+
+    setRuntimeJsonDraft(next);
+    setRuntimeJsonDirty(false);
+    setRuntimeJsonError(null);
+
+    try {
+      const parsed = next.trim() ? JSON.parse(next) : {};
+      const extracted = extractRuntimeVarsFromJson(parsed);
+      if (extracted) {
+        applyExtractedRuntimeVars(extracted);
+      }
+    } catch {
+      // ignore invalid saved draft and keep current vars
+    }
+  }, [applyExtractedRuntimeVars, currentSessionVars, initialWorkflow.id, runtimeJsonStorageKey]);
+
+  useEffect(() => {
+    const fallback = getBuiltInWorkflowDebugInput(initialWorkflow.id) ?? serializeRuntimeVarsAsJson(currentSessionVars);
+    let next = fallback;
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = window.localStorage.getItem(runtimeJsonStorageKey);
+        if (saved?.trim()) next = saved;
+      } catch {
+        // ignore
+      }
+    }
+
+    setRuntimeJsonDraft(next);
+    setRuntimeJsonDirty(false);
+    setRuntimeJsonError(null);
+
+    try {
+      const parsed = next.trim() ? JSON.parse(next) : {};
+      const extracted = extractRuntimeVarsFromJson(parsed);
+      if (extracted) {
+        applyExtractedRuntimeVars(extracted);
+      }
+    } catch {
+      // ignore invalid saved draft and keep current vars
+    }
+    // 这里只在切换工作流时初始化默认入参，避免运行中修改字段后被 effect 回滚。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialWorkflow.id, runtimeJsonStorageKey]);
+
+  const resetRuntimeJsonFromCurrent = useCallback(() => {
+    setRuntimeJsonDraft(serializeRuntimeVarsAsJson(currentSessionVars));
+    setRuntimeJsonDirty(false);
+    setRuntimeJsonError(null);
+  }, [currentSessionVars]);
+
+  const saveRuntimeJsonAsDefault = useCallback(() => {
+    try {
+      const raw = runtimeJsonDraft.trim();
+      const parsed = raw ? JSON.parse(raw) : {};
+      const extracted = extractRuntimeVarsFromJson(parsed);
+      if (!extracted) throw new Error('JSON 顶层必须是对象');
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(runtimeJsonStorageKey, JSON.stringify(parsed, null, 2));
+      }
+      setRuntimeJsonDraft(JSON.stringify(parsed, null, 2));
+      setRuntimeJsonDirty(false);
+      setRuntimeJsonError(null);
+      appendLog('💾 已保存为该工作流的默认入参');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeJsonError(`默认入参保存失败：${message}`);
+    }
+  }, [appendLog, runtimeJsonDraft, runtimeJsonStorageKey]);
+
+  const applyRuntimeJson = useCallback(() => {
+    try {
+      const raw = runtimeJsonDraft.trim();
+      const parsed = raw ? JSON.parse(raw) : {};
+      const extracted = extractRuntimeVarsFromJson(parsed);
+      if (!extracted) throw new Error('JSON 顶层必须是对象');
+      const mergedForPreview = applyExtractedRuntimeVars(extracted);
+
+      setRuntimeJsonDraft(serializeRuntimeVarsAsJson(mergedForPreview));
+      setRuntimeJsonDirty(false);
+      setRuntimeJsonError(null);
+      appendLog(`🧩 已应用 JSON 入参（${Object.keys(mergedForPreview).length} 个字段）`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeJsonError(`JSON 解析失败：${message}`);
+    }
+  }, [appendLog, applyExtractedRuntimeVars, runtimeJsonDraft]);
 
   function updateNodes(next: NodeDef[]) {
     setNodes(next);
@@ -2715,7 +3142,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
 
         <RuntimeContextPanel
           fieldKeys={runtimeContextKeys}
-          values={collectSessionVars()}
+          values={currentSessionVars}
           adsEnabled={adsWorkflowEnabled}
           sessionId={sessionId}
           currentStep={currentStep}
@@ -2723,6 +3150,17 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
           modeLabel={sessionId ? 'session 接力' : '独立执行'}
           onChange={setContextFieldValue}
           onResetAdsDefault={() => setRuntimeVars(prev => ({ ...prev, browserInstanceId: DEFAULT_ADS_BROWSER_INSTANCE_ID }))}
+          jsonValue={runtimeJsonDraft}
+          jsonError={runtimeJsonError}
+          onJsonChange={(value) => {
+            setRuntimeJsonDraft(value);
+            setRuntimeJsonDirty(true);
+            if (runtimeJsonError) setRuntimeJsonError(null);
+          }}
+          onApplyJson={applyRuntimeJson}
+          onResetJsonFromCurrent={resetRuntimeJsonFromCurrent}
+          onLoadJsonDefault={loadRuntimeJsonDefault}
+          onSaveJsonDefault={saveRuntimeJsonAsDefault}
         />
 
         {/* ── 节点详情 + 执行面板（选中节点时始终显示）── */}

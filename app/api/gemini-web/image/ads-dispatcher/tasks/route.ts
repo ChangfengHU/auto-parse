@@ -88,7 +88,8 @@ async function listFromSupabase(input: { status?: string; q?: string; limit: num
 }
 
 function listFromDisk(input: { status?: string; q?: string; limit: number }) {
-  const dir = path.join(os.tmpdir(), 'gemini-ads-dispatcher-task-cache');
+  const { getGeminiAdsDispatcherTaskCacheDir } = require('@/lib/workflow/gemini-ads-dispatcher-cache') as typeof import('@/lib/workflow/gemini-ads-dispatcher-cache');
+  const dir = getGeminiAdsDispatcherTaskCacheDir();
   if (!fs.existsSync(dir)) {
     return { source: 'disk', items: [], nextCursor: null };
   }

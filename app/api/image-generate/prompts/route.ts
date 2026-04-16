@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { proxyFetch } from '@/lib/proxy-fetch';
 
 interface StoryBible {
   title: string;
@@ -284,7 +285,7 @@ async function callGeminiStoryPrompts(input: {
           '输出格式严格为 JSON：{"bible":{"title":"","overview":"","world":"","protagonist":"","supportingCast":"","visualStyle":"","continuityRules":[""]},"scenes":[{"id":"scene-1","title":"","paragraph":"","storyBeat":"","prompt":"","negativePrompt":"","styleNotes":"","continuityNotes":""}]}',
         ].join('\n');
 
-  const response = await fetch(endpoint, {
+  const response = await proxyFetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

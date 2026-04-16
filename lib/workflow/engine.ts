@@ -16,6 +16,7 @@ import { executeMaterial } from './nodes/material';
 import { executeNavigate } from './nodes/navigate';
 import { executeTextInput } from './nodes/text-input';
 import { executePasteImageClipboard } from './nodes/paste-image-clipboard';
+import { executePressHotkey } from './nodes/press-hotkey';
 import { executeClick } from './nodes/click';
 import { executeScroll } from './nodes/scroll';
 import { executeScreenshot } from './nodes/screenshot';
@@ -47,6 +48,7 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   navigate:              executeNavigate,
   text_input:            executeTextInput,
   paste_image_clipboard: executePasteImageClipboard,
+  press_hotkey:          executePressHotkey,
   click:                 executeClick,
   scroll:                executeScroll,
   screenshot:            executeScreenshot,

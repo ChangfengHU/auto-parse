@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
+import { ImageGalleryPreview } from '@/components/image-gallery-preview';
 
 /* ─── Types ─── */
 type ItemStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
@@ -12,6 +13,7 @@ interface DispatcherItem {
   id: string;
   index: number;
   prompt: string;
+  sourceImageUrls: string[];
   promptHistory?: string[];
   promptOptimizedCount?: number;
   status: ItemStatus;
@@ -600,6 +602,7 @@ export default function AdsDispatcherDetailPage() {
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [operating, setOperating] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -640,7 +643,11 @@ export default function AdsDispatcherDetailPage() {
     setOperating(true);
     try {
       const s = task.settings;
-      const body: Record<string, unknown> = { prompts: task.prompts };
+      const runs = task.items.map((item) => ({
+        prompt: item.prompt,
+        sourceImageUrls: Array.isArray(item.sourceImageUrls) ? item.sourceImageUrls : [],
+      }));
+      const body: Record<string, unknown> = runs.length > 0 ? { runs } : { prompts: task.prompts };
       if (s.instanceIds?.length) body.instanceIds = s.instanceIds;
       if (s.workflowId) body.workflowId = s.workflowId;
       if (s.promptVarName) body.promptVarName = s.promptVarName;
@@ -664,6 +671,25 @@ export default function AdsDispatcherDetailPage() {
       return next;
     });
   };
+
+  // Extract successful images for preview
+  const galleryImages = task
+    ? task.items
+        .filter(item => item.status === 'success' && (item.imageUrls?.length > 0 || item.mediaUrls?.length > 0))
+        .flatMap(item => {
+          const urls = item.imageUrls?.length > 0 ? item.imageUrls : item.mediaUrls || [];
+          return urls.map((url, idx) => ({
+            id: `${item.id}-${idx}`,
+            url,
+            prompt: item.prompt,
+          }));
+        })
+    : [];
+
+  // Show preview mode
+  if (previewMode && !loading && task) {
+    return <ImageGalleryPreview images={galleryImages} onClose={() => setPreviewMode(false)} />;
+  }
 
   if (loading) return (
     <div className="min-h-screen bg-background flex items-center justify-center text-muted-foreground text-sm">加载中...</div>
@@ -721,6 +747,15 @@ export default function AdsDispatcherDetailPage() {
             </div>
             {/* Operation buttons */}
             <div className="flex gap-2 flex-wrap">
+              {galleryImages.length > 0 && (
+                <button
+                  onClick={() => setPreviewMode(true)}
+                  className="px-3 py-1.5 text-xs bg-primary/20 text-primary border border-primary/30 rounded-lg hover:bg-primary/30 transition-colors"
+                  title={`预览 ${galleryImages.length} 张图片`}
+                >
+                  🖼️ 预览 ({galleryImages.length})
+                </button>
+              )}
               {task.status === 'running' && (
                 <button disabled={operating} onClick={() => void doOp(() => fetch(`/api/gemini-web/image/ads-dispatcher/tasks/${id}/pause`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }))}
                   className="px-3 py-1.5 text-xs bg-orange-500/20 text-orange-400 border border-orange-500/30 rounded-lg hover:bg-orange-500/30 disabled:opacity-50 transition-colors">

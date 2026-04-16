@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { proxyFetch } from '@/lib/proxy-fetch';
 
 export const runtime = 'nodejs';
 
@@ -148,7 +149,7 @@ async function generateWithGemini(brief: string, count: number) {
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const { system, user } = buildPrompt(brief, count);
 
-  const response = await fetch(endpoint, {
+  const response = await proxyFetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -179,7 +180,7 @@ async function generateWithGrok(brief: string, count: number) {
     throw new Error('缺少 XAI_API_KEY');
   }
   const { system, user } = buildPrompt(brief, count);
-  const response = await fetch('https://api.x.ai/v1/chat/completions', {
+  const response = await proxyFetch('https://api.x.ai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -217,7 +218,7 @@ async function generateWithOpenAI(brief: string, count: number) {
     throw new Error('缺少 OPENAI_API_KEY');
   }
   const { system, user } = buildPrompt(brief, count);
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await proxyFetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -252,9 +253,9 @@ async function generateWithOpenAI(brief: string, count: number) {
 async function generateIdeas(brief: string, count: number) {
   const errors: string[] = [];
   const providers: Array<{ name: ProviderName; run: () => Promise<IdeaPreset[]> }> = [
-    { name: 'gemini', run: () => generateWithGemini(brief, count) },
     { name: 'grok', run: () => generateWithGrok(brief, count) },
     { name: 'openai', run: () => generateWithOpenAI(brief, count) },
+    { name: 'gemini', run: () => generateWithGemini(brief, count) },
   ];
 
   for (const provider of providers) {

@@ -11,6 +11,7 @@ const TYPE_STYLE: Record<ParamMeta['type'], string> = {
   selector: 'bg-orange-500/15 text-orange-400 border-orange-400/30',
   template: 'bg-purple-500/15 text-purple-400 border-purple-400/30',
   url:      'bg-blue-500/15 text-blue-400 border-blue-400/30',
+  hotkey:   'bg-indigo-500/15 text-indigo-400 border-indigo-400/30',
   string:   'bg-muted text-muted-foreground border-border',
   number:   'bg-green-500/15 text-green-400 border-green-400/30',
   boolean:  'bg-yellow-500/15 text-yellow-400 border-yellow-400/30',

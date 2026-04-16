@@ -80,6 +80,8 @@ export interface GeminiAdsDispatcherItem {
   index: number;
   /** 当前将要执行的 prompt（可能是重试时被改写后的版本） */
   prompt: string;
+  /** 当前 prompt 绑定的参考图 URL 集合，可为空 */
+  sourceImageUrls: string[];
   /** prompt 变体历史：第 1 个为原始 prompt，其后为改写版本 */
   promptHistory?: string[];
   /** 已进行过的 prompt 改写次数（便于快速判断） */
@@ -171,7 +173,8 @@ declare global {
 
 const DEFAULT_INSTANCE_IDS = ['k1b908rw', 'k1bdaoa7', 'k1ba8vac'];
 const TASK_CACHE_TTL_MS = Number(process.env.GEMINI_ADS_DISPATCHER_TASK_CACHE_TTL_MS || 3 * 60 * 60 * 1000);
-const TASK_CACHE_DIR = path.join(os.tmpdir(), 'gemini-ads-dispatcher-task-cache');
+const { getGeminiAdsDispatcherQueueLockDir, getGeminiAdsDispatcherTaskCacheDir } = require('./gemini-ads-dispatcher-cache') as typeof import('./gemini-ads-dispatcher-cache');
+const TASK_CACHE_DIR = getGeminiAdsDispatcherTaskCacheDir();
 const DEFAULT_DISPATCHER_TIMEOUT_MS = Number(process.env.GEMINI_ADS_DISPATCHER_TIMEOUT_MS || 45 * 60 * 1000);
 const DEFAULT_INSTANCE_COOLDOWN_MS = Number(process.env.GEMINI_ADS_DISPATCHER_INSTANCE_COOLDOWN_MS || 45_000);
 const DEFAULT_MAX_IDLE_CYCLES = Number(process.env.GEMINI_ADS_DISPATCHER_MAX_IDLE_CYCLES || 18);
@@ -245,7 +248,7 @@ function sleep(ms: number) {
 }
 
 const QUEUE_FILE = path.join(TASK_CACHE_DIR, 'queue.json');
-const QUEUE_LOCK_DIR = path.join(os.tmpdir(), 'gemini-ads-dispatcher-queue.lock');
+const QUEUE_LOCK_DIR = getGeminiAdsDispatcherQueueLockDir();
 
 type DispatcherQueueState = {
   entries: Array<{ taskId: string; enqueuedAt: string }>;
@@ -317,12 +320,12 @@ function normalizeQueueState(state: DispatcherQueueState) {
 
   // Drop entries that no longer exist or are no longer queued
   normalized.entries = normalized.entries.filter((entry) => {
-    const task = getGeminiAdsDispatcherTask(entry.taskId);
+    const task = getGeminiAdsDispatcherTaskSync(entry.taskId);
     return Boolean(task && task.status === 'queued' && !isTerminal(task.status));
   });
 
   if (normalized.runningTaskId) {
-    const runningTask = getGeminiAdsDispatcherTask(normalized.runningTaskId);
+    const runningTask = getGeminiAdsDispatcherTaskSync(normalized.runningTaskId);
     if (!runningTask || isTerminal(runningTask.status)) {
       normalized.runningTaskId = undefined;
     }
@@ -406,7 +409,7 @@ export async function clearGeminiAdsDispatcherQueue(options?: { reason?: string;
 
   const endedAt = nowIso();
   for (const taskId of clearedTaskIds) {
-    const task = getGeminiAdsDispatcherTask(taskId);
+    const task = await getGeminiAdsDispatcherTask(taskId);
     if (!task) continue;
     if (isTerminal(task.status)) continue;
 
@@ -571,12 +574,12 @@ async function onQueueTaskFinished(taskId: string) {
     persistQueueState(next);
   }).catch(() => null);
 
-  trace(taskId, 'queue_task_finished', { status: getGeminiAdsDispatcherTask(taskId)?.status });
+  trace(taskId, 'queue_task_finished', { status: (await getGeminiAdsDispatcherTask(taskId))?.status });
   void kickQueue();
 }
 
 async function startQueuedTask(taskId: string) {
-  const task = getGeminiAdsDispatcherTask(taskId);
+  const task = await getGeminiAdsDispatcherTask(taskId);
   if (!task) {
     await onQueueTaskFinished(taskId);
     return;
@@ -691,6 +694,47 @@ function computeSummary(items: GeminiAdsDispatcherItem[]): DispatcherSummary {
     failed: items.filter((item) => item.status === 'failed').length,
     cancelled: items.filter((item) => item.status === 'cancelled').length,
   };
+}
+
+function normalizeSourceImageUrls(value: unknown): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const pushToken = (token: string) => {
+    const trimmed = token.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+
+  const visit = (input: unknown) => {
+    if (Array.isArray(input)) {
+      for (const item of input) visit(item);
+      return;
+    }
+
+    const text = String(input || '').trim();
+    if (!text) return;
+
+    if (text.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          visit(parsed);
+          return;
+        }
+      } catch {
+        // fall through to split mode
+      }
+    }
+
+    for (const token of text.split(/[\n,]/)) {
+      pushToken(token);
+    }
+  };
+
+  visit(value);
+  return out;
 }
 
 function updateTask(taskId: string, patch: Partial<GeminiAdsDispatcherTask>) {
@@ -1232,12 +1276,17 @@ async function assignNextItem(taskId: string, instanceId: string) {
     itemId: nextItem.id,
     index: nextItem.index,
     prompt: nextItem.prompt,
+    sourceImageCount: nextItem.sourceImageUrls.length,
     leaseId: lease.leaseId,
   });
 
   try {
     const child = await createGeminiAdsBatchTask({
-      runs: [{ browserInstanceId: instanceId, prompt: nextItem.prompt }],
+      runs: [{
+        browserInstanceId: instanceId,
+        prompt: nextItem.prompt,
+        sourceImageUrls: nextItem.sourceImageUrls,
+      }],
       workflowId: current.settings.workflowId,
       promptVarName: current.settings.promptVarName,
       maxConcurrency: 1,
@@ -1813,7 +1862,11 @@ async function runDispatcherTask(taskId: string) {
 }
 
 export async function createGeminiAdsDispatcherTask(input: {
-  prompts: string[];
+  prompts?: string[];
+  runs?: Array<{
+    prompt: string;
+    sourceImageUrls?: string[] | string;
+  }>;
   instanceIds?: string[];
   workflowId?: string;
   promptVarName?: string;
@@ -1834,8 +1887,25 @@ export async function createGeminiAdsDispatcherTask(input: {
   force?: boolean;
   forceReason?: string;
 }) {
-  const requestedPromptCount = input.prompts.length;
-  const prompts = input.prompts.map((item) => String(item || '').trim()).filter(Boolean);
+  const requestedPromptCount = Array.isArray(input.runs)
+    ? input.runs.length
+    : Array.isArray(input.prompts)
+      ? input.prompts.length
+      : 0;
+  const normalizedRuns = Array.isArray(input.runs)
+    ? input.runs
+      .map((item) => ({
+        prompt: String(item?.prompt || '').trim(),
+        sourceImageUrls: normalizeSourceImageUrls(item?.sourceImageUrls),
+      }))
+      .filter((item) => item.prompt)
+    : (input.prompts ?? [])
+      .map((item) => ({
+        prompt: String(item || '').trim(),
+        sourceImageUrls: [] as string[],
+      }))
+      .filter((item) => item.prompt);
+  const prompts = normalizedRuns.map((item) => item.prompt);
   if (prompts.length === 0) {
     throw new Error('prompts 不能为空');
   }
@@ -1925,11 +1995,12 @@ export async function createGeminiAdsDispatcherTask(input: {
   pruneTaskTraces(TRACE_NAMESPACE);
   const traceFile = taskTraceFileRelative(taskTraceFile(TRACE_NAMESPACE, taskId));
 
-  const items: GeminiAdsDispatcherItem[] = prompts.map((prompt, index) => ({
+  const items: GeminiAdsDispatcherItem[] = normalizedRuns.map((run, index) => ({
     id: `${taskId}-${index + 1}`,
     index,
-    prompt,
-    promptHistory: [prompt],
+    prompt: run.prompt,
+    sourceImageUrls: run.sourceImageUrls,
+    promptHistory: [run.prompt],
     promptOptimizedCount: 0,
     status: 'pending',
     attempts: 0,
@@ -1997,6 +2068,12 @@ export async function createGeminiAdsDispatcherTask(input: {
     preflight: task.preflight,
     settings: task.settings,
     prompts: task.prompts,
+    items: task.items.map((item) => ({
+      id: item.id,
+      index: item.index,
+      prompt: item.prompt,
+      sourceImageUrls: item.sourceImageUrls,
+    })),
     instances: task.instances,
   });
 
@@ -2009,7 +2086,11 @@ export async function createGeminiAdsDispatcherTask(input: {
   return task;
 }
 
-export function getGeminiAdsDispatcherTask(taskId: string) {
+/**
+ * [NEW] 内部同步校验，仅检查内存和本地文件，不触发网络请求
+ * 用于队列维护等高频、低延迟场景
+ */
+function getGeminiAdsDispatcherTaskSync(taskId: string): GeminiAdsDispatcherTask | undefined {
   const mem = taskStore().get(taskId);
   if (mem) {
     if (isTaskExpired(mem)) {
@@ -2029,8 +2110,36 @@ export function getGeminiAdsDispatcherTask(taskId: string) {
   return persisted;
 }
 
-export function cancelGeminiAdsDispatcherTask(taskId: string, reason?: string) {
-  const task = getGeminiAdsDispatcherTask(taskId);
+/**
+ * 获取调度任务详情（支持二级缓存回源）
+ * 逻辑：内存 -> 本地磁盘 -> Supabase 远端
+ */
+export async function getGeminiAdsDispatcherTask(taskId: string): Promise<GeminiAdsDispatcherTask | undefined> {
+  // 1. 本地尝试（内存 & 磁盘）
+  const local = getGeminiAdsDispatcherTaskSync(taskId);
+  if (local) return local;
+
+  // 2. 本地缺失或已过期，尝试从 Supabase 远端恢复
+  const { getAdsDispatcherTaskSnapshot } = require('./supabase-task-persist');
+  const remote = await getAdsDispatcherTaskSnapshot(taskId).catch(() => null);
+  
+  if (remote) {
+    // 赋予一个新的本地 TTL（如继续保留 3 小时），避免频繁请求数据库
+    const task: GeminiAdsDispatcherTask = {
+      ...(remote as unknown as GeminiAdsDispatcherTask),
+      cacheUntil: new Date(Date.now() + TASK_CACHE_TTL_MS).toISOString()
+    };
+    taskStore().set(taskId, task);
+    // 恢复现场提示
+    console.log(`[Dispatcher] Task ${taskId} resurrected from Supabase.`);
+    return task;
+  }
+
+  return undefined;
+}
+
+export async function cancelGeminiAdsDispatcherTask(taskId: string, reason?: string) {
+  const task = await getGeminiAdsDispatcherTask(taskId);
   if (!task) return undefined;
   if (isTerminal(task.status)) return task;
 

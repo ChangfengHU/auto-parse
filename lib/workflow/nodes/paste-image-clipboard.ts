@@ -91,12 +91,48 @@ export async function executePasteImageClipboard(
       if (fallback) imageUrls.push(fallback);
     }
 
+    const modeRaw = String((params as Partial<PasteImageClipboardParams>).mode || '').trim();
+    const mode = (modeRaw || 'auto').toLowerCase();
+
     const targetSelector = String((params as Partial<PasteImageClipboardParams>).targetSelector || '').trim();
+    const pasteHotkeyRaw = String((params as Partial<PasteImageClipboardParams>).pasteHotkey || '').trim();
+    const ensurePageFocused = params.ensurePageFocused ?? true;
+    const fallbackOnNoEffect = params.fallbackOnNoEffect ?? true;
+
+    const resolveAutoPasteHotkey = () => (process.platform === 'darwin' ? 'Meta+V' : 'Control+V');
+    const resolvedPasteHotkey = !pasteHotkeyRaw || pasteHotkeyRaw.toLowerCase() === 'auto'
+      ? resolveAutoPasteHotkey()
+      : pasteHotkeyRaw;
+
+    const expandPasteHotkeys = (hk: string): string[] => {
+      const raw = String(hk || '').trim();
+      if (!raw) return [];
+      if (!fallbackOnNoEffect) return [raw];
+
+      const uniq = (arr: string[]) => Array.from(new Set(arr.filter(Boolean)));
+
+      if (raw.toLowerCase() === 'auto') {
+        const auto = resolveAutoPasteHotkey();
+        const alt = auto.startsWith('Meta') ? auto.replace('Meta', 'Control') : auto.replace('Control', 'Meta');
+        return uniq([auto, alt]);
+      }
+
+      if (raw.includes('ControlOrMeta')) {
+        return uniq([raw.replace('ControlOrMeta', 'Meta'), raw.replace('ControlOrMeta', 'Control')]);
+      }
+      if (raw.includes('Meta') && !raw.includes('Control')) return uniq([raw, raw.replace('Meta', 'Control')]);
+      if (raw.includes('Control') && !raw.includes('Meta')) return uniq([raw, raw.replace('Control', 'Meta')]);
+      return [raw];
+    };
+
+    const pasteHotkeys = expandPasteHotkeys(pasteHotkeyRaw || resolvedPasteHotkey);
+
     const waitAfterPaste = Math.max(0, Number(params.waitAfterPaste ?? 1200) || 1200);
     const outputVar = String(params.outputVar || 'pastedImageUrls').trim();
 
     const verifyAttachment = params.verifyAttachment ?? true;
     const uploadFallback = params.uploadFallback ?? true;
+    const uploadFallbackEffective = uploadFallback && mode !== 'paste';
     const waitAfterUpload = Math.max(0, Number(params.waitAfterUpload ?? 2500) || 2500);
 
     const attachIndicatorSelectorRaw = String(params.attachIndicatorSelector || '').trim();
@@ -206,6 +242,7 @@ export async function executePasteImageClipboard(
     }
 
     let attachedVia: 'clipboard' | 'upload' = 'clipboard';
+    let attachedViaDetail: 'clipboard' | 'drag_drop' | 'filechooser' | 'fileinput' = 'clipboard';
 
     const verifyIncrease = async (
       before: { count: number; signature: string },
@@ -240,7 +277,23 @@ export async function executePasteImageClipboard(
 
     const tryClipboardPaste = async () => {
       await withSystemClipboardLock(async () => {
-        await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+        if (ensurePageFocused) {
+          await page.bringToFront().catch(() => {});
+          await page.evaluate(() => window.focus()).catch(() => {});
+          log.push('🧲 已尝试 bringToFront + window.focus');
+        }
+
+        const origin = (() => {
+          try {
+            return new URL(page.url()).origin;
+          } catch {
+            return undefined;
+          }
+        })();
+        await page
+          .context()
+          .grantPermissions(['clipboard-read', 'clipboard-write'], origin ? { origin } : undefined)
+          .catch(() => {});
 
         let beforeSnap = await getAttachmentSnapshot();
         if (verifyAttachment) {
@@ -300,124 +353,254 @@ export async function executePasteImageClipboard(
           ctx.emit?.('log', `📋 已注入第 ${i + 1} 张图片到剪贴板`);
 
           await target.click({ timeout: 15_000 });
-          const pasteKey = process.platform === 'darwin' ? 'Meta+V' : 'Control+V';
-          log.push(`⌨️ 粘贴快捷键：${pasteKey}`);
-          await page.keyboard.press(pasteKey);
-          await page.waitForTimeout(waitAfterPaste);
-          log.push(`✅ [${i + 1}/${downloaded.length}] 已执行粘贴（键盘事件已触发）`);
 
-          await verifyIncrease(beforeSnap, 1, `第 ${i + 1} 张粘贴`, Math.max(4000, waitAfterPaste * 4));
+          let pastedOk = false;
+          let lastErr: unknown;
+          const candidates = pasteHotkeys.length ? pasteHotkeys : [resolvedPasteHotkey];
+          log.push(`⌨️ 粘贴候选快捷键：${candidates.join(' | ')}`);
+
+          for (const hk of candidates) {
+            try {
+              log.push(`⌨️ 粘贴快捷键：${hk}`);
+              await page.keyboard.press(hk);
+              await page.waitForTimeout(waitAfterPaste);
+              log.push(`✅ [${i + 1}/${downloaded.length}] 已执行粘贴（键盘事件已触发）`);
+
+              await verifyIncrease(beforeSnap, 1, `第 ${i + 1} 张粘贴`, Math.max(4000, waitAfterPaste * 4));
+              pastedOk = true;
+              break;
+            } catch (e) {
+              lastErr = e;
+              log.push(`⚠️ ${hk} 粘贴未生效，尝试下一个候选...`);
+            }
+          }
+
+          if (!pastedOk) throw lastErr;
+
           beforeSnap = await getAttachmentSnapshot();
         }
       });
     };
 
     try {
+      if (mode === 'upload') {
+        throw new Error('__FORCE_UPLOAD__');
+      }
       await tryClipboardPaste();
     } catch (e) {
       const err = e instanceof Error ? e.message : String(e);
-      log.push(`⚠️ 剪贴板粘贴未生效：${err}`);
+      const forcedUpload = err === '__FORCE_UPLOAD__';
+      if (!forcedUpload) {
+        log.push(`⚠️ 剪贴板粘贴未生效：${err}`);
+      }
 
-      if (!uploadFallback) {
+      if (!uploadFallbackEffective && !forcedUpload) {
         throw e;
       }
 
       attachedVia = 'upload';
-      log.push('🪄 尝试降级：下载到本地后通过 file input 上传...');
+      log.push(forcedUpload ? '⬆️ 直接上传：下载到本地后通过上传入口选择文件...' : '🪄 尝试降级：下载到本地后通过 file input 上传...');
 
       let before = await getAttachmentSnapshot();
       if (verifyAttachment) log.push(`🔎 附件计数（上传前）：${before.count}`);
 
-      const uploadButtonCandidates = [
-        // Gemini 常见入口
-        'button:has-text("Upload")',
-        'button:has-text("上传")',
-        'button:has-text("Add image")',
-        'button:has-text("添加图片")',
-        'button:has-text("Insert")',
-        'button:has-text("插入")',
-        // aria-label
-        '[aria-label*="upload" i]',
-        '[aria-label*="image" i]',
-        '[aria-label*="photo" i]',
-        '[aria-label*="图片" i]',
-        '[aria-label*="照片" i]',
-      ];
+      let uploadDone = false;
 
-      const tryUploadViaFileChooser = async (): Promise<boolean> => {
-        const clickSources = openUploaderSelector ? [openUploaderSelector, ...uploadButtonCandidates] : uploadButtonCandidates;
-
+      const tryUploadViaDragDrop = async (): Promise<boolean> => {
         for (let i = 0; i < downloaded.length; i++) {
-          const filePath = downloaded[i].filePath;
-          let chosen = false;
+          const img = downloaded[i];
+          const ext = (img.filePath.split('.').pop() || 'png').replace(/[^a-z0-9]/gi, '') || 'png';
+          const fileName = `img-${Date.now()}-${i + 1}.${ext}`;
 
-          for (const sel of clickSources) {
-            const locator = page.locator(sel).first();
-            const chooserPromise = page.waitForEvent('filechooser', { timeout: 1500 }).catch(() => null);
-            const clicked = await locator.click({ timeout: 1500 }).then(() => true).catch(() => false);
-            const chooser = await chooserPromise;
+          await targetHandle.evaluate(
+            async (el, payload: { base64: string; type: string; name: string }) => {
+              const { base64, type, name } = payload;
+              const bin = atob(base64);
+              const bytes = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
 
-            if (!clicked || !chooser) continue;
+              const blob = new Blob([bytes], { type });
+              const file = new File([blob], name, { type });
+              const dt = new DataTransfer();
+              dt.items.add(file);
 
-            await chooser.setFiles(filePath);
-            log.push(`📎 [${i + 1}/${downloaded.length}] filechooser 已选择文件：${path.basename(filePath)}（入口=${sel}）`);
-            chosen = true;
-            break;
-          }
+              const makeEvt = (type: string) => {
+                try {
+                  return new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
+                } catch {
+                  const ev = new Event(type, { bubbles: true, cancelable: true }) as any;
+                  Object.defineProperty(ev, 'dataTransfer', { value: dt });
+                  return ev;
+                }
+              };
 
-          if (!chosen) return false;
+              el.dispatchEvent(makeEvt('dragenter'));
+              el.dispatchEvent(makeEvt('dragover'));
+              el.dispatchEvent(makeEvt('drop'));
+            },
+            { base64: img.base64, type: img.mimeType, name: fileName }
+          );
 
+          log.push(`🧲 [${i + 1}/${downloaded.length}] 已尝试 drag&drop 上传：${img.mimeType}`);
           await page.waitForTimeout(waitAfterUpload);
-          await verifyIncrease(before, 1, `第 ${i + 1} 张文件选择器上传`, Math.max(6000, waitAfterUpload * 4));
+          await verifyIncrease(before, 1, `第 ${i + 1} 张 drag&drop 上传`, Math.max(6000, waitAfterUpload * 4));
           before = await getAttachmentSnapshot();
         }
-
         return true;
       };
 
-      // 优先走 filechooser：很多页面不会暴露/常驻 input[type=file]
-      const chooserOk = await tryUploadViaFileChooser();
-
-      const tryRevealFileInput = async (): Promise<boolean> => {
-        const sel = fileInputSelector || 'input[type="file"], input[type="file"][accept*="image" i]';
-        const ok = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
-        if (ok) return true;
-
-        // 没传 openUploaderSelector 时，做一轮启发式点击，常见于 Gemini（先点“添加图片/上传”才挂 input）
-        for (const cand of uploadButtonCandidates) {
-          const btn = page.locator(cand).first();
-          const clicked = await btn.click({ timeout: 800 }).then(() => true).catch(() => false);
-          if (!clicked) continue;
-          const appeared = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
-          if (appeared) {
-            log.push(`🧩 自动打开上传器成功：${cand}`);
-            return true;
+      // `mode=upload` 代表显式走上传入口，不应先尝试 drag&drop。
+      if (mode !== 'upload') {
+        try {
+          const ok = await tryUploadViaDragDrop();
+          if (ok) {
+            uploadDone = true;
+            attachedViaDetail = 'drag_drop';
           }
+        } catch {
+          // ignore and fallback
         }
-
-        return false;
-      };
-
-      const revealed = chooserOk ? true : await tryRevealFileInput();
-      if (!revealed) {
-        throw new Error(
-          `未找到 file input（selector=${fileInputSelector || 'input[type=file]'}）。` +
-            `请配置 openUploaderSelector（先点开上传入口）或 fileInputSelector（定位真实 input）。`
-        );
       }
 
-      const inputSel = fileInputSelector || 'input[type="file"], input[type="file"][accept*="image" i]';
-      const input = page.locator(inputSel).first();
-      await input.waitFor({ state: 'attached', timeout: 15_000 });
+      if (!uploadDone) {
+        const uploadButtonCandidates = [
+          // Gemini 当前上传入口
+          '[aria-label*="Open upload file menu" i]',
+          '.upload-card-button',
+          // Gemini 常见入口
+          'button:has-text("Upload")',
+          'button:has-text("上传")',
+          'button:has-text("Add image")',
+          'button:has-text("添加图片")',
+          'button:has-text("Insert")',
+          'button:has-text("插入")',
+          // aria-label
+          '[aria-label*="upload" i]',
+          '[aria-label*="image" i]',
+          '[aria-label*="photo" i]',
+          '[aria-label*="图片" i]',
+          '[aria-label*="照片" i]',
+        ];
 
-      for (let i = 0; i < downloaded.length; i++) {
-        const filePath = downloaded[i].filePath;
-        await input.setInputFiles(filePath);
-        log.push(`📎 [${i + 1}/${downloaded.length}] 已 setInputFiles：${path.basename(filePath)}（${fileInputSelector}）`);
+        const tryUploadViaFileChooser = async (): Promise<boolean> => {
+          const clickSources = openUploaderSelector ? [openUploaderSelector, ...uploadButtonCandidates] : uploadButtonCandidates;
 
-        await page.waitForTimeout(waitAfterUpload);
-        await verifyIncrease(before, 1, `第 ${i + 1} 张文件上传`, Math.max(6000, waitAfterUpload * 4));
-        before = await getAttachmentSnapshot();
+          // Google/Gemini 常见：入口按钮先打开菜单，再点“从电脑上传/选择文件”才会触发 filechooser
+          const menuItemCandidates = [
+            'text=/upload files/i',
+            '[role="menuitem"]:has-text("Upload files")',
+            'text=/upload from computer/i',
+            'text=/choose file/i',
+            'text=/select file/i',
+            'text=从电脑上传',
+            'text=上传文件',
+            'text=选择文件',
+            'text=本地上传',
+            '[role="menuitem"]:has-text("Upload")',
+            '[role="menuitem"]:has-text("上传")',
+            '[role="menuitem"]:has-text("图片")',
+            '[role="option"]:has-text("Upload")',
+            '[role="option"]:has-text("上传")',
+          ];
+
+          const clickToFileChooser = async (entrySelector: string): Promise<import('playwright').FileChooser | null> => {
+            const locator = page.locator(entrySelector).first();
+            const visible = await locator.isVisible().catch(() => false);
+            if (!visible) return null;
+            const chooserPromise = page.waitForEvent('filechooser', { timeout: 1800 }).catch(() => null);
+            const clicked = await locator.click({ timeout: 1800 }).then(() => true).catch(() => false);
+            const chooser = await chooserPromise;
+            if (clicked && chooser) return chooser;
+
+            for (const menuSel of menuItemCandidates) {
+              const item = page.locator(menuSel).first();
+              const itemVisible = await item.isVisible().catch(() => false);
+              if (!itemVisible) continue;
+              const chooserPromise2 = page.waitForEvent('filechooser', { timeout: 1400 }).catch(() => null);
+              const clicked2 = await item.click({ timeout: 1400 }).then(() => true).catch(() => false);
+              const chooser2 = await chooserPromise2;
+              if (clicked2 && chooser2) return chooser2;
+            }
+
+            return null;
+          };
+
+          for (let i = 0; i < downloaded.length; i++) {
+            const filePath = downloaded[i].filePath;
+            let chosen = false;
+
+            for (const sel of clickSources) {
+              const chooser = await clickToFileChooser(sel);
+              if (!chooser) continue;
+
+              await chooser.setFiles(filePath);
+              log.push(`📎 [${i + 1}/${downloaded.length}] filechooser 已选择文件：${path.basename(filePath)}（入口=${sel}）`);
+              chosen = true;
+              break;
+            }
+
+            if (!chosen) return false;
+
+            await page.waitForTimeout(waitAfterUpload);
+            await verifyIncrease(before, 1, `第 ${i + 1} 张文件选择器上传`, Math.max(6000, waitAfterUpload * 4));
+            before = await getAttachmentSnapshot();
+          }
+
+          return true;
+        };
+
+        // 优先走 filechooser：很多页面不会暴露/常驻 input[type=file]
+        const chooserOk = await tryUploadViaFileChooser();
+        if (chooserOk) {
+          attachedViaDetail = 'filechooser';
+          uploadDone = true;
+        }
+
+        const tryRevealFileInput = async (): Promise<boolean> => {
+          const sel = fileInputSelector || 'input[type="file"], input[type="file"][accept*="image" i]';
+          const ok = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
+          if (ok) return true;
+
+          // 没传 openUploaderSelector 时，做一轮启发式点击，常见于 Gemini（先点“添加图片/上传”才挂 input）
+          for (const cand of uploadButtonCandidates) {
+            const btn = page.locator(cand).first();
+            const clicked = await btn.click({ timeout: 800 }).then(() => true).catch(() => false);
+            if (!clicked) continue;
+            const appeared = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
+            if (appeared) {
+              log.push(`🧩 自动打开上传器成功：${cand}`);
+              return true;
+            }
+          }
+
+          return false;
+        };
+
+        if (!uploadDone) {
+          const revealed = await tryRevealFileInput();
+          if (!revealed) {
+            throw new Error(
+              `未找到 file input（selector=${fileInputSelector || 'input[type=file]'}）。` +
+                `请配置 openUploaderSelector（先点开上传入口）或 fileInputSelector（定位真实 input）。`
+            );
+          }
+
+          const inputSel = fileInputSelector || 'input[type="file"], input[type="file"][accept*="image" i]';
+          const input = page.locator(inputSel).first();
+          await input.waitFor({ state: 'attached', timeout: 15_000 });
+
+          for (let i = 0; i < downloaded.length; i++) {
+            const filePath = downloaded[i].filePath;
+            await input.setInputFiles(filePath);
+            log.push(`📎 [${i + 1}/${downloaded.length}] 已 setInputFiles：${path.basename(filePath)}（${fileInputSelector}）`);
+
+            await page.waitForTimeout(waitAfterUpload);
+            await verifyIncrease(before, 1, `第 ${i + 1} 张文件上传`, Math.max(6000, waitAfterUpload * 4));
+            before = await getAttachmentSnapshot();
+          }
+          attachedViaDetail = 'fileinput';
+          uploadDone = true;
+        }
       }
     }
 
@@ -436,6 +619,7 @@ export async function executePasteImageClipboard(
         imageUrl: imageUrls[0] || '',
         imageCount: imageUrls.length,
         attachedVia,
+        attachedViaDetail,
         localPaths: downloaded.map((d) => d.filePath),
         verifyAttachment,
         attachIndicatorSelector: attachIndicatorSelectorRaw || '(default)',

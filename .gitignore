@@ -62,3 +62,8 @@ __pycache__/
 # Runtime & Temp
 .runtime/
 temp/
+.claude/
+viewer_*.html
+batch_viewer_*.html
+model_sheet_viewer_*.html
+blueprint_viewer_*.html

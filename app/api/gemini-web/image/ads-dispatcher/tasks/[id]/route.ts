@@ -1,3 +1,6 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { NextResponse } from 'next/server';
 import { getGeminiAdsDispatcherQueueInfo, getGeminiAdsDispatcherTask } from '@/lib/workflow/gemini-ads-dispatcher';
 
@@ -23,6 +26,23 @@ type Row = {
   task_json?: any;
 };
 
+function sanitizeUrls(urls: unknown, sourceImageUrls: unknown): string[] {
+  const blocked = new Set(
+    (Array.isArray(sourceImageUrls) ? sourceImageUrls : [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  );
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of Array.isArray(urls) ? urls : []) {
+    const url = String(raw || '').trim();
+    if (!url || blocked.has(url) || seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+  return out;
+}
+
 async function fetchTaskFromSupabase(id: string) {
   const url = new URL(`${SUPABASE_URL}/rest/v1/gemini_ads_dispatcher_tasks`);
   url.searchParams.set('select', 'id,task_json');
@@ -38,20 +58,50 @@ async function fetchTaskFromSupabase(id: string) {
   return rows[0]?.task_json || null;
 }
 
+function fetchTaskFromDisk(id: string) {
+  const { getGeminiAdsDispatcherTaskCacheDir } = require('@/lib/workflow/gemini-ads-dispatcher-cache') as typeof import('@/lib/workflow/gemini-ads-dispatcher-cache');
+  const dir = getGeminiAdsDispatcherTaskCacheDir();
+  const directFile = path.join(dir, `${id}.json`);
+
+  const tryRead = (file: string) => {
+    try {
+      const task = JSON.parse(fs.readFileSync(file, 'utf8')) as any;
+      return task && task.id === id ? task : null;
+    } catch {
+      return null;
+    }
+  };
+
+  if (fs.existsSync(directFile)) {
+    const direct = tryRead(directFile);
+    if (direct) return direct;
+  }
+
+  if (!fs.existsSync(dir)) return null;
+
+  // Fallback: scan directory to find matching task id (file name may not equal taskId)
+  let names: string[] = [];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return null;
+  }
+
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue;
+    if (name === 'queue.json') continue;
+    const hit = tryRead(path.join(dir, name));
+    if (hit) return hit;
+  }
+
+  return null;
+}
+
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  let task: any = getGeminiAdsDispatcherTask(id);
-  let source: 'memory' | 'supabase' = 'memory';
-
-  if (!task && isSupabaseConfigured()) {
-    try {
-      task = await fetchTaskFromSupabase(id);
-      if (task) source = 'supabase';
-    } catch {
-      // ignore
-    }
-  }
+  const task = await getGeminiAdsDispatcherTask(id);
+  const source = 'memory'; // 内部已处理三级缓存，此处为兼容语义保留 key
 
   if (!task) {
     return NextResponse.json({ error: '任务不存在' }, { status: 404 });
@@ -59,9 +109,36 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 
   const done = task.status === 'success' || task.status === 'failed' || task.status === 'cancelled';
   const items = Array.isArray(task.items) ? task.items : [];
+  const sanitizedItems = items.map((item: any) => {
+    const media = sanitizeUrls(item.mediaUrls ?? item.imageUrls, item.sourceImageUrls);
+    const images = sanitizeUrls(item.imageUrls, item.sourceImageUrls);
+    return {
+      id: item.id,
+      index: item.index,
+      prompt: item.prompt,
+      sourceImageUrls: item.sourceImageUrls ?? [],
+      sourceImageUrl: item.sourceImageUrls?.[0] ?? null,
+      originalPrompt: item.promptHistory?.[0] ?? item.prompt,
+      promptHistory: item.promptHistory,
+      status: item.status,
+      attempts: item.attempts,
+      retried: Number(item.attempts || 0) > 1,
+      retryCount: Math.max(0, Number(item.attempts || 0) - 1),
+      browserInstanceId: item.browserInstanceId,
+      mediaUrls: media,
+      primaryMediaUrl: media[0] || null,
+      primaryMediaType: item.primaryMediaType || null,
+      imageUrls: images,
+      primaryImageUrl: images[0] || null,
+      error: item.error,
+      batchTaskId: item.batchTaskId,
+      startedAt: item.startedAt,
+      endedAt: item.endedAt,
+    };
+  });
 
-  const mediaUrls = Array.from(new Set(items.flatMap((item: any) => (item.mediaUrls ?? item.imageUrls) || []).filter(Boolean)));
-  const imageUrls = Array.from(new Set(items.flatMap((item: any) => (item.imageUrls || []).filter(Boolean))));
+  const mediaUrls = Array.from(new Set(items.flatMap((item: any) => sanitizeUrls(item.mediaUrls ?? item.imageUrls, item.sourceImageUrls))));
+  const imageUrls = Array.from(new Set(items.flatMap((item: any) => sanitizeUrls(item.imageUrls, item.sourceImageUrls))));
 
   const retriedItems = items
     .filter((item: any) => Number(item.attempts || 0) > 1)
@@ -69,6 +146,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       id: item.id,
       index: item.index,
       prompt: item.prompt,
+      sourceImageUrls: item.sourceImageUrls ?? [],
+      sourceImageUrl: item.sourceImageUrls?.[0] ?? null,
       originalPrompt: item.promptHistory?.[0] ?? item.prompt,
       promptHistory: item.promptHistory,
       attempts: item.attempts,
@@ -82,6 +161,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   return NextResponse.json({
     source,
     ...task,
+    items: sanitizedItems,
     queue: getGeminiAdsDispatcherQueueInfo(task.id),
     traceUrl: `/api/task-traces?namespace=gemini-ads-dispatcher&taskId=${encodeURIComponent(task.id)}`,
     done,
@@ -95,27 +175,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       totalCount: task.summary?.total ?? items.length,
       retriedItemCount: retriedItems.length,
       retriedItems,
-      items: items.map((item: any) => ({
-        id: item.id,
-        index: item.index,
-        prompt: item.prompt,
-        originalPrompt: item.promptHistory?.[0] ?? item.prompt,
-        promptHistory: item.promptHistory,
-        status: item.status,
-        attempts: item.attempts,
-        retried: Number(item.attempts || 0) > 1,
-        retryCount: Math.max(0, Number(item.attempts || 0) - 1),
-        browserInstanceId: item.browserInstanceId,
-        mediaUrls: item.mediaUrls ?? item.imageUrls,
-        primaryMediaUrl: (item.mediaUrls ?? item.imageUrls)?.[0] || null,
-        primaryMediaType: item.primaryMediaType || null,
-        imageUrls: item.imageUrls,
-        primaryImageUrl: item.imageUrls?.[0] || null,
-        error: item.error,
-        batchTaskId: item.batchTaskId,
-        startedAt: item.startedAt,
-        endedAt: item.endedAt,
-      })),
+      items: sanitizedItems,
       instances: task.instances,
     },
   });

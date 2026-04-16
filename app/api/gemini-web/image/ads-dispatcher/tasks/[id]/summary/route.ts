@@ -9,16 +9,33 @@ function isDone(status: TaskStatus): boolean {
   return status === 'success' || status === 'failed' || status === 'cancelled';
 }
 
+function sanitizeUrls(urls: unknown, sourceImageUrls: unknown): string[] {
+  const blocked = new Set(
+    (Array.isArray(sourceImageUrls) ? sourceImageUrls : [])
+      .map((item) => String(item || '').trim())
+      .filter(Boolean)
+  );
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of Array.isArray(urls) ? urls : []) {
+    const url = String(raw || '').trim();
+    if (!url || blocked.has(url) || seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+  return out;
+}
+
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const task = getGeminiAdsDispatcherTask(id);
+  const task = await getGeminiAdsDispatcherTask(id);
   if (!task) {
     return NextResponse.json({ error: '任务不存在' }, { status: 404 });
   }
 
   const done = isDone(task.status as TaskStatus);
-  const mediaUrls = Array.from(new Set(task.items.flatMap((item) => item.mediaUrls ?? item.imageUrls).filter(Boolean)));
-  const imageUrls = Array.from(new Set(task.items.flatMap((item) => item.imageUrls ?? []).filter(Boolean)));
+  const mediaUrls = Array.from(new Set(task.items.flatMap((item) => sanitizeUrls(item.mediaUrls ?? item.imageUrls, item.sourceImageUrls))));
+  const imageUrls = Array.from(new Set(task.items.flatMap((item) => sanitizeUrls(item.imageUrls ?? [], item.sourceImageUrls))));
   const completed = (task.summary?.success ?? 0) + (task.summary?.failed ?? 0) + (task.summary?.cancelled ?? 0);
   const total = task.summary?.total ?? task.items.length;
   const progress = total > 0 ? Math.round((completed / total) * 100) : 0;
@@ -53,10 +70,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       primaryImageUrl: imageUrls[0] ?? null,
     },
     items: task.items.map((item) => {
-      const media = (item.mediaUrls ?? item.imageUrls).filter(Boolean);
-      const images = (item.imageUrls ?? []).filter(Boolean);
+      const media = sanitizeUrls(item.mediaUrls ?? item.imageUrls, item.sourceImageUrls);
+      const images = sanitizeUrls(item.imageUrls ?? [], item.sourceImageUrls);
       return {
         index: item.index,
+        prompt: item.prompt,
+        sourceImageUrls: item.sourceImageUrls ?? [],
+        sourceImageUrl: item.sourceImageUrls?.[0] ?? null,
         status: item.status,
         attempts: item.attempts,
         primaryMediaUrl: media[0] ?? null,

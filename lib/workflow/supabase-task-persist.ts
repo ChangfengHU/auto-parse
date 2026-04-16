@@ -64,3 +64,36 @@ export function insertTaskTraceEvent(input: {
     body: JSON.stringify(row),
   }).catch(() => {});
 }
+
+/**
+ * [NEW] 从 Supabase 获取调度任务快照（用于二级缓存回源）
+ */
+export async function getAdsDispatcherTaskSnapshot(taskId: string): Promise<Json | null> {
+  if (!isConfigured()) return null;
+
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/gemini_ads_dispatcher_tasks?id=eq.${taskId}&select=task_json`,
+      {
+        method: 'GET',
+        headers: headers(),
+      }
+    );
+
+    if (!res.ok) {
+      if (res.status !== 404) {
+        console.error(`[Supabase] Failed to fetch task ${taskId}: ${res.statusText}`);
+      }
+      return null;
+    }
+
+    const list = await res.json();
+    if (Array.isArray(list) && list.length > 0) {
+      return list[0].task_json as Json;
+    }
+    return null;
+  } catch (error) {
+    console.error(`[Supabase] Error fetching task ${taskId}:`, error);
+    return null;
+  }
+}

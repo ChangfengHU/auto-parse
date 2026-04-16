@@ -246,9 +246,23 @@ export async function executeExtractImageDownload(
     const waitForNew = params.waitForNew ?? false;
     const waitForNewTimeout = params.waitForNewTimeout ?? 120_000;
 
-    const failFastTextIncludes = (params.failFastTextIncludes || [])
-      .map((item) => String(item || '').trim())
-      .filter(Boolean);
+    // 安全处理 failFastTextIncludes：支持数组、对象或其他类型
+    let failFastTextIncludes: string[] = [];
+    if (params.failFastTextIncludes) {
+      if (Array.isArray(params.failFastTextIncludes)) {
+        failFastTextIncludes = params.failFastTextIncludes
+          .map((item) => String(item || '').trim())
+          .filter(Boolean);
+      } else if (typeof params.failFastTextIncludes === 'object') {
+        // 如果被误传成了对象，尝试从对象中提取数组
+        const val = Object.values(params.failFastTextIncludes as Record<string, unknown>);
+        if (Array.isArray(val) && val.length > 0) {
+          failFastTextIncludes = val
+            .map((item) => String(item || '').trim())
+            .filter(Boolean);
+        }
+      }
+    }
     const failFastSelector = String(params.failFastSelector || '').trim();
     if (failFastTextIncludes.length > 0 || failFastSelector) {
       log.push(

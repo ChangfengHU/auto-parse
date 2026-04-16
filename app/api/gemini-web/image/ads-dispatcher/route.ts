@@ -7,14 +7,87 @@ import {
 
 export const runtime = 'nodejs';
 
+function normalizeImageUrlList(value: unknown): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const pushToken = (token: string) => {
+    const trimmed = token.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+
+  const visit = (input: unknown) => {
+    if (Array.isArray(input)) {
+      for (const item of input) visit(item);
+      return;
+    }
+
+    const text = String(input || '').trim();
+    if (!text) return;
+
+    if (text.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          visit(parsed);
+          return;
+        }
+      } catch {
+        // fall through to split mode
+      }
+    }
+
+    for (const token of text.split(/[\n,]/)) {
+      pushToken(token);
+    }
+  };
+
+  visit(value);
+  return out;
+}
+
+function normalizeDispatcherRuns(body: Record<string, unknown>) {
+  const sharedImages =
+    body.sourceImageUrls ?? body.imageUrls ?? body.sourceImageUrl ?? body.imageUrl;
+  const groupedImages = Array.isArray(body.sourceImageUrlsByPrompt)
+    ? body.sourceImageUrlsByPrompt
+    : (Array.isArray(body.imageUrlsByPrompt) ? body.imageUrlsByPrompt : []);
+
+  const rawRuns = Array.isArray(body.runs) ? body.runs : null;
+  if (rawRuns) {
+    return rawRuns
+      .map((item, index) => {
+        const run = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+        const prompt = String(run.prompt || '').trim();
+        const sourceImageUrls = normalizeImageUrlList(
+          run.sourceImageUrls
+            ?? run.imageUrls
+            ?? run.sourceImageUrl
+            ?? run.imageUrl
+            ?? groupedImages[index]
+            ?? sharedImages
+        );
+        return { prompt, sourceImageUrls };
+      })
+      .filter((item) => item.prompt);
+  }
+
+  const prompts = Array.isArray(body.prompts) ? body.prompts : [];
+  return prompts
+    .map((item, index) => ({
+      prompt: String(item || '').trim(),
+      sourceImageUrls: normalizeImageUrlList(groupedImages[index] ?? sharedImages),
+    }))
+    .filter((item) => item.prompt);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const prompts = Array.isArray(body.prompts)
-      ? body.prompts
-      : Array.isArray(body.runs)
-        ? body.runs.map((item: unknown) => (item && typeof item === 'object' ? (item as { prompt?: string }).prompt : ''))
-        : [];
+    const normalizedBody = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+    const runs = normalizeDispatcherRuns(normalizedBody);
 
     const clearQueue = body.clearQueue === true || body.flushQueue === true || body.resetQueue === true;
     const clearQueueReason = typeof body.clearQueueReason === 'string'
@@ -25,7 +98,7 @@ export async function POST(req: NextRequest) {
       ? await clearGeminiAdsDispatcherQueue({ reason: clearQueueReason })
       : null;
 
-    if (clearQueue && prompts.length === 0) {
+    if (clearQueue && runs.length === 0) {
       return NextResponse.json({
         ok: true,
         cleared,
@@ -38,7 +111,7 @@ export async function POST(req: NextRequest) {
     const force = body.force === true || body.forceExecute === true || body.forceStart === true;
 
     const task = await createGeminiAdsDispatcherTask({
-      prompts,
+      runs,
       instanceIds,
       force,
       forceReason: typeof body.forceReason === 'string' ? body.forceReason : undefined,

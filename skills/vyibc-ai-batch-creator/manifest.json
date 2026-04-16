@@ -1,0 +1,152 @@
+{
+  "name": "vyibc-ai-batch-creator",
+  "displayName": "AI 创意批量生成器",
+  "description": "基于参考图的 AI 图片批量生成工具 —— 快速生成多张风格一致的高质量创意图片",
+  "version": "1.0.0",
+  "author": "vyibc",
+  "tags": [
+    "batch-generation",
+    "ai-creation",
+    "consistent-style",
+    "image-generation"
+  ],
+  "triggers": [
+    "vyibc-ai-batch-creator",
+    "AI 创意批量生成",
+    "批量生成图片",
+    "生成多张图片"
+  ],
+  "parameters": {
+    "sourceImageUrl": {
+      "type": "string | string[]",
+      "description": "参考图片的 URL，用于保持生成图片的风格和人物一致",
+      "required": false,
+      "examples": [
+        "https://example.com/girl.jpg",
+        "[\"https://example.com/girl.jpg\", \"https://example.com/girl2.jpg\"]"
+      ]
+    },
+    "prompts": {
+      "type": "string[]",
+      "description": "要生成的创意描述列表，每一个 prompt 生成一张图片",
+      "required": true,
+      "examples": [
+        "[\"场景1\", \"场景2\", \"场景3\"]",
+        "场景1\n场景2\n场景3"
+      ]
+    },
+    "priority": {
+      "type": "boolean",
+      "description": "是否优先执行任务（跳过队列）",
+      "default": false
+    },
+    "maxAttempts": {
+      "type": "number",
+      "description": "失败重试次数",
+      "default": 3,
+      "min": 1,
+      "max": 10
+    },
+    "timeout": {
+      "type": "number",
+      "description": "任务超时时间（毫秒）",
+      "default": 2700000,
+      "min": 60000
+    },
+    "quality": {
+      "type": "string",
+      "description": "质量模式",
+      "enum": ["balanced", "quality", "speed"],
+      "default": "balanced"
+    }
+  },
+  "output": {
+    "type": "object",
+    "properties": {
+      "taskId": {
+        "type": "string",
+        "description": "任务 ID，用于查询进度和获取结果"
+      },
+      "status": {
+        "type": "string",
+        "enum": ["queued", "running", "success", "failed"],
+        "description": "任务状态"
+      },
+      "progress": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "number" },
+          "completed": { "type": "number" },
+          "failed": { "type": "number" },
+          "processing": { "type": "number" }
+        }
+      },
+      "queryUrl": {
+        "type": "string",
+        "description": "实时查询进度的 URL"
+      },
+      "cancelUrl": {
+        "type": "string",
+        "description": "取消任务的 URL"
+      },
+      "message": {
+        "type": "string",
+        "description": "返回信息"
+      }
+    }
+  },
+  "capabilities": [
+    {
+      "name": "批量生成",
+      "description": "一次生成 5-100+ 张图片，无需逐个等待"
+    },
+    {
+      "name": "一致性保证",
+      "description": "自动保持参考图的风格和人物特征"
+    },
+    {
+      "name": "大规模创作",
+      "description": "支持 5-100+ 张的大规模生成"
+    },
+    {
+      "name": "实时监控",
+      "description": "支持查询进度和实时反馈"
+    }
+  ],
+  "useCases": [
+    {
+      "title": "个人写真集生成",
+      "description": "生成某个人在不同场景、衣着的一致写真集"
+    },
+    {
+      "title": "小说/故事配图",
+      "description": "为故事中的关键场景生成完整插图集"
+    },
+    {
+      "title": "产品展示",
+      "description": "展示产品在不同场景、不同穿搭的应用"
+    },
+    {
+      "title": "角色原画库",
+      "description": "生成游戏或动漫角色的多种设定图"
+    },
+    {
+      "title": "品牌视觉资产",
+      "description": "为品牌生成在不同营销场景的统一视觉资产"
+    }
+  ],
+  "apiEndpoint": "http://localhost:1007/api/gemini-web/image/ads-dispatcher",
+  "documentation": {
+    "url": "./SKILL.md",
+    "quickStart": {
+      "title": "快速开始",
+      "steps": [
+        "准备 1-3 张参考图的 URL",
+        "列出 5-100+ 个要生成的场景描述",
+        "运行 skill，获得 taskId",
+        "使用 queryUrl 监控进度",
+        "完成后获取所有生成的图片 URL"
+      ]
+    }
+  }
+}
