@@ -256,6 +256,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           label: node.label,
           result,
           executedAt: Date.now(),
+          durationMs: result.durationMs,
         };
 
         const nextStep = requestedIndex + 1;
@@ -276,14 +277,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
           if (freshSession?._idleSim) freshSession._idleSim.start(session._page);
         }
 
+        const totalDurationMs = done && !failed
+          ? session.history.reduce((sum, h) => sum + (h.durationMs || 0), 0) + (result.durationMs || 0)
+          : undefined;
+
         send('done', JSON.stringify({
-          result: { success: result.success, log: result.log, error: result.error, output: result.output },
+          result: { success: result.success, log: result.log, error: result.error, output: result.output, durationMs: result.durationMs },
           vars: nextVars,
           executedStep: requestedIndex,
           nextStep: failed ? requestedIndex : nextStep,
           done: done && !failed,
           failed,
           relay,
+          totalDurationMs,
         }));
 
       } catch (e) {

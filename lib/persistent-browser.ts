@@ -9,6 +9,7 @@
 
 import { chromium, BrowserContext } from 'playwright';
 import { getRuntimeBackendConfigSync } from '@/lib/runtime/backend-config';
+import { execSync } from 'child_process';
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
@@ -116,6 +117,45 @@ declare global {
 }
 
 /**
+ * 寻找并杀死占用该数据目录的孤儿 Chrome 进程
+ */
+function killOrphanedChrome(dataDir: string) {
+  try {
+    // 查找正在运行的且包含指定数据目录路径的进程 PID
+    const cmd = `ps aux | grep "user-data-dir=${dataDir}" | grep -v grep | awk '{print $2}'`;
+    const pids = execSync(cmd).toString().trim().split('\n').filter(Boolean);
+
+    if (pids.length > 0) {
+      console.log(`[Browser] 发现占用的孤儿 Chrome 进程 (PIDs: ${pids.join(', ')}), 正在强制清理以解除目录锁定...`);
+      for (const pid of pids) {
+        try {
+          execSync(`kill -9 ${pid}`);
+        } catch {
+          // 忽略已关闭的情况
+        }
+      }
+    }
+  } catch {
+    // 忽略异常
+  }
+}
+
+/**
+ * 清理 SingletonLock 锁文件
+ */
+function cleanSingletonLock(dataDir: string) {
+  const lockFile = path.join(dataDir, 'SingletonLock');
+  try {
+    if (fs.existsSync(lockFile)) {
+      console.log(`[Browser] 检测到 SingletonLock 锁文件，执行强行删除`);
+      fs.unlinkSync(lockFile);
+    }
+  } catch {
+    // 忽略异常
+  }
+}
+
+/**
  * 启动前修复 Chrome Preferences，将 exit_type 重置为 Normal
  */
 function patchChromePreferences(dataDir: string) {
@@ -164,6 +204,10 @@ export async function getPersistentContext(): Promise<BrowserContext> {
 
   launching = true;
   try {
+    // 0. 启动前自检及自愈
+    killOrphanedChrome(BROWSER_DATA_DIR);
+    cleanSingletonLock(BROWSER_DATA_DIR);
+
     patchChromePreferences(BROWSER_DATA_DIR);
     const configuredHeadless = getConfiguredBrowserHeadless();
     console.log(`[Browser] 启动持久化浏览器  headless=${configuredHeadless}  dataDir=${BROWSER_DATA_DIR}`);
@@ -196,7 +240,7 @@ export async function getPersistentContext(): Promise<BrowserContext> {
         '--deny-permission-prompts',
         '--disable-notifications',
         // 启用远程调试端口
-        '--remote-debugging-port=1009',
+        '--remote-debugging-port=10009',
         '--remote-debugging-address=0.0.0.0',
       ],
     });

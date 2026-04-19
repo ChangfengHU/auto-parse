@@ -35,6 +35,26 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
   const [testing, setTesting] = useState(false);
   const [msg, setMsg] = useState('');
   const [showInput, setShowInput] = useState(false);
+  const [qrState, setQrState] = useState<{
+    loading: boolean;
+    qrUrl: string | null;
+    qrId: string | null;
+    code: string | null;
+    a1: string | null;
+    webid: string | null;
+    initialCookies: any;
+    statusText: string;
+  }>({
+    loading: false,
+    qrUrl: null,
+    qrId: null,
+    code: null,
+    a1: null,
+    webid: null,
+    initialCookies: null,
+    statusText: '',
+  });
+
   const autoLoginTriedRef = useRef(false);
 
   const refresh = useCallback(async (options?: { force?: boolean }) => {
@@ -89,6 +109,93 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
       window.removeEventListener('message', handler);
     };
   }, []);
+
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
+
+  const startQrLogin = async () => {
+    setQrState(prev => ({ ...prev, loading: true, statusText: '正在生成二维码...' }));
+    setMsg('');
+    try {
+      const res = await fetch('/api/analysis/xhs/login/qr');
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || '生成二维码失败');
+
+      setQrState({
+        loading: false,
+        qrUrl: d.url,
+        qrId: d.qr_id,
+        code: d.code,
+        a1: d.a1,
+        webid: d.webid,
+        initialCookies: d.cookies,
+        statusText: '请使用小红书 App 扫码',
+      });
+
+      // 开始轮询
+      stopPolling();
+      pollTimerRef.current = setInterval(async () => {
+        try {
+          const pollRes = await fetch('/api/analysis/xhs/login/poll', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              qr_id: d.qr_id,
+              code: d.code,
+              a1: d.a1,
+              webid: d.webid,
+              cookies: d.cookies,
+              clientId: input.trim() || pluginClientId
+            }),
+          });
+          const pollData = await pollRes.json();
+          if (pollData.ok) {
+            if (pollData.status_text === 'scanned') {
+              setQrState(prev => ({ ...prev, statusText: '📲 已扫码，请在手机上点击确认...' }));
+            } else if (pollData.status_text === 'success') {
+              setQrState(prev => ({ ...prev, statusText: '✅ 登录成功！正在同步...' }));
+              stopPolling();
+              setMsg('✅ 登录成功，正在刷新页面...');
+              setTimeout(() => {
+                setQrState(prev => ({ ...prev, qrUrl: null }));
+                void refresh({ force: true });
+              }, 1500);
+            }
+          }
+        } catch (e) {
+          console.error('Polling error:', e);
+        }
+      }, 3000);
+
+    } catch (e) {
+      setMsg('❌ ' + (e instanceof Error ? e.message : String(e)));
+      setQrState(prev => ({ ...prev, loading: false, statusText: '' }));
+    }
+  };
+
+  const cancelQrLogin = () => {
+    stopPolling();
+    setQrState({
+      loading: false,
+      qrUrl: null,
+      qrId: null,
+      code: null,
+      a1: null,
+      webid: null,
+      initialCookies: null,
+      statusText: '',
+    });
+  };
 
   useEffect(() => {
     if (!pluginClientId || autoLoginTriedRef.current || status?.valid) return;
@@ -187,7 +294,7 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
         <div className="flex items-center gap-2">
           {status?.set && (
             <button 
-              onClick={() => setShowInput(!showInput)} 
+              onClick={() => { setShowInput(!showInput); cancelQrLogin(); }} 
               className="text-xs text-primary hover:underline font-medium"
             >
               {showInput ? '取消修改' : '重新设置'}
@@ -211,15 +318,35 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
           </button>
         </div>
       )}
+      
       {status?.set && !status.valid && (
         <p className="text-xs text-amber-600 dark:text-amber-400">
-          已检测到登录信息，但当前未通过有效性校验，请点击“测试登录”查看详情。
+          已检测到登录信息，但当前未通过有效性校验，请点击“测试登录”或尝试扫码重新登录。
         </p>
       )}
 
-      {/* 手动输入区：未设置时，或手动点击重新设置时显示 */}
-      {(!status?.set || showInput) && (
-        <div className="space-y-2 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+      {/* 手动输入区 / 扫码入口 */}
+      {(!status?.set || showInput) && !qrState.qrUrl && (
+        <div className="space-y-3 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={startQrLogin}
+              disabled={qrState.loading}
+              className="flex-1 py-2.5 bg-rose-500 text-white text-xs font-bold rounded-lg hover:bg-rose-600 transition-all shadow-md shadow-rose-500/10 flex items-center justify-center gap-2"
+            >
+              {qrState.loading ? (
+                <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : '📕 一键扫码登录'}
+            </button>
+          </div>
+          
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-border" /></div>
+            <div className="relative flex justify-center text-[10px] uppercase">
+              <span className="bg-card px-2 text-muted-foreground font-medium">其他方式</span>
+            </div>
+          </div>
+
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -244,21 +371,6 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
               使用 Cookie
             </button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {mode === 'credential' ? (
-              <>
-                输入凭证 ID（例如
-                <code className="bg-muted px-1 rounded ml-1">xhs_4cbc57e24e94447a912c0f8acc2ed2b9</code>）
-              </>
-            ) : (
-              <>粘贴完整 Cookie 字符串（如包含 web_session、a1 等字段）</>
-            )}
-          </p>
-          {pluginClientId && mode === 'credential' && (
-            <p className="text-xs text-emerald-600 dark:text-emerald-400">
-              已从插件检测到凭证：<span className="font-mono">{pluginClientId}</span>
-            </p>
-          )}
           <div className="flex flex-col sm:flex-row gap-2">
             <input
               value={input}
@@ -268,23 +380,41 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
               className="flex-1 px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/40 font-mono"
               autoFocus={showInput}
             />
-              <button
-                onClick={save}
-                disabled={saving || !input.trim()}
-                className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded-lg disabled:opacity-50 hover:opacity-90 transition-all shadow-sm"
-              >
-                {saving ? '...' : '保存/登录'}
-              </button>
-              <button
-                onClick={testLogin}
-                disabled={testing}
-                className="px-4 py-2 bg-muted text-foreground text-sm rounded-lg disabled:opacity-50 hover:bg-muted/80 transition-all border border-border"
-              >
-                {testing ? '测试中...' : '测试登录'}
-              </button>
+            <button
+              onClick={save}
+              disabled={saving || !input.trim()}
+              className="px-4 py-2 bg-primary text-primary-foreground text-sm rounded-lg disabled:opacity-50 hover:opacity-90 transition-all shadow-sm"
+            >
+              {saving ? '...' : '保存'}
+            </button>
           </div>
         </div>
       )}
+
+      {/* 二维码展示区 */}
+      {qrState.qrUrl && (
+        <div className="flex flex-col items-center gap-3 p-4 bg-muted/20 rounded-xl border border-border animate-in zoom-in-95 duration-200">
+          <div className="text-sm font-semibold text-foreground">扫码安全登录</div>
+          <div className="bg-white p-2 rounded-lg shadow-inner border border-zinc-100">
+            <img 
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrState.qrUrl)}`}
+              alt="小红书登录二维码"
+              className="w-48 h-48"
+            />
+          </div>
+          <div className="text-center space-y-1">
+            <p className="text-xs font-medium text-primary animate-pulse">{qrState.statusText}</p>
+            <p className="text-[10px] text-muted-foreground">该二维码仅用于登录验证，不记录您的账号密码</p>
+          </div>
+          <button 
+            onClick={cancelQrLogin}
+            className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+          >
+            取消扫码
+          </button>
+        </div>
+      )}
+
       {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
     </div>
   );

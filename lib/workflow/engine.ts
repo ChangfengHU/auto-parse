@@ -78,6 +78,19 @@ export async function executeNode(
   node: NodeDef,
   ctx: WorkflowContext
 ): Promise<NodeResult> {
+  // 检查节点是否禁用
+  if (node.disabled) {
+    const msg = `⏭️ 节点已禁用，跳过执行：${node.label ?? node.type}`;
+    ctx.emit?.('log', msg);
+    // 不写 output：避免 { skipped, reason } 合并进 finalVars，下游误判「整单未产出」
+    return {
+      success: true,
+      log: [msg],
+      stepSkipped: true,
+    };
+  }
+
+  const startTime = performance.now();
   const executor = NODE_REGISTRY[node.type];
   if (!executor) {
     return { success: false, log: [`❌ 未知节点类型: ${node.type}`], error: `unknown node: ${node.type}` };
@@ -101,15 +114,16 @@ export async function executeNode(
   }
 
   // ── 节点前置导航（url 字段设置时自动跳转）─────────────────────────────────
-  if (node.url) {
+  // 注意：对于导航节点本身，我们跳过解析此处的 url 自动跳转，由 navigate 节点内部 logic 统一处理，避免双重跳转
+  if (node.url && node.type !== 'navigate') {
     const resolvedUrl = resolveParams({ url: node.url }, ctx.vars).url as string;
     const currentUrl = page.url();
-    if (!currentUrl.includes(resolvedUrl) && !resolvedUrl.includes(currentUrl)) {
-      ctx.emit?.('log', `🌐 自动导航到：${resolvedUrl}`);
+    if (resolvedUrl && !currentUrl.includes(resolvedUrl) && !resolvedUrl.includes(currentUrl)) {
+      ctx.emit?.('log', `🌐 节点前置自动导航：${resolvedUrl}`);
       try {
         await page.goto(resolvedUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       } catch (e) {
-        ctx.emit?.('log', `⚠️ 导航超时，继续执行：${String(e).slice(0, 80)}`);
+        ctx.emit?.('log', `⚠️ 前置导航超时，尝试继续执行：${String(e).slice(0, 80)}`);
       }
     }
   }
@@ -170,7 +184,7 @@ export async function executeNode(
     }
   }
 
-  // ── 自动截图（默认开启，除非明确关闭）────────────────────────────────────
+  // ── 自动截图及耗时收尾 ────────────────────────────────────────────────
   if (node.autoScreenshot !== false && !result.screenshot) {
     const shot = await captureScreenshot(resultPage).catch(() => undefined);
     if (shot) {
@@ -179,6 +193,15 @@ export async function executeNode(
     }
   } else if (result.screenshot) {
     ctx.emit?.('screenshot', result.screenshot);
+  }
+
+  const durationMs = Math.round(performance.now() - startTime);
+  const durationS = (durationMs / 1000).toFixed(2);
+  
+  result.durationMs = durationMs;
+
+  if (result.success) {
+    ctx.emit?.('log', `⏱️ 节点执行耗时: ${durationS}s`);
   }
 
   return result;
@@ -192,6 +215,12 @@ export interface RunWorkflowOptions {
   page: Page;
   emit: (type: string, payload: string) => void;
   startFrom?: number;
+  /** 每步执行前（已做过 shouldAbort 检查） */
+  beforeStep?: (stepIndex: number, node: NodeDef, ctx: WorkflowContext) => void | Promise<void>;
+  /** 每步日志已 emit 后、判定失败返回前 */
+  afterStep?: (stepIndex: number, node: NodeDef, result: NodeResult, ctx: WorkflowContext) => void | Promise<void>;
+  /** 每步开始前检查，返回 true 则中止整次 run（如任务已被 stop） */
+  shouldAbort?: () => boolean;
 }
 
 export interface RunWorkflowResult {
@@ -203,14 +232,26 @@ export interface RunWorkflowResult {
 }
 
 export async function runWorkflow(options: RunWorkflowOptions): Promise<RunWorkflowResult> {
-  const { workflow, vars, page, emit, startFrom = 0 } = options;
+  const { workflow, vars, page, emit, startFrom = 0, beforeStep, afterStep, shouldAbort } = options;
   const ctx: WorkflowContext = { vars, outputs: {}, emit };
   const nodes = workflow.nodes;
   let completedSteps = 0;
   let currentRunningPage = page; // 使用局部变量追踪当前活跃页面，支持中途掉包
 
   for (let i = startFrom; i < nodes.length; i++) {
+    if (shouldAbort?.()) {
+      return {
+        success: false,
+        message: '任务已停止',
+        completedSteps,
+        totalSteps: nodes.length,
+        outputs: ctx.outputs,
+      };
+    }
+
     const node = nodes[i];
+    await beforeStep?.(i, node, ctx);
+
     emit('log', `\n── 步骤 ${i + 1}/${nodes.length}：${node.label ?? node.type} ──`);
 
     const result = await executeNode(currentRunningPage, node, ctx);
@@ -230,6 +271,8 @@ export async function runWorkflow(options: RunWorkflowOptions): Promise<RunWorkf
     for (const line of result.log) {
       emit('log', line);
     }
+
+    await afterStep?.(i, node, result, ctx);
 
     if (!result.success && !node.continueOnError) {
       emit('error', result.error ?? '节点执行失败');

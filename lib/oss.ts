@@ -9,48 +9,84 @@ const writeFile = promisify(fs.writeFile);
 const unlink = promisify(fs.unlink);
 const mkdir = promisify(fs.mkdir);
 
+/** 默认走 HTTPS（与 ali-oss 默认 secure:false 不同，避免 PUT 落在 http:// 上易被代理/链路掐断） */
 function createClient() {
+  const useHttps = process.env.OSS_USE_HTTP !== '1' && process.env.OSS_USE_HTTP !== 'true';
   return new OSS({
     region: process.env.OSS_REGION ?? 'oss-cn-hangzhou',
     accessKeyId: process.env.OSS_ACCESS_KEY_ID!,
     accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET!,
     bucket: process.env.OSS_BUCKET!,
-    timeout: 600000,  // 10分钟超时，支持大文件上传
+    timeout: 600000, // 10分钟超时，支持大文件上传
+    secure: useHttps,
   });
+}
+
+function isRetryableOssError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /socket hang up|ECONNRESET|ETIMEDOUT|EPIPE|ECONNABORTED|timed out|Timeout|UND_ERR_SOCKET|ENOTFOUND|EAI_AGAIN/i.test(
+    msg
+  );
+}
+
+/** 工作流批量跑时易出现瞬时断连，与页面单次 debug 体感不一致；对可恢复错误重试 */
+type OssClient = InstanceType<typeof OSS>;
+
+async function withOssUploadRetries<T>(label: string, fn: (client: OssClient) => Promise<T>): Promise<T> {
+  const raw = process.env.OSS_UPLOAD_RETRIES;
+  const max = raw !== undefined && /^\d+$/.test(raw) ? Math.min(8, Math.max(1, Number(raw))) : 3;
+  let last: unknown;
+  for (let attempt = 1; attempt <= max; attempt++) {
+    try {
+      const client = createClient();
+      return await fn(client);
+    } catch (e) {
+      last = e;
+      if (!isRetryableOssError(e) || attempt === max) {
+        throw e;
+      }
+      const delay = 400 * attempt;
+      console.warn(
+        `[oss] ${label} 第 ${attempt}/${max} 次失败，${delay}ms 后重试:`,
+        e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200)
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw last;
 }
 
 // 从 URL 流式上传（支持大文件，避免内存占用）
 export async function uploadVideoFromUrl(videoUrl: string, key: string): Promise<string> {
-  const client = createClient();
+  return withOssUploadRetries('uploadVideoFromUrl', async (client) => {
+    const isXhs = videoUrl.includes('xhscdn.com') || videoUrl.includes('xiaohongshu.com');
+    const response = await axios.get(videoUrl, {
+      responseType: 'stream',
+      timeout: 600000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Referer: isXhs ? 'https://www.xiaohongshu.com/' : 'https://www.douyin.com/',
+      },
+    });
 
-  const isXhs = videoUrl.includes('xhscdn.com') || videoUrl.includes('xiaohongshu.com');
-  const response = await axios.get(videoUrl, {
-    responseType: 'stream',
-    timeout: 600000,
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      Referer: isXhs ? 'https://www.xiaohongshu.com/' : 'https://www.douyin.com/',
-    },
+    const stream = response.data as Readable;
+    const filename = key.split('/').pop() ?? 'video.mp4';
+
+    const result = await client.putStream(key, stream, {
+      headers: {
+        'Content-Type': 'video/mp4',
+        'x-oss-object-acl': 'public-read',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    } as any);
+
+    const url: string = (result as any).url ?? '';
+    return url.replace(/^http:\/\//, 'https://');
   });
-
-  const stream = response.data as Readable;
-  const filename = key.split('/').pop() ?? 'video.mp4';
-  
-  const result = await client.putStream(key, stream, {
-    headers: {
-      'Content-Type': 'video/mp4',
-      'x-oss-object-acl': 'public-read',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-    },
-  } as any);
-
-  return (result as any).url;
 }
 
 // 小红书图片专用上传方法：先下载到本地，再上传OSS
 export async function uploadXhsImageFromUrl(url: string, key: string, cookies?: string): Promise<string> {
-  const client = createClient();
-  
   // 创建临时目录
   const tempDir = path.join(process.cwd(), 'temp');
   try {
@@ -126,18 +162,21 @@ export async function uploadXhsImageFromUrl(url: string, key: string, cookies?: 
   }
 
   try {
-    // 从本地文件上传到OSS
-    const filename = key.split('/').pop() ?? 'image.jpg';
-    const result = await client.put(key, tempFilePath, {
-      headers: {
-        'Content-Type': 'image/jpeg',
-        'x-oss-object-acl': 'public-read',
-        'Content-Disposition': `inline; filename="${filename}"`,
-      },
-    } as any);
+    const httpsUrl = await withOssUploadRetries('uploadXhsImageFromUrl', async (client) => {
+      const filename = key.split('/').pop() ?? 'image.jpg';
+      const result = await client.put(key, tempFilePath, {
+        headers: {
+          'Content-Type': 'image/jpeg',
+          'x-oss-object-acl': 'public-read',
+          'Content-Disposition': `inline; filename="${filename}"`,
+        },
+      } as any);
 
-    console.log(`✅ 图片上传OSS成功: ${(result as any).url}`);
-    return (result as any).url;
+      const u: string = (result as any).url ?? '';
+      return u.replace(/^http:\/\//, 'https://');
+    });
+    console.log(`✅ 图片上传OSS成功: ${httpsUrl}`);
+    return httpsUrl;
   } finally {
     // 清理临时文件
     try {
@@ -151,12 +190,9 @@ export async function uploadXhsImageFromUrl(url: string, key: string, cookies?: 
 
 // 从 URL 上传图片或其他文件（通用方法）
 export async function uploadFromUrl(url: string, key: string, contentType?: string): Promise<string> {
-  const client = createClient();
-
-  // 根据文件扩展名推断 Content-Type
   const ext = key.split('.').pop()?.toLowerCase();
   let inferredContentType = contentType;
-  
+
   if (!inferredContentType) {
     switch (ext) {
       case 'jpg':
@@ -180,57 +216,66 @@ export async function uploadFromUrl(url: string, key: string, contentType?: stri
     }
   }
 
-  const response = await axios.get(url, {
-    responseType: 'stream',
-    timeout: 600000,
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible)',
-      'Referer': 'https://www.xiaohongshu.com/',
-    },
+  const ct = inferredContentType;
+
+  return withOssUploadRetries('uploadFromUrl', async (client) => {
+    const response = await axios.get(url, {
+      responseType: 'stream',
+      timeout: 600000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible)',
+        Referer: 'https://www.xiaohongshu.com/',
+      },
+    });
+
+    const stream = response.data as Readable;
+    const filename = key.split('/').pop() ?? 'file';
+
+    const result = await client.putStream(key, stream, {
+      headers: {
+        'Content-Type': ct,
+        'x-oss-object-acl': 'public-read',
+        'Content-Disposition': `inline; filename="${filename}"`,
+      },
+    } as any);
+
+    const urlFromUrl: string = (result as any).url ?? '';
+    return urlFromUrl.replace(/^http:\/\//, 'https://');
   });
-
-  const stream = response.data as Readable;
-  const filename = key.split('/').pop() ?? 'file';
-  
-  const result = await client.putStream(key, stream, {
-    headers: {
-      'Content-Type': inferredContentType,
-      'x-oss-object-acl': 'public-read',
-      'Content-Disposition': `inline; filename="${filename}"`,
-    },
-  } as any);
-
-  return (result as any).url;
 }
 
 // 从 Buffer 上传
 export async function uploadBuffer(buffer: Buffer, key: string, contentType: string = 'image/jpeg'): Promise<string> {
-  const client = createClient();
-  const filename = key.split('/').pop() ?? 'file';
+  return withOssUploadRetries('uploadBuffer', async (client) => {
+    const filename = key.split('/').pop() ?? 'file';
 
-  const result = await client.put(key, buffer, {
-    headers: {
-      'Content-Type': contentType,
-      'x-oss-object-acl': 'public-read',
-      'Content-Disposition': `inline; filename="${filename}"`,
-    },
-  } as any);
+    const result = await client.put(key, buffer, {
+      headers: {
+        'Content-Type': contentType,
+        'x-oss-object-acl': 'public-read',
+        'Content-Disposition': `inline; filename="${filename}"`,
+      },
+    } as any);
 
-  return (result as any).url;
+    const url: string = (result as any).url ?? '';
+    return url.replace(/^http:\/\//, 'https://');
+  });
 }
 
 // 从本地 file 上传
 export async function uploadFromFile(filePath: string, key: string, contentType: string = 'video/mp4'): Promise<string> {
-  const client = createClient();
-  const filename = key.split('/').pop() ?? 'file';
+  return withOssUploadRetries('uploadFromFile', async (client) => {
+    const filename = key.split('/').pop() ?? 'file';
 
-  const result = await client.put(key, filePath, {
-    headers: {
-      'Content-Type': contentType,
-      'x-oss-object-acl': 'public-read',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-    },
-  } as any);
+    const result = await client.put(key, filePath, {
+      headers: {
+        'Content-Type': contentType,
+        'x-oss-object-acl': 'public-read',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+      },
+    } as any);
 
-  return (result as any).url;
+    const urlFromFile: string = (result as any).url ?? '';
+    return urlFromFile.replace(/^http:\/\//, 'https://');
+  });
 }

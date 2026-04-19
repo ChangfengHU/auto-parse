@@ -236,6 +236,64 @@ export async function executePasteImageClipboard(
       return { count: Number(data?.count || 0), signature: String(data?.signature || '') };
     };
 
+    let cleanedExistingAttachments = false;
+    const clearExistingAttachments = async () => {
+      if (cleanedExistingAttachments) return;
+      cleanedExistingAttachments = true;
+
+      const before = await getAttachmentSnapshot();
+      if (before.count <= 0) return;
+
+      log.push(`🧹 检测到旧附件 ${before.count} 个，先清理后再上传新图`);
+
+      const removeSelectors = [
+        '[aria-label*="Remove image" i]',
+        '[aria-label*="Remove" i]',
+        '[aria-label*="Delete" i]',
+        '[aria-label*="删除"]',
+        '[aria-label*="移除"]',
+        'button:has-text("Remove")',
+        'button:has-text("Delete")',
+        'button:has-text("删除")',
+        'button:has-text("移除")',
+        '[data-testid*="remove" i]',
+        '[data-test-id*="remove" i]',
+      ];
+
+      for (let round = 1; round <= 4; round++) {
+        const clicked = await rootHandle
+          .evaluate(async (root: Element, selectors: string[]) => {
+            const isVisible = (el: Element) => {
+              const rect = (el as HTMLElement).getBoundingClientRect?.();
+              return Boolean(rect && rect.width > 0 && rect.height > 0);
+            };
+            let count = 0;
+            for (const sel of selectors) {
+              const nodes = Array.from(root?.querySelectorAll?.(sel) ?? []);
+              for (const node of nodes) {
+                if (!(node instanceof HTMLElement)) continue;
+                if (!isVisible(node)) continue;
+                try {
+                  node.click();
+                  count += 1;
+                  await new Promise((r) => setTimeout(r, 60));
+                } catch {
+                  // ignore and continue
+                }
+              }
+            }
+            return count;
+          }, removeSelectors)
+          .catch(() => 0);
+
+        await page.waitForTimeout(220);
+        const after = await getAttachmentSnapshot();
+        log.push(`🧹 清理附件 round=${round}: click=${clicked}, 剩余=${after.count}`);
+        if (after.count <= 0) break;
+        if (!clicked) break;
+      }
+    };
+
     const downloaded: DownloadedImage[] = [];
     for (let i = 0; i < imageUrls.length; i++) {
       downloaded.push(await downloadToTemp(imageUrls[i], i));
@@ -277,6 +335,8 @@ export async function executePasteImageClipboard(
 
     const tryClipboardPaste = async () => {
       await withSystemClipboardLock(async () => {
+        await clearExistingAttachments();
+
         if (ensurePageFocused) {
           await page.bringToFront().catch(() => {});
           await page.evaluate(() => window.focus()).catch(() => {});
@@ -401,6 +461,7 @@ export async function executePasteImageClipboard(
       attachedVia = 'upload';
       log.push(forcedUpload ? '⬆️ 直接上传：下载到本地后通过上传入口选择文件...' : '🪄 尝试降级：下载到本地后通过 file input 上传...');
 
+      await clearExistingAttachments();
       let before = await getAttachmentSnapshot();
       if (verifyAttachment) log.push(`🔎 附件计数（上传前）：${before.count}`);
 

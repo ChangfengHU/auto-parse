@@ -59,6 +59,9 @@ python/.venv/
 __pycache__/
 *.pyc
 
+# workflow task SQLite (local persistence)
+.data/
+
 # Runtime & Temp
 .runtime/
 temp/

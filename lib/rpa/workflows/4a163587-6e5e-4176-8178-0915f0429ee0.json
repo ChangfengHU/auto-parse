@@ -1,7 +1,7 @@
 {
   "id": "4a163587-6e5e-4176-8178-0915f0429ee0",
   "name": "gemini流程管理-ads-下载提取版",
-  "description": "基于非Ads基线流程，仅首节点切换Ads并支持浏览器实例参数\n\n支持可选参考图：sourceImageUrl（单张）/ sourceImageUrls（多张，JSON 数组或逗号分隔）。",
+  "description": "基于非Ads基线流程，仅首节点切换Ads并支持浏览器实例参数\n\n支持可选参考图：sourceImageUrl（单张）/ sourceImageUrls（多张，JSON 数组或逗号分隔）。\n\n文本输入仅由后续「点击发送」提交，避免与 autoEnter 双重发送；DOM 取图仅限 model-response 内 blob/data 图，避免误选首页示例大图。",
   "nodes": [
     {
       "type": "navigate",
@@ -13,7 +13,12 @@
         "useAdsPower": true,
         "adsProfileId": "{{browserInstanceId}}",
         "adsProxyServer": "",
-        "adsManualCdpUrl": "{{browserWsUrl}}"
+        "adsManualCdpUrl": "{{browserWsUrl}}",
+        "postClickEnabled": true,
+        "postClickElements": [
+          { "text": "Create image" },
+          { "text": "制作图片" }
+        ]
       },
       "waitAfter": {
         "action": "appeared",
@@ -25,9 +30,16 @@
     {
       "type": "click",
       "label": "点击",
+      "disabled": true,
       "params": {
-        "text": "Create image",
-        "selector": ""
+        "text": "",
+        "selector": "",
+        "elements": [
+          { "text": "Create image" },
+          { "text": "制作图片" },
+          { "selector": "text=Create image", "useSelector": true },
+          { "selector": "text=制作图片", "useSelector": true }
+        ]
       },
       "waitAfter": {
         "action": "appeared",
@@ -63,7 +75,10 @@
       "label": "文本输入",
       "params": {
         "value": "{{noteUrl}}",
-        "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]"
+        "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]",
+        "inputMode": "type",
+        "delay": 15,
+        "autoEnter": false
       }
     },
     {
@@ -71,13 +86,10 @@
       "label": "点击",
       "params": {
         "text": "",
-        "selector": "button[aria-label=\"Send message\"], button[aria-label*=\"发送\"], .send-button-container button"
+        "selector": "button[aria-label=\"Send message\"], button[aria-label*=\"发送\"], button[aria-label=\"Submit\"], button[aria-label*=\"Submit\" i], .send-button-container button"
       },
       "waitAfter": {
-        "enabled": true,
-        "timeout": 240000,
-        "selector": "[aria-label=\"Copy image\"], button[aria-label*=\"复制图片\"], button[aria-label*=\"Copy image\"], button:has-text(\"复制\")",
-        "delaySeconds": 3
+        "enabled": false
       }
     },
     {
@@ -93,6 +105,14 @@
         "waitAfterClick": 500,
         "downloadTimeout": 35000,
         "allowDomFallback": true,
+        "preferDomExtraction": true,
+        "fallbackImageSelector": "model-response img[src^=\"blob:\"], model-response img[src^=\"data:image\"]",
+        "waitImageReady": true,
+        "waitImageReadyTimeout": 240000,
+        "waitImageReadyText": "正在加载",
+        "waitImageReadySelector": "",
+        "waitImageReadyAction": "appeared_then_disappeared",
+        "waitImageReadyAppearTimeout": 30000,
         "menuItemSelector": "[role=\"menuitem\"]:has-text(\"Download\"), [role=\"menuitem\"]:has-text(\"下载\"), button:has-text(\"Download\"), button:has-text(\"下载\")",
         "minFileSizeBytes": 524288,
         "menuTriggerSelector": "button[aria-label*=\"More options\"], button[aria-label*=\"更多\"]",

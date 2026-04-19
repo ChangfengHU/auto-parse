@@ -145,7 +145,27 @@ function summarizeWorkingTabs(urls: string[]) {
   return `Gemini 工作页 ${urls.length} 个，默认按可复用处理，首个: ${truncateUrl(urls[0])}`;
 }
 
-async function inspectByAdsPower(instanceId: string): Promise<Pick<InstanceStatus, 'active' | 'tabOpen' | 'source' | 'detail'>> {
+async function connectOverCDPWithTimeout(wsEndpoint: string, timeoutMs: number) {
+  return await new Promise<Awaited<ReturnType<typeof chromium.connectOverCDP>>>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`CDP 连接超时（>${timeoutMs}ms）`));
+    }, timeoutMs);
+    chromium.connectOverCDP(wsEndpoint)
+      .then((browser) => {
+        clearTimeout(timer);
+        resolve(browser);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+async function inspectByAdsPower(
+  instanceId: string,
+  options?: { skipCdp?: boolean }
+): Promise<Pick<InstanceStatus, 'active' | 'tabOpen' | 'source' | 'detail'>> {
   const apiBase = resolveApiBase();
   const apiKey = resolveApiKey();
   const url = new URL(`${apiBase}/api/v1/browser/active`);
@@ -156,7 +176,13 @@ async function inspectByAdsPower(instanceId: string): Promise<Pick<InstanceStatu
   }
   const headers = buildHeaders(apiKey);
 
-  const res = await fetch(url.toString(), { method: 'GET', headers, signal: AbortSignal.timeout(5000) });
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), { method: 'GET', headers, signal: AbortSignal.timeout(5000) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { active: false, tabOpen: false, source: 'none', detail: `Ads API 请求失败: ${message}` };
+  }
   if (!res.ok) {
     return { active: false, tabOpen: false, source: 'none', detail: `Ads API HTTP ${res.status}` };
   }
@@ -179,9 +205,13 @@ async function inspectByAdsPower(instanceId: string): Promise<Pick<InstanceStatu
     return { active: false, tabOpen: false, source: 'none', detail: '分身未提供可用 ws，当前不可调度' };
   }
 
+  if (options?.skipCdp) {
+    return { active: true, tabOpen: false, source: 'adspower', detail: '分身已激活（跳过 CDP 标签检测）' };
+  }
+
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
   try {
-    browser = await chromium.connectOverCDP(wsEndpoint);
+    browser = await connectOverCDPWithTimeout(wsEndpoint, 8000);
     const contexts = browser.contexts();
     const workingTabs = contexts.flatMap((ctx) =>
       ctx
@@ -253,7 +283,7 @@ export async function getInstanceStatus(instanceId: string): Promise<InstanceSta
 export async function getDispatchableInstanceStatus(instanceId: string): Promise<InstanceStatus> {
   pruneExpiredLeases();
   const lock = leaseStore().get(instanceId);
-  const adsInspect = await inspectByAdsPower(instanceId);
+  const adsInspect = await inspectByAdsPower(instanceId, { skipCdp: true });
   const state: InstanceState = lock ? 'busy' : 'idle';
 
   return {
@@ -285,9 +315,24 @@ export async function acquireInstanceLease(
   options?: { mode?: 'default' | 'dispatcher' }
 ): Promise<{ ok: boolean; reason?: string; leaseId?: string; status: InstanceStatus }> {
   const useDispatcherMode = options?.mode === 'dispatcher';
-  const current = useDispatcherMode
-    ? await getDispatchableInstanceStatus(instanceId)
-    : await getInstanceStatus(instanceId);
+  const fallbackStatus = (detail: string, locked = false): InstanceStatus => ({
+    instanceId,
+    state: locked ? 'busy' : 'inactive',
+    tabOpen: false,
+    active: false,
+    locked,
+    source: 'none',
+    detail,
+  });
+  let current: InstanceStatus;
+  try {
+    current = useDispatcherMode
+      ? await getDispatchableInstanceStatus(instanceId)
+      : await getInstanceStatus(instanceId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: `实例状态检测失败: ${message}`, status: fallbackStatus(`实例状态检测失败: ${message}`) };
+  }
   if (current.state !== 'idle') {
     return { ok: false, reason: `实例当前为 ${current.state}`, status: current };
   }
@@ -300,10 +345,20 @@ export async function acquireInstanceLease(
   }
   const leaseId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   store.set(instanceId, { leaseId, jobId, acquiredAt: Date.now() });
-  const status = useDispatcherMode
-    ? await getDispatchableInstanceStatus(instanceId)
-    : await getInstanceStatus(instanceId);
-  return { ok: true, leaseId, status };
+  try {
+    const status = useDispatcherMode
+      ? await getDispatchableInstanceStatus(instanceId)
+      : await getInstanceStatus(instanceId);
+    return { ok: true, leaseId, status };
+  } catch (error) {
+    store.delete(instanceId);
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      reason: `实例锁定后状态检测失败: ${message}`,
+      status: fallbackStatus(`实例锁定后状态检测失败: ${message}`),
+    };
+  }
 }
 
 export async function releaseInstanceLease(
@@ -316,7 +371,20 @@ export async function releaseInstanceLease(
   if (current && (!leaseId || current.leaseId === leaseId)) {
     store.delete(instanceId);
   }
-  return options?.mode === 'dispatcher'
-    ? getDispatchableInstanceStatus(instanceId)
-    : getInstanceStatus(instanceId);
+  try {
+    return options?.mode === 'dispatcher'
+      ? await getDispatchableInstanceStatus(instanceId)
+      : await getInstanceStatus(instanceId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      instanceId,
+      state: 'inactive',
+      tabOpen: false,
+      active: false,
+      locked: false,
+      source: 'none',
+      detail: `释放后状态检测失败: ${message}`,
+    };
+  }
 }

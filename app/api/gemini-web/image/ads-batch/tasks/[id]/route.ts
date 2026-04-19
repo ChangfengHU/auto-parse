@@ -35,6 +35,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         primaryImageUrl: item.imageUrls[0] || null,
         error: item.error,
         taskId: item.taskId,
+        workflowTaskId: item.taskId,
         startedAt: item.startedAt,
         endedAt: item.endedAt,
       })),

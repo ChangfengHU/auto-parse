@@ -26,6 +26,14 @@ import { getRuntimeBackendConfigSync } from '@/lib/runtime/backend-config';
 type DispatcherStatus = 'queued' | 'running' | 'paused' | 'success' | 'failed' | 'cancelled';
 type DispatcherItemStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
 type DispatcherInstanceState = 'idle' | 'running' | 'inactive' | 'busy';
+type DispatcherFailureCategory =
+  | 'fast_fail'
+  | 'policy_blocked'
+  | 'timeout'
+  | 'child_create_failed'
+  | 'no_media'
+  | 'network'
+  | 'unknown';
 
 interface DispatcherSummary {
   total: number;
@@ -98,6 +106,21 @@ export interface GeminiAdsDispatcherItem {
   imageUrls: string[];
   primaryMediaType?: 'image' | 'video' | 'unknown';
   error?: string;
+  failureCategory?: DispatcherFailureCategory;
+  attemptHistory?: Array<{
+    attempt: number;
+    prompt: string;
+    browserInstanceId?: string;
+    batchTaskId?: string;
+    startedAt?: string;
+    endedAt?: string;
+    durationMs?: number;
+    outcome?: 'running' | 'success' | 'failed' | 'timeout' | 'create_failed' | 'cancelled';
+    error?: string;
+    failureCategory?: DispatcherFailureCategory;
+    rewriteApplied?: boolean;
+    rewriteReason?: string;
+  }>;
   startedAt?: string;
   endedAt?: string;
 }
@@ -786,6 +809,90 @@ function formatDurationMs(ms: number) {
   return remainMinutes > 0 ? `${hours}h${remainMinutes}m` : `${hours}h`;
 }
 
+function toDurationMs(startedAt?: string, endedAt?: string): number | undefined {
+  const s = parseTs(startedAt);
+  const e = parseTs(endedAt);
+  if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return undefined;
+  return Math.round(e - s);
+}
+
+function parseFailureCategory(message?: string): DispatcherFailureCategory {
+  const text = String(message || '').toLowerCase();
+  if (!text) return 'unknown';
+  if (text.includes('fail_fast:')) return 'fast_fail';
+  if (text.includes('超时') || text.includes('timeout')) return 'timeout';
+  if (text.includes('子任务创建失败') || text.includes('create_failed')) return 'child_create_failed';
+  if (text.includes('任务未返回媒体') || text.includes('未返回媒体')) return 'no_media';
+  if (
+    text.includes('policy') ||
+    text.includes('safety') ||
+    text.includes('违规') ||
+    text.includes('违禁') ||
+    text.includes('not create images of people') ||
+    text.includes('depict a real person')
+  ) {
+    return 'policy_blocked';
+  }
+  if (text.includes('fetch failed') || text.includes('network') || text.includes('econn') || text.includes('timed out')) {
+    return 'network';
+  }
+  return 'unknown';
+}
+
+function isInstanceUnavailableError(message?: string): boolean {
+  const text = String(message || '').toLowerCase();
+  if (!text) return false;
+  return (
+    text.includes('未激活') ||
+    text.includes('不可用') ||
+    text.includes('inactive') ||
+    text.includes('not active') ||
+    text.includes('adspower 分身未激活')
+  );
+}
+
+function isDownloadExtractFastFailReason(message?: string): boolean {
+  const text = String(message || '');
+  return text.includes('FAIL_FAST:') && text.includes('NODE=extract_image_download;');
+}
+
+function shouldForceRewrite(
+  category: DispatcherFailureCategory,
+  settings: DispatcherSettings,
+  failureReason?: string
+): boolean {
+  if (settings.optimizePromptOnRetry) return false;
+  if (category !== 'fast_fail') return false;
+  return isDownloadExtractFastFailReason(failureReason);
+}
+
+function adaptiveChildTimeoutMs(baseMs: number, attempts: number): number {
+  // 第一轮也做上限收敛，避免单个子任务长时间占用分身拖慢整体吞吐。
+  const cappedBase = Math.min(baseMs, 5 * 60_000);
+  if (attempts <= 1) return cappedBase;
+  if (attempts === 2) return Math.max(180_000, Math.floor(cappedBase * 0.7));
+  if (attempts === 3) return Math.max(150_000, Math.floor(cappedBase * 0.55));
+  return Math.max(120_000, Math.floor(cappedBase * 0.45));
+}
+
+function appendAttemptHistoryEntry(
+  item: GeminiAdsDispatcherItem,
+  entry: NonNullable<GeminiAdsDispatcherItem['attemptHistory']>[number]
+) {
+  const prev = Array.isArray(item.attemptHistory) ? item.attemptHistory : [];
+  return [...prev, entry];
+}
+
+function patchLatestAttemptHistory(
+  item: GeminiAdsDispatcherItem,
+  patch: Partial<NonNullable<GeminiAdsDispatcherItem['attemptHistory']>[number]>
+) {
+  const history = Array.isArray(item.attemptHistory) ? [...item.attemptHistory] : [];
+  if (history.length === 0) return history;
+  history[history.length - 1] = { ...history[history.length - 1], ...patch };
+  return history;
+}
+
 function normalizePromptHistory(item: GeminiAdsDispatcherItem): string[] {
   const history = Array.isArray(item.promptHistory)
     ? item.promptHistory.map((p) => String(p || '').trim()).filter(Boolean)
@@ -939,6 +1046,39 @@ async function computeRetryPromptWithOptimization(taskId: string, task: GeminiAd
   }
 }
 
+async function computeRetryPromptForFailure(input: {
+  taskId: string;
+  task: GeminiAdsDispatcherTask;
+  item: GeminiAdsDispatcherItem;
+  failureReason: string;
+  failureCategory: DispatcherFailureCategory;
+  forceRewrite?: boolean;
+}) {
+  const forceRewrite = typeof input.forceRewrite === 'boolean'
+    ? input.forceRewrite
+    : shouldForceRewrite(input.failureCategory, input.task.settings, input.failureReason);
+  const taskForOpt = forceRewrite
+    ? { ...input.task, settings: { ...input.task.settings, optimizePromptOnRetry: true } }
+    : input.task;
+  if (forceRewrite) {
+    trace(input.taskId, 'prompt_rewrite_forced', {
+      itemId: input.item.id,
+      category: input.failureCategory,
+      attempts: input.item.attempts,
+      reason: input.failureReason,
+    });
+  }
+  const before = input.item.prompt;
+  const opt = await computeRetryPromptWithOptimization(input.taskId, taskForOpt, input.item, input.failureReason);
+  return {
+    prompt: opt.prompt,
+    history: opt.history,
+    optimizedCount: opt.optimizedCount,
+    rewriteApplied: String(opt.prompt || '').trim() !== String(before || '').trim(),
+    rewriteForced: forceRewrite,
+  };
+}
+
 function mapPoolState(state?: InstanceStatus['state']): DispatcherInstanceState {
   if (state === 'inactive') return 'inactive';
   if (state === 'busy') return 'busy';
@@ -1081,8 +1221,15 @@ function updateInstanceResult(
       }
 
       const nextFailureStreak = instance.consecutiveFailures + 1;
-      const enableCooldown = nextFailureStreak >= task.settings.failureCooldownThreshold;
-      const cooldownUntil = enableCooldown ? new Date(Date.now() + task.settings.instanceCooldownMs).toISOString() : undefined;
+      const unavailable = isInstanceUnavailableError(input.error);
+      const timeoutFailure = parseFailureCategory(input.error) === 'timeout';
+      const enableCooldown = unavailable || timeoutFailure || nextFailureStreak >= task.settings.failureCooldownThreshold;
+      const cooldownMs = unavailable
+        ? Math.max(task.settings.instanceCooldownMs, 3 * 60_000)
+        : timeoutFailure
+          ? Math.max(task.settings.instanceCooldownMs, 2 * 60_000)
+          : task.settings.instanceCooldownMs;
+      const cooldownUntil = enableCooldown ? new Date(Date.now() + cooldownMs).toISOString() : undefined;
       return {
         ...instance,
         lastCompletedItemId: input.itemId ?? instance.lastCompletedItemId,
@@ -1095,7 +1242,11 @@ function updateInstanceResult(
         consecutiveFailures: nextFailureStreak,
         cooldownUntil,
         detail: enableCooldown
-          ? `连续失败 ${nextFailureStreak} 次，冷却 ${formatDurationMs(task.settings.instanceCooldownMs)}`
+          ? (unavailable
+              ? `实例不可用，冷却 ${formatDurationMs(cooldownMs)}（等待手动恢复）`
+              : timeoutFailure
+                ? `子任务超时，冷却 ${formatDurationMs(cooldownMs)}（等待分身状态回稳）`
+              : `连续失败 ${nextFailureStreak} 次，冷却 ${formatDurationMs(cooldownMs)}`)
           : (input.error || '最近一次任务失败'),
       };
     });
@@ -1126,9 +1277,14 @@ async function refreshNonRunningInstances(taskId: string) {
       const status = statusMap.get(instance.instanceId);
       if (!status) return instance;
       const coolingDown = isInCooldown(instance, nowMs);
+      const keepInactiveByRecentError = coolingDown && isInstanceUnavailableError(instance.lastError);
       return {
         ...instance,
-        state: status.state === 'inactive' ? 'inactive' : coolingDown ? 'idle' : mapPoolState(status.state),
+        state: status.state === 'inactive' || keepInactiveByRecentError
+          ? 'inactive'
+          : coolingDown
+            ? 'idle'
+            : mapPoolState(status.state),
         detail: coolingDown
           ? `实例冷却中，截止 ${instance.cooldownUntil}`
           : (status.detail || instance.detail),
@@ -1150,7 +1306,10 @@ async function releaseInstance(taskId: string, instanceId: string, leaseId?: str
         ? instance
         : {
             ...instance,
-            state: status?.state === 'inactive' ? 'inactive' : 'idle',
+            state: status?.state === 'inactive'
+              || (isInCooldown(instance, nowMs) && isInstanceUnavailableError(instance.lastError))
+              ? 'inactive'
+              : 'idle',
             leaseId: undefined,
             currentItemId: undefined,
             currentPrompt: undefined,
@@ -1226,6 +1385,31 @@ async function assignNextItem(taskId: string, instanceId: string) {
     leaseId: lease.leaseId,
   });
 
+  // 二次活性校验：避免分身状态刚好抖动（池里显示可用，但 AdsPower 实际未激活）导致整轮子任务白跑。
+  const liveStatus = await listDispatchableInstanceStatuses([instanceId]).catch(() => []);
+  const live = liveStatus.find((item) => item.instanceId === instanceId);
+  if (live && live.state === 'inactive') {
+    trace(taskId, 'assign_skipped_inactive', {
+      instanceId,
+      itemId: nextItem.id,
+      leaseId: lease.leaseId,
+      detail: live.detail,
+    });
+    updateInstances(taskId, (instances) =>
+      instances.map((instance) =>
+        instance.instanceId !== instanceId
+          ? instance
+          : {
+              ...instance,
+              state: 'inactive',
+              detail: live.detail || '实例未激活，跳过本轮分配',
+            }
+      )
+    );
+    await releaseInstance(taskId, instanceId, lease.leaseId);
+    return false;
+  }
+
   updateTaskState(taskId, (task) => {
     const itemIndex = task.items.findIndex((item) => item.id === nextItem.id);
     const instanceIndex = task.instances.findIndex((item) => item.instanceId === instanceId);
@@ -1235,15 +1419,26 @@ async function assignNextItem(taskId: string, instanceId: string) {
     const items = task.items.map((item, index) =>
       index !== itemIndex
         ? item
-        : {
-            ...item,
-            status: 'running' as const,
-            attempts: item.attempts + 1,
-            browserInstanceId: instanceId,
-            startedAt: item.startedAt || startedAt,
-            endedAt: undefined,
-            error: undefined,
-          }
+        : (() => {
+            const attempt = item.attempts + 1;
+            return {
+              ...item,
+              status: 'running' as const,
+              attempts: attempt,
+              browserInstanceId: instanceId,
+              startedAt: item.startedAt || startedAt,
+              endedAt: undefined,
+              error: undefined,
+              failureCategory: undefined,
+              attemptHistory: appendAttemptHistoryEntry(item, {
+                attempt,
+                prompt: item.prompt,
+                browserInstanceId: instanceId,
+                startedAt,
+                outcome: 'running',
+              }),
+            };
+          })()
     );
     const instances = task.instances.map((item, index) =>
       index !== instanceIndex
@@ -1276,6 +1471,8 @@ async function assignNextItem(taskId: string, instanceId: string) {
     itemId: nextItem.id,
     index: nextItem.index,
     prompt: nextItem.prompt,
+    attempt: nextItem.attempts + 1,
+    childTimeoutMs: adaptiveChildTimeoutMs(current.settings.childTaskTimeoutMs, nextItem.attempts + 1),
     sourceImageCount: nextItem.sourceImageUrls.length,
     leaseId: lease.leaseId,
   });
@@ -1303,6 +1500,9 @@ async function assignNextItem(taskId: string, instanceId: string) {
               batchTaskHistory: item.batchTaskId
                 ? [...(item.batchTaskHistory ?? []), item.batchTaskId]
                 : (item.batchTaskHistory ?? []),
+              attemptHistory: patchLatestAttemptHistory(item, {
+                batchTaskId: child.id,
+              }),
             }
       );
       const instances = task.instances.map((item) =>
@@ -1326,15 +1526,42 @@ async function assignNextItem(taskId: string, instanceId: string) {
       instanceId,
       itemId: nextItem.id,
       batchTaskId: child.id,
+      attempt: nextItem.attempts + 1,
+      childTimeoutMs: adaptiveChildTimeoutMs(current.settings.childTaskTimeoutMs, nextItem.attempts + 1),
     });
 
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const failureReason = `子任务创建失败: ${message}`;
+    const failureCategory = parseFailureCategory(failureReason);
     const fresh = taskStore().get(taskId);
     if (!fresh) return false;
     const currentItem = fresh.items.find((item) => item.id === nextItem.id);
+    if (!currentItem) return false;
     const exhausted = (currentItem?.attempts || 0) >= fresh.settings.maxAttemptsPerPrompt;
+    let retryPrompt = currentItem.prompt;
+    let retryPromptHistory = normalizePromptHistory(currentItem);
+    let retryOptimizedCount = currentItem.promptOptimizedCount;
+    let rewriteApplied = false;
+    let rewriteReason: string | undefined;
+    if (!exhausted) {
+      const opt = await computeRetryPromptForFailure({
+        taskId,
+        task: fresh,
+        item: currentItem,
+        failureReason,
+        failureCategory,
+      });
+      retryPrompt = opt.prompt;
+      retryPromptHistory = opt.history;
+      retryOptimizedCount = opt.optimizedCount;
+      rewriteApplied = opt.rewriteApplied;
+      if (opt.rewriteApplied) {
+        rewriteReason = opt.rewriteForced ? 'forced_by_failure_category' : 'retry_optimization_enabled';
+      }
+    }
+    const endedAt = nowIso();
     updateTaskState(taskId, (task) => {
       const items = task.items.map((item) =>
         item.id !== nextItem.id
@@ -1342,8 +1569,24 @@ async function assignNextItem(taskId: string, instanceId: string) {
           : {
               ...item,
               status: exhausted ? 'failed' as const : 'pending' as const,
-              error: message,
-              endedAt: exhausted ? nowIso() : undefined,
+              prompt: !exhausted && typeof retryPrompt === 'string' && retryPrompt.trim() ? retryPrompt : item.prompt,
+              promptHistory: !exhausted ? retryPromptHistory : item.promptHistory,
+              promptOptimizedCount: !exhausted ? retryOptimizedCount : item.promptOptimizedCount,
+              lastPromptOptimizedAt: !exhausted && (retryOptimizedCount ?? 0) > (item.promptOptimizedCount ?? 0)
+                ? nowIso()
+                : item.lastPromptOptimizedAt,
+              error: failureReason,
+              failureCategory,
+              endedAt: exhausted ? endedAt : undefined,
+              attemptHistory: patchLatestAttemptHistory(item, {
+                endedAt,
+                durationMs: toDurationMs(item.attemptHistory?.[item.attemptHistory.length - 1]?.startedAt, endedAt),
+                outcome: exhausted ? 'failed' : 'create_failed',
+                error: failureReason,
+                failureCategory,
+                rewriteApplied: !exhausted ? rewriteApplied : undefined,
+                rewriteReason: !exhausted ? rewriteReason : undefined,
+              }),
             }
       );
       const instances = task.instances.map((item) =>
@@ -1368,14 +1611,28 @@ async function assignNextItem(taskId: string, instanceId: string) {
     trace(taskId, 'child_task_create_failed', {
       instanceId,
       itemId: nextItem.id,
-      error: message,
+      error: failureReason,
+      category: failureCategory,
+      rewriteApplied,
+      rewriteReason,
       exhausted,
     });
+    if (!exhausted) {
+      trace(taskId, 'item_retry_scheduled', {
+        instanceId,
+        itemId: nextItem.id,
+        status: 'pending',
+        error: failureReason,
+        category: failureCategory,
+        rewriteApplied,
+        rewriteReason,
+      });
+    }
 
     updateInstanceResult(taskId, instanceId, {
       outcome: 'failed',
       itemId: nextItem.id,
-      error: `子任务创建失败: ${message}`,
+      error: failureReason,
     });
     await releaseInstance(taskId, instanceId, lease.leaseId);
     return false;
@@ -1404,11 +1661,35 @@ async function reconcileRunningInstances(taskId: string) {
     const child = getGeminiAdsBatchTask(batchTaskId);
     if (!child) continue;
     if (!isTerminal(child.status)) {
-      if (instance.startedAt && Date.now() - Date.parse(instance.startedAt) > fresh.settings.childTaskTimeoutMs) {
+      const item = fresh.items.find((entry) => entry.id === currentItemId);
+      const timeoutMs = adaptiveChildTimeoutMs(fresh.settings.childTaskTimeoutMs, item?.attempts || 1);
+      if (instance.startedAt && Date.now() - Date.parse(instance.startedAt) > timeoutMs) {
         cancelGeminiAdsBatchTask(batchTaskId);
-        const item = fresh.items.find((entry) => entry.id === currentItemId);
         const exhausted = (item?.attempts || 0) >= fresh.settings.maxAttemptsPerPrompt;
-        const timeoutMessage = `子任务超时（>${Math.floor(fresh.settings.childTaskTimeoutMs / 1000)}s）`;
+        const timeoutMessage = `子任务超时（>${Math.floor(timeoutMs / 1000)}s）`;
+        const failureCategory = parseFailureCategory(timeoutMessage);
+        let retryPrompt = item?.prompt;
+        let retryPromptHistory = item ? normalizePromptHistory(item) : undefined;
+        let retryOptimizedCount = item?.promptOptimizedCount;
+        let rewriteApplied = false;
+        let rewriteReason: string | undefined;
+        if (!exhausted && item) {
+          const opt = await computeRetryPromptForFailure({
+            taskId,
+            task: fresh,
+            item,
+            failureReason: timeoutMessage,
+            failureCategory,
+          });
+          retryPrompt = opt.prompt;
+          retryPromptHistory = opt.history;
+          retryOptimizedCount = opt.optimizedCount;
+          rewriteApplied = opt.rewriteApplied;
+          if (opt.rewriteApplied) {
+            rewriteReason = opt.rewriteForced ? 'forced_by_failure_category' : 'retry_optimization_enabled';
+          }
+        }
+        const endedAt = nowIso();
         updateTaskState(taskId, (task) => {
           const items = task.items.map((entry) =>
             entry.id !== currentItemId
@@ -1416,8 +1697,24 @@ async function reconcileRunningInstances(taskId: string) {
               : {
                   ...entry,
                   status: exhausted ? 'failed' as const : 'pending' as const,
+                  prompt: !exhausted && typeof retryPrompt === 'string' && retryPrompt.trim() ? retryPrompt : entry.prompt,
+                  promptHistory: !exhausted ? retryPromptHistory : entry.promptHistory,
+                  promptOptimizedCount: !exhausted ? retryOptimizedCount : entry.promptOptimizedCount,
+                  lastPromptOptimizedAt: !exhausted && (retryOptimizedCount ?? 0) > (entry.promptOptimizedCount ?? 0)
+                    ? nowIso()
+                    : entry.lastPromptOptimizedAt,
                   error: timeoutMessage,
-                  endedAt: exhausted ? nowIso() : undefined,
+                  failureCategory,
+                  endedAt: exhausted ? endedAt : undefined,
+                  attemptHistory: patchLatestAttemptHistory(entry, {
+                    endedAt,
+                    durationMs: toDurationMs(entry.attemptHistory?.[entry.attemptHistory.length - 1]?.startedAt, endedAt),
+                    outcome: exhausted ? 'failed' : 'timeout',
+                    error: timeoutMessage,
+                    failureCategory,
+                    rewriteApplied: !exhausted ? rewriteApplied : undefined,
+                    rewriteReason: !exhausted ? rewriteReason : undefined,
+                  }),
                 }
           );
           return {
@@ -1432,9 +1729,24 @@ async function reconcileRunningInstances(taskId: string) {
           batchTaskId,
           prompt: item?.prompt,
           attempts: item?.attempts,
-          timeoutMs: fresh.settings.childTaskTimeoutMs,
+          timeoutMs,
+          failureCategory,
+          rewriteApplied,
+          rewriteReason,
           exhausted,
         });
+        if (!exhausted) {
+          trace(taskId, 'item_retry_scheduled', {
+            instanceId: instance.instanceId,
+            itemId: currentItemId,
+            batchTaskId,
+            status: 'pending',
+            error: timeoutMessage,
+            category: failureCategory,
+            rewriteApplied,
+            rewriteReason,
+          });
+        }
 
         updateInstanceResult(taskId, instance.instanceId, {
           outcome: 'failed',
@@ -1458,6 +1770,9 @@ async function reconcileRunningInstances(taskId: string) {
       : cancelled
         ? undefined
         : run?.error || (mediaUrls.length === 0 ? '任务未返回媒体 URL' : '子任务失败');
+    const failureCategory = !success && !cancelled
+      ? parseFailureCategory(message || '子任务失败')
+      : undefined;
     const item = fresh.items.find((entry) => entry.id === currentItemId);
 
     // Fast-fail 策略处理
@@ -1481,30 +1796,44 @@ async function reconcileRunningInstances(taskId: string) {
       mediaCount: mediaUrls.length,
       attempts: item?.attempts,
       error: message,
+      failureCategory,
     });
 
     let retryPrompt = item?.prompt;
     let retryPromptHistory = item ? normalizePromptHistory(item) : undefined;
     let retryOptimizedCount = item?.promptOptimizedCount;
+    let rewriteApplied = false;
+    let rewriteReason: string | undefined;
     if (!success && !cancelled && !exhausted && item) {
-      // fast-fail + llm_rewrite 策略：强制 LLM 改写，即使 optimizePromptOnRetry=false
-      const forceLlmRewrite = isFastFail && fastFailStrategy === 'llm_rewrite';
-      const taskForOpt = forceLlmRewrite && !fresh.settings.optimizePromptOnRetry
-        ? { ...fresh, settings: { ...fresh.settings, optimizePromptOnRetry: true } }
-        : fresh;
+      const isDownloadExtractFastFail = isDownloadExtractFastFailReason(message);
+      const forceRewriteForRetry = isFastFail
+        ? (fastFailStrategy === 'llm_rewrite' && isDownloadExtractFastFail)
+        : undefined;
       if (isFastFail && fastFailStrategy !== 'direct_retry') {
         trace(taskId, 'fast_fail_retry_strategy', {
           itemId: currentItemId,
           strategy: fastFailStrategy,
-          forceLlmRewrite,
+          forceLlmRewrite: forceRewriteForRetry === true,
+          eligibleByNode: isDownloadExtractFastFail,
           attempts: item.attempts,
           message,
         });
       }
-      const opt = await computeRetryPromptWithOptimization(taskId, taskForOpt, item, message || '子任务失败');
+      const opt = await computeRetryPromptForFailure({
+        taskId,
+        task: fresh,
+        item,
+        failureReason: message || '子任务失败',
+        failureCategory: failureCategory || 'unknown',
+        forceRewrite: forceRewriteForRetry,
+      });
       retryPrompt = opt.prompt;
       retryPromptHistory = opt.history;
       retryOptimizedCount = opt.optimizedCount;
+      rewriteApplied = opt.rewriteApplied;
+      if (opt.rewriteApplied) {
+        rewriteReason = opt.rewriteForced ? 'forced_by_failure_category' : 'retry_optimization_enabled';
+      }
     }
 
     updateTaskState(taskId, (task) => {
@@ -1518,7 +1847,15 @@ async function reconcileRunningInstances(taskId: string) {
             imageUrls,
             primaryMediaType: run?.primaryMediaType,
             error: undefined,
+            failureCategory: undefined,
             endedAt,
+            attemptHistory: patchLatestAttemptHistory(entry, {
+              endedAt,
+              durationMs: toDurationMs(entry.attemptHistory?.[entry.attemptHistory.length - 1]?.startedAt, endedAt),
+              outcome: 'success',
+              error: undefined,
+              failureCategory: undefined,
+            }),
           };
         }
         if (cancelled || task.cancelRequested) {
@@ -1526,7 +1863,15 @@ async function reconcileRunningInstances(taskId: string) {
             ...entry,
             status: 'cancelled' as const,
             error: undefined,
+            failureCategory: undefined,
             endedAt,
+            attemptHistory: patchLatestAttemptHistory(entry, {
+              endedAt,
+              durationMs: toDurationMs(entry.attemptHistory?.[entry.attemptHistory.length - 1]?.startedAt, endedAt),
+              outcome: 'cancelled',
+              error: undefined,
+              failureCategory: undefined,
+            }),
           };
         }
 
@@ -1538,7 +1883,17 @@ async function reconcileRunningInstances(taskId: string) {
             imageUrls: imageUrls.length > 0 ? imageUrls : entry.imageUrls,
             primaryMediaType: run?.primaryMediaType || entry.primaryMediaType,
             error: message,
+            failureCategory,
             endedAt,
+            attemptHistory: patchLatestAttemptHistory(entry, {
+              endedAt,
+              durationMs: toDurationMs(entry.attemptHistory?.[entry.attemptHistory.length - 1]?.startedAt, endedAt),
+              outcome: 'failed',
+              error: message,
+              failureCategory,
+              rewriteApplied,
+              rewriteReason,
+            }),
           };
         }
 
@@ -1553,7 +1908,17 @@ async function reconcileRunningInstances(taskId: string) {
           imageUrls: imageUrls.length > 0 ? imageUrls : entry.imageUrls,
           primaryMediaType: run?.primaryMediaType || entry.primaryMediaType,
           error: message,
+          failureCategory,
           endedAt: undefined,
+          attemptHistory: patchLatestAttemptHistory(entry, {
+            endedAt,
+            durationMs: toDurationMs(entry.attemptHistory?.[entry.attemptHistory.length - 1]?.startedAt, endedAt),
+            outcome: 'failed',
+            error: message,
+            failureCategory,
+            rewriteApplied,
+            rewriteReason,
+          }),
         };
       });
       return {
@@ -1581,6 +1946,9 @@ async function reconcileRunningInstances(taskId: string) {
       mediaUrl: mediaUrls[0] || null,
       imageUrl: imageUrls[0] || null,
       error: resultStatus === 'success' || resultStatus === 'cancelled' ? undefined : message,
+      category: failureCategory,
+      rewriteApplied,
+      rewriteReason,
     });
 
     if (success && (mediaUrls[0] || imageUrls[0])) {
@@ -1619,6 +1987,7 @@ async function finalizeTaskWithFailure(taskId: string, reason: string) {
   const current = taskStore().get(taskId);
   if (!current) return;
   const endedAt = nowIso();
+  const failureCategory = parseFailureCategory(reason);
 
   for (const instance of current.instances.filter((item) => item.batchTaskId)) {
     if (instance.batchTaskId) {
@@ -1639,7 +2008,15 @@ async function finalizeTaskWithFailure(taskId: string, reason: string) {
           ...item,
           status: 'failed' as const,
           error: item.error || reason,
+          failureCategory: item.failureCategory || failureCategory,
           endedAt: item.endedAt || endedAt,
+          attemptHistory: patchLatestAttemptHistory(item, {
+            endedAt: item.endedAt || endedAt,
+            durationMs: toDurationMs(item.attemptHistory?.[item.attemptHistory.length - 1]?.startedAt, item.endedAt || endedAt),
+            outcome: 'failed',
+            error: item.error || reason,
+            failureCategory: item.failureCategory || failureCategory,
+          }),
         }
   );
   const summary = computeSummary(items);
@@ -1763,7 +2140,15 @@ async function runDispatcherTask(taskId: string) {
             browserInstanceId: undefined,
             batchTaskId: undefined,
             error: undefined,
+            failureCategory: undefined,
             endedAt: undefined,
+            attemptHistory: patchLatestAttemptHistory(item, {
+              endedAt,
+              durationMs: toDurationMs(item.attemptHistory?.[item.attemptHistory.length - 1]?.startedAt, endedAt),
+              outcome: 'cancelled',
+              error: undefined,
+              failureCategory: undefined,
+            }),
           }
         : item
     );
@@ -1807,7 +2192,19 @@ async function runDispatcherTask(taskId: string) {
     const cancelledItems = final.items.map((item) =>
       item.status === 'success' || item.status === 'failed'
         ? item
-        : { ...item, status: 'cancelled' as const, endedAt: item.endedAt || endedAt }
+        : {
+            ...item,
+            status: 'cancelled' as const,
+            failureCategory: undefined,
+            endedAt: item.endedAt || endedAt,
+            attemptHistory: patchLatestAttemptHistory(item, {
+              endedAt: item.endedAt || endedAt,
+              durationMs: toDurationMs(item.attemptHistory?.[item.attemptHistory.length - 1]?.startedAt, item.endedAt || endedAt),
+              outcome: 'cancelled',
+              error: undefined,
+              failureCategory: undefined,
+            }),
+          }
     );
     const summary = computeSummary(cancelledItems);
     updateTask(taskId, {
@@ -1836,7 +2233,15 @@ async function runDispatcherTask(taskId: string) {
           ...item,
           status: 'failed' as const,
           error: item.error || '任务结束时仍未完成',
+          failureCategory: item.failureCategory || parseFailureCategory(item.error || '任务结束时仍未完成'),
           endedAt: item.endedAt || endedAt,
+          attemptHistory: patchLatestAttemptHistory(item, {
+            endedAt: item.endedAt || endedAt,
+            durationMs: toDurationMs(item.attemptHistory?.[item.attemptHistory.length - 1]?.startedAt, item.endedAt || endedAt),
+            outcome: 'failed',
+            error: item.error || '任务结束时仍未完成',
+            failureCategory: item.failureCategory || parseFailureCategory(item.error || '任务结束时仍未完成'),
+          }),
         }
       : item
   );

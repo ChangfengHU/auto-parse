@@ -3,6 +3,7 @@ import type { NodeResult, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
 import { withSystemClipboardLock } from '../clipboard-lock';
 import { uploadBuffer } from '../../oss';
+import { normalizeFailFastAction, normalizeFailFastTextIncludes } from './fail-fast-text';
 
 /** 节点参数 */
 class FailFastError extends Error {
@@ -11,6 +12,11 @@ class FailFastError extends Error {
     super(`FAIL_FAST: ${reason}`);
     this.name = 'FailFastError';
   }
+}
+
+function isFailFastError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err || '');
+  return message.startsWith('FAIL_FAST:');
 }
 
 export interface ExtractImageClipboardParams {
@@ -28,6 +34,8 @@ export interface ExtractImageClipboardParams {
   failFastTextIncludes?: string[];
   /** 失败快判：当页面出现这些 DOM（可见）时直接判定失败 */
   failFastSelector?: string;
+  /** fast-fail 命中后的处理策略：skip_node=跳过当前节点继续；fail_workflow=直接失败（默认 skip_node） */
+  failFastAction?: 'skip_node' | 'fail_workflow';
 
   /** 是否上传到 OSS（默认 true） */
   uploadToOSS?: boolean;
@@ -48,19 +56,9 @@ async function detectFailFast(
   page: Page,
   params: ExtractImageClipboardParams
 ): Promise<string | null> {
-  // 安全处理 failFastTextIncludes：支持数组、对象或其他类型
-  let includes: string[] = [];
-  if (params.failFastTextIncludes) {
-    if (Array.isArray(params.failFastTextIncludes)) {
-      includes = params.failFastTextIncludes.map(s => String(s).trim()).filter(Boolean);
-    } else if (typeof params.failFastTextIncludes === 'object') {
-      // 如果被误传成了对象，尝试从对象中提取数组
-      const val = Object.values(params.failFastTextIncludes as Record<string, unknown>);
-      if (Array.isArray(val) && val.length > 0) {
-        includes = val.map(s => String(s).trim()).filter(Boolean);
-      }
-    }
-  }
+  const includes = normalizeFailFastTextIncludes(
+    (params as { failFastTextIncludes?: unknown }).failFastTextIncludes
+  );
   const selector = String(params.failFastSelector ?? '').trim();
 
   if (selector) {
@@ -74,13 +72,12 @@ async function detectFailFast(
 
   if (includes.length > 0) {
     try {
-      const hit = await page.evaluate((needles) => {
-        const text = (document.body?.innerText || '').replace(/\s+/g, ' ');
-        for (const n of needles) {
-          if (n && text.includes(n)) return n;
-        }
-        return null;
-      }, includes);
+      let bodyText = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+      if (!bodyText) {
+        bodyText = await page.locator('body').innerText({ timeout: 200 }).catch(() => '');
+      }
+      const normalized = String(bodyText || '').replace(/\s+/g, ' ').toLowerCase();
+      const hit = includes.find((needle) => normalized.includes(needle.toLowerCase()));
       if (hit) return `text: ${hit}`;
     } catch {
       // ignore
@@ -209,6 +206,8 @@ export async function executeExtractImageClipboard(
     const waitAfterCopy = params.waitAfterCopy ?? 3000;
     const uploadToOSS = params.uploadToOSS ?? true;
     const outputVar = params.outputVar || 'imageUrl';
+    const failFastAction = normalizeFailFastAction((params as { failFastAction?: unknown }).failFastAction);
+    log.push(`🛑 失败快判命中后策略: ${failFastAction}`);
 
     // 处理 ossPath 中的 {{timestamp}} 模板变量
     let ossPath = params.ossPath || `gemini-images/{{timestamp}}.png`;
@@ -316,6 +315,23 @@ export async function executeExtractImageClipboard(
     };
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
+    if (isFailFastError(e)) {
+      const failFastAction = normalizeFailFastAction((params as { failFastAction?: unknown }).failFastAction);
+      if (failFastAction === 'skip_node') {
+        log.push(`⏭️ fast-fail 命中，按策略跳过当前节点并继续后续步骤`);
+        const screenshot = await captureScreenshot(page).catch(() => undefined);
+        return {
+          success: true,
+          log,
+          screenshot,
+          output: {
+            skippedByFailFast: true,
+            failFastAction,
+            failFastReason: error,
+          },
+        };
+      }
+    }
     log.push(`❌ 剪贴板图片提取失败: ${error}`);
     const screenshot = await captureScreenshot(page).catch(() => undefined);
     return { success: false, log, error, screenshot };

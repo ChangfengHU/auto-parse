@@ -2,7 +2,6 @@ import { randomUUID } from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { createGeminiWebImageTask, getGeminiWebImageTask, cancelGeminiWebImageTask } from './gemini-web-image';
 import { getWorkflow, listWorkflows } from './workflow-db';
 import type { WorkflowDef } from './types';
 import {
@@ -12,6 +11,12 @@ import {
   taskTraceFileRelative,
   type TaskTracePayload,
 } from './task-trace';
+import {
+  collectWorkflowTaskArtifacts,
+  getWorkflowTask,
+  startWorkflowTask,
+  stopWorkflowTask,
+} from './workflow-task-cli';
 
 type BatchStatus = 'queued' | 'running' | 'success' | 'failed' | 'cancelled';
 type BatchRunStatus = 'queued' | 'running' | 'success' | 'failed' | 'cancelled';
@@ -258,8 +263,90 @@ function filterReferenceMediaUrls(urls: string[], sourceImageUrls: string[]): st
   return out;
 }
 
+function parseUrlTokens(input: unknown): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (value: string) => {
+    const url = String(value || '').trim();
+    if (!url || seen.has(url)) return;
+    if (!/^https?:\/\//i.test(url)) return;
+    seen.add(url);
+    out.push(url);
+  };
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    const text = String(value || '').trim();
+    if (!text) return;
+    if (text.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          visit(parsed);
+          return;
+        }
+      } catch {
+        // fall through
+      }
+    }
+    for (const token of text.split(/[\n,]/)) {
+      push(token);
+    }
+  };
+  visit(input);
+  return out;
+}
+
+function collectMediaCandidates(result?: {
+  mediaUrls?: string[];
+  imageUrls?: string[];
+  primaryMediaUrl?: string | null;
+  primaryImageUrl?: string | null;
+  outputs?: Record<string, unknown>;
+  vars?: Record<string, string>;
+}) {
+  const media = new Set<string>();
+  const image = new Set<string>();
+  const addMedia = (value: unknown) => {
+    for (const url of parseUrlTokens(value)) media.add(url);
+  };
+  const addImage = (value: unknown) => {
+    for (const url of parseUrlTokens(value)) {
+      image.add(url);
+      media.add(url);
+    }
+  };
+
+  addMedia(result?.mediaUrls);
+  addImage(result?.imageUrls);
+  addMedia(result?.primaryMediaUrl ?? '');
+  addImage(result?.primaryImageUrl ?? '');
+
+  const outputValues = Object.values(result?.outputs ?? {});
+  for (const value of outputValues) addMedia(value);
+
+  const vars = result?.vars ?? {};
+  addMedia(vars.mediaUrl);
+  addImage(vars.imageUrl);
+  addMedia(vars.primaryMediaUrl);
+  addImage(vars.primaryImageUrl);
+  addMedia(vars.mediaUrls);
+  addImage(vars.imageUrls);
+
+  return {
+    mediaUrls: Array.from(media),
+    imageUrls: Array.from(image),
+  };
+}
+
 function isTerminal(status: string) {
   return status === 'success' || status === 'failed' || status === 'cancelled';
+}
+
+function isWorkflowTaskTerminal(status: string) {
+  return status === 'done' || status === 'error' || status === 'stopped';
 }
 
 async function runBatchTask(taskId: string) {
@@ -320,11 +407,10 @@ async function runBatchTask(taskId: string) {
             break;
           }
 
-          const child = await createGeminiWebImageTask({
+          const child = await startWorkflowTask({
+            workflowId: workflow.id,
             workflow,
             vars,
-            prompt: run.prompt,
-            autoCloseTab: fresh.autoCloseTab,
           });
           updateRun(taskId, index, { taskId: child.id, attempts: attempt, status: 'running' });
           trace(taskId, 'child_task_created', { index, attempt, childTaskId: child.id, browserInstanceId: run.browserInstanceId });
@@ -333,33 +419,35 @@ async function runBatchTask(taskId: string) {
             const latest = taskStore().get(taskId);
             if (!latest) return;
             if (latest.cancelRequested) {
-              cancelGeminiWebImageTask(child.id);
+              stopWorkflowTask(child.id, 'batch_cancelled');
             }
 
-            const childTask = getGeminiWebImageTask(child.id);
+            const childTask = getWorkflowTask(child.id);
             if (!childTask) {
               await new Promise((resolve) => setTimeout(resolve, 1200));
               continue;
             }
-            if (!isTerminal(childTask.status)) {
+            if (!isWorkflowTaskTerminal(childTask.status)) {
               await new Promise((resolve) => setTimeout(resolve, 1200));
               continue;
             }
 
-            if (childTask.status === 'success') {
+            if (childTask.status === 'done') {
+              const artifacts = collectWorkflowTaskArtifacts(child.id);
+              const candidate = collectMediaCandidates(artifacts ?? undefined);
               const mediaUrls = filterReferenceMediaUrls(
-                childTask.result?.mediaUrls ?? childTask.result?.imageUrls ?? [],
+                candidate.mediaUrls,
                 run.sourceImageUrls ? normalizeSourceImageUrls(run.sourceImageUrls) : []
               );
               const imageUrls = filterReferenceMediaUrls(
-                childTask.result?.imageUrls ?? [],
+                candidate.imageUrls,
                 run.sourceImageUrls ? normalizeSourceImageUrls(run.sourceImageUrls) : []
               );
               if (mediaUrls.length > 0) {
                 finalStatus = 'success';
                 finalMediaUrls = mediaUrls;
                 finalImageUrls = imageUrls;
-                finalPrimaryMediaType = childTask.result?.primaryMediaType;
+                finalPrimaryMediaType = artifacts?.primaryMediaType;
                 finalError = undefined;
               } else {
                 finalStatus = 'failed';
@@ -368,26 +456,28 @@ async function runBatchTask(taskId: string) {
                 finalPrimaryMediaType = undefined;
                 finalError = '任务完成但未返回媒体 URL';
               }
-            } else if (childTask.status === 'cancelled') {
+            } else if (childTask.status === 'stopped') {
               finalStatus = 'cancelled';
               finalMediaUrls = [];
               finalImageUrls = [];
               finalPrimaryMediaType = undefined;
               finalError = undefined;
             } else {
+              const artifacts = collectWorkflowTaskArtifacts(child.id);
+              const candidate = collectMediaCandidates(artifacts ?? undefined);
               const filteredMediaUrls = filterReferenceMediaUrls(
-                childTask.result?.mediaUrls ?? childTask.result?.imageUrls ?? [],
+                candidate.mediaUrls,
                 run.sourceImageUrls ? normalizeSourceImageUrls(run.sourceImageUrls) : []
               );
               const filteredImageUrls = filterReferenceMediaUrls(
-                childTask.result?.imageUrls ?? [],
+                candidate.imageUrls,
                 run.sourceImageUrls ? normalizeSourceImageUrls(run.sourceImageUrls) : []
               );
               finalStatus = 'failed';
               finalMediaUrls = filteredMediaUrls;
               finalImageUrls = filteredImageUrls;
-              finalPrimaryMediaType = childTask.result?.primaryMediaType;
-              finalError = childTask.error || '子任务失败';
+              finalPrimaryMediaType = artifacts?.primaryMediaType;
+              finalError = childTask.errorMessage || '子任务失败';
             }
             break;
           }
@@ -622,6 +712,11 @@ export function cancelGeminiAdsBatchTask(taskId: string) {
   const updated = updateTask(taskId, { cancelRequested: true });
   if (updated) {
     trace(taskId, 'cancel_requested', { status: task.status });
+    for (const run of updated.runs) {
+      if (run.status === 'running' && run.taskId) {
+        stopWorkflowTask(run.taskId, 'batch_cancelled');
+      }
+    }
   }
   return updated;
 }

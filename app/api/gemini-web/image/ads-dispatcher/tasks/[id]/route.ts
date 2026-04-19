@@ -26,6 +26,19 @@ type Row = {
   task_json?: any;
 };
 
+function parseTs(value?: string | null) {
+  if (!value) return NaN;
+  const ts = Date.parse(value);
+  return Number.isFinite(ts) ? ts : NaN;
+}
+
+function durationMs(start?: string | null, end?: string | null) {
+  const s = parseTs(start);
+  const e = parseTs(end ?? new Date().toISOString());
+  if (!Number.isFinite(s) || !Number.isFinite(e)) return undefined;
+  return Math.max(0, e - s);
+}
+
 function sanitizeUrls(urls: unknown, sourceImageUrls: unknown): string[] {
   const blocked = new Set(
     (Array.isArray(sourceImageUrls) ? sourceImageUrls : [])
@@ -112,6 +125,23 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const sanitizedItems = items.map((item: any) => {
     const media = sanitizeUrls(item.mediaUrls ?? item.imageUrls, item.sourceImageUrls);
     const images = sanitizeUrls(item.imageUrls, item.sourceImageUrls);
+    const attempts = Number(item.attempts || 0);
+    const attemptHistory = Array.isArray(item.attemptHistory)
+      ? item.attemptHistory.map((attempt: any) => ({
+          attempt: Number(attempt?.attempt || 0),
+          prompt: attempt?.prompt,
+          browserInstanceId: attempt?.browserInstanceId,
+          batchTaskId: attempt?.batchTaskId,
+          startedAt: attempt?.startedAt,
+          endedAt: attempt?.endedAt,
+          durationMs: attempt?.durationMs ?? durationMs(attempt?.startedAt, attempt?.endedAt),
+          outcome: attempt?.outcome,
+          error: attempt?.error,
+          failureCategory: attempt?.failureCategory,
+          rewriteApplied: attempt?.rewriteApplied,
+          rewriteReason: attempt?.rewriteReason,
+        }))
+      : [];
     return {
       id: item.id,
       index: item.index,
@@ -121,9 +151,9 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       originalPrompt: item.promptHistory?.[0] ?? item.prompt,
       promptHistory: item.promptHistory,
       status: item.status,
-      attempts: item.attempts,
-      retried: Number(item.attempts || 0) > 1,
-      retryCount: Math.max(0, Number(item.attempts || 0) - 1),
+      attempts,
+      retried: attempts > 1,
+      retryCount: Math.max(0, attempts - 1),
       browserInstanceId: item.browserInstanceId,
       mediaUrls: media,
       primaryMediaUrl: media[0] || null,
@@ -131,9 +161,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       imageUrls: images,
       primaryImageUrl: images[0] || null,
       error: item.error,
+      failureCategory: item.failureCategory,
       batchTaskId: item.batchTaskId,
+      batchTaskHistory: item.batchTaskHistory ?? [],
       startedAt: item.startedAt,
       endedAt: item.endedAt,
+      durationMs: durationMs(item.startedAt, item.endedAt),
+      attemptHistory,
     };
   });
 
@@ -154,13 +188,25 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       retryCount: Math.max(0, Number(item.attempts || 0) - 1),
       status: item.status,
       error: item.error,
+      failureCategory: item.failureCategory,
       browserInstanceId: item.browserInstanceId,
       batchTaskId: item.batchTaskId,
+      durationMs: durationMs(item.startedAt, item.endedAt),
     }));
+
+  const failureCategoryStats = sanitizedItems.reduce((acc: Record<string, number>, item: any) => {
+    const category = typeof item.failureCategory === 'string' ? item.failureCategory : '';
+    if (!category) return acc;
+    acc[category] = (acc[category] || 0) + 1;
+    return acc;
+  }, {});
+
+  const taskDurationMs = durationMs(task.startedAt || task.createdAt, task.endedAt);
 
   return NextResponse.json({
     source,
     ...task,
+    durationMs: taskDurationMs,
     items: sanitizedItems,
     queue: getGeminiAdsDispatcherQueueInfo(task.id),
     traceUrl: `/api/task-traces?namespace=gemini-ads-dispatcher&taskId=${encodeURIComponent(task.id)}`,
@@ -174,6 +220,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       cancelledCount: task.summary?.cancelled ?? 0,
       totalCount: task.summary?.total ?? items.length,
       retriedItemCount: retriedItems.length,
+      durationMs: taskDurationMs,
+      failureCategoryStats,
       retriedItems,
       items: sanitizedItems,
       instances: task.instances,

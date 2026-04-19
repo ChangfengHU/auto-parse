@@ -49,6 +49,7 @@ export interface NodeDef {
   label?: string                     // 展示给用户的名称
   params: Record<string, unknown>    // 节点参数（支持 {{变量}} 模板）
   continueOnError?: boolean          // 失败时是否继续（默认 false）
+  disabled?: boolean                 // 节点是否禁用（禁用时会跳过执行，默认 false）
   url?: string                       // 执行前自动导航到此 URL（空则不导航）
   waitAfter?: WaitAfterConfig        // 执行后等待条件
   autoScreenshot?: boolean           // 执行后自动截图（默认 true）
@@ -66,6 +67,14 @@ export interface NavigateParams {
   adsApiUrl?: string               // AdsPower 本地接口地址，默认 http://127.0.0.1:50325
   adsManualCdpUrl?: string         // 终极方案：手动填入已打开浏览器的 CDP 地址 (ws://...)
   adsProxyServer?: string          // 选填：强制透传 --proxy-server（例：http://host:port）
+  adsDisableAutoStart?: boolean    // 开启后仅复用 active 分身，不自动调用 browser/start
+
+  // ── 后置点击（导航完成后自动点击按钮） ──
+  postClickEnabled?: boolean       // 是否启用后置点击（默认 false）
+  postClickElements?: Array<{      // 候选按钮（按优先级尝试）
+    text?: string                  // 按钮文字（优先）
+    selector?: string              // CSS 选择器（次选）
+  }>
 }
 
 export interface MaterialParams {
@@ -81,6 +90,7 @@ export interface TextInputParams {
   inputMode?: 'fill' | 'type'
   clear?: boolean   // 是否先清空（默认 true）
   delay?: number    // 每字符延迟 ms（模拟人工输入，默认 0）
+  autoEnter?: boolean // 输入完成后是否自动回车
 }
 
 export interface PressHotkeyParams {
@@ -228,6 +238,8 @@ export interface ExtractImageClipboardParams {
   failFastTextIncludes?: string[];
   /** 失败快判：当页面出现这些 DOM（可见）时直接判定失败 */
   failFastSelector?: string;
+  /** fast-fail 命中后的处理策略：skip_node=跳过当前节点继续；fail_workflow=直接失败（默认 skip_node） */
+  failFastAction?: 'skip_node' | 'fail_workflow';
 
   /** 是否上传到 OSS（默认 true） */
   uploadToOSS?: boolean;
@@ -256,17 +268,43 @@ export interface ExtractImageDownloadParams {
   outputVar?: string;
 
   /**
+   * 提取后落盘：oss=阿里云 OSS；local_api=POST 到自建 files:upload（multipart，storage_backend=local）拿 url；
+   * 未指定时：uploadToOSS=true → oss，uploadToOSS=false → 仅本地临时路径（与旧行为一致）。
+   */
+  storageBackend?: 'oss' | 'local_api';
+  /** storageBackend=local_api 时必填（或设环境变量 WORKFLOW_LOCAL_FILES_UPLOAD_URL），如 http://127.0.0.1:1002/v1beta/files:upload */
+  localFilesUploadUrl?: string;
+  /** 上传超时 ms，默认 120000 */
+  localFilesUploadTimeoutMs?: number;
+
+  /**
    * 失败快判（减少无效等待）：当页面出现这些文本片段时直接判定失败。
    * 例如："抱歉，今天没办法帮你生成更多视频了"。
    */
   failFastTextIncludes?: string[];
   /** 失败快判：当页面出现这些 DOM（可见）时直接判定失败 */
   failFastSelector?: string;
+  /** fast-fail 命中后的处理策略：skip_node=跳过当前节点继续；fail_workflow=直接失败（默认 skip_node） */
+  failFastAction?: 'skip_node' | 'fail_workflow';
 
   /** 等待新按钮出现（多轮续话模式）：先记录当前按钮数量，等待数量增加后再下载最新按钮 */
   waitForNew?: boolean;
   /** waitForNew 模式的最大等待时间（ms），默认 120000 */
   waitForNewTimeout?: number;
+  /** 优先从 DOM 直接 fetch 图片（跳过浏览器下载流程）。图片已渲染时可大幅提速，默认 false */
+  preferDomExtraction?: boolean;
+  /** 提取前先等待图片生成完成，默认 false */
+  waitImageReady?: boolean;
+  /** 等待超时（ms），默认 240000 */
+  waitImageReadyTimeout?: number;
+  /** 等待的目标文字（页面包含此文字即匹配，比选择器更简单；与 waitImageReadySelector 二选一，文字优先） */
+  waitImageReadyText?: string;
+  /** 等待的目标选择器（CSS/Playwright selector；与 waitImageReadyText 二选一，文字优先） */
+  waitImageReadySelector?: string;
+  /** 等待模式：appeared=等元素出现；disappeared=等元素消失；appeared_then_disappeared=等出现再消失（适合加载指示器，默认） */
+  waitImageReadyAction?: 'appeared' | 'disappeared' | 'appeared_then_disappeared';
+  /** appeared_then_disappeared 模式中等待元素出现的超时（ms），默认 30000 */
+  waitImageReadyAppearTimeout?: number;
 }
 
 export interface ExtractImageParams {
@@ -429,7 +467,10 @@ export interface NodeResult {
   log: string[]
   screenshot?: string              // base64 data URL
   output?: Record<string, unknown> // 传递给后续节点的数据（如 cookies、进度值）
+  /** 节点被禁用等：不计入 output，避免污染 finalVars；由引擎/任务层标记「步骤已跳过」 */
+  stepSkipped?: boolean
   error?: string
+  durationMs?: number              // 执行耗时（毫秒）
   newPage?: unknown                // 可选：用于工作流中途强制替换浏览器页面的游标引用
   newBrowser?: unknown             // 可选：用于存放伴随的新浏览器实例
 }
@@ -449,6 +490,7 @@ export interface StepHistory {
   label?: string
   result: NodeResult
   executedAt: number
+  durationMs?: number              // 冗余字段或从 result 中提取
 }
 
 export interface WorkflowSession {

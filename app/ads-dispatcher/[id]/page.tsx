@@ -8,6 +8,22 @@ import { ImageGalleryPreview } from '@/components/image-gallery-preview';
 /* ─── Types ─── */
 type ItemStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled';
 type InstanceState = 'idle' | 'running' | 'inactive' | 'busy';
+type AttemptOutcome = 'running' | 'success' | 'failed' | 'timeout' | 'create_failed' | 'cancelled';
+
+interface AttemptHistoryEntry {
+  attempt: number;
+  prompt?: string;
+  browserInstanceId?: string;
+  batchTaskId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  durationMs?: number;
+  outcome?: AttemptOutcome;
+  error?: string;
+  failureCategory?: string;
+  rewriteApplied?: boolean;
+  rewriteReason?: string;
+}
 
 interface DispatcherItem {
   id: string;
@@ -25,8 +41,11 @@ interface DispatcherItem {
   imageUrls: string[];
   primaryMediaType?: 'image' | 'video' | 'unknown';
   error?: string;
+  failureCategory?: string;
   startedAt?: string;
   endedAt?: string;
+  durationMs?: number;
+  attemptHistory?: AttemptHistoryEntry[];
 }
 
 interface DispatcherInstance {
@@ -97,6 +116,7 @@ interface TaskDetail {
   createdAt: string;
   startedAt?: string;
   endedAt?: string;
+  durationMs?: number;
   cancelRequested: boolean;
   cancelReason?: string;
   pausedAt?: string;
@@ -111,6 +131,11 @@ interface TaskDetail {
   items: DispatcherItem[];
   instances: DispatcherInstance[];
   queue: { state: string; position?: number; size: number; runningTaskId?: string };
+  result?: {
+    durationMs?: number;
+    retriedItemCount?: number;
+    failureCategoryStats?: Record<string, number>;
+  };
   traceUrl?: string;
   done: boolean;
 }
@@ -163,6 +188,39 @@ function formatMs(ms: number) {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(0)}s`;
   return `${(ms / 60000).toFixed(1)}min`;
+}
+
+function formatMaybeMs(ms?: number) {
+  if (typeof ms !== 'number' || Number.isNaN(ms)) return '-';
+  return formatMs(ms);
+}
+
+function failureCategoryLabel(category?: string) {
+  const labels: Record<string, string> = {
+    fast_fail: '快速失败',
+    timeout: '超时',
+    policy_blocked: '策略/违禁',
+    policy_violation: '策略/违禁',
+    no_media: '无媒体结果',
+    no_result: '无结果',
+    child_create_failed: '子任务创建失败',
+    network: '网络异常',
+    network_error: '网络异常',
+    unknown: '未知',
+  };
+  return labels[category || ''] || (category || '未分类');
+}
+
+function outcomeLabel(outcome?: AttemptOutcome) {
+  const labels: Record<string, string> = {
+    running: '运行中',
+    success: '成功',
+    failed: '失败',
+    timeout: '超时',
+    create_failed: '创建失败',
+    cancelled: '已取消',
+  };
+  return labels[outcome || ''] || (outcome || '-');
 }
 
 function truncate(s: string, n = 60) {
@@ -333,6 +391,8 @@ function ItemExpandedDetail({ item }: { item: DispatcherItem }) {
       <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted-foreground">
         <span>开始：{formatTime(item.startedAt)}</span>
         <span>结束：{formatTime(item.endedAt)}</span>
+        <span>耗时：{formatMaybeMs(item.durationMs)}</span>
+        {item.failureCategory && <span>失败分类：<span className="text-red-400">{failureCategoryLabel(item.failureCategory)}</span></span>}
         {item.browserInstanceId && (
           <span>实例：<code className="font-mono text-foreground">{item.browserInstanceId}</code></span>
         )}
@@ -347,8 +407,39 @@ function ItemExpandedDetail({ item }: { item: DispatcherItem }) {
         )}
       </div>
 
-      {/* 历史尝试记录 */}
-      {item.batchTaskHistory && item.batchTaskHistory.length > 0 && (
+      {/* 尝试明细 */}
+      {item.attemptHistory && item.attemptHistory.length > 0 && (
+        <div>
+          <div className="font-medium text-muted-foreground mb-2">尝试明细（{item.attemptHistory.length}）</div>
+          <div className="space-y-1.5">
+            {item.attemptHistory.map((attempt) => (
+              <div key={`${item.id}-attempt-${attempt.attempt}`} className="bg-muted/20 border border-border rounded-lg px-3 py-2 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-foreground">第 {attempt.attempt} 次</span>
+                  <span className="text-muted-foreground">状态：{outcomeLabel(attempt.outcome)}</span>
+                  <span className="text-muted-foreground">耗时：{formatMaybeMs(attempt.durationMs)}</span>
+                  {attempt.failureCategory && <span className="text-red-400">分类：{failureCategoryLabel(attempt.failureCategory)}</span>}
+                  {attempt.rewriteApplied && (
+                    <span className="text-amber-400 border border-amber-500/30 rounded px-1">
+                      已改写{attempt.rewriteReason ? ` (${attempt.rewriteReason})` : ''}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-muted-foreground">
+                  <span>开始：{formatTime(attempt.startedAt)}</span>
+                  <span>结束：{formatTime(attempt.endedAt)}</span>
+                  {attempt.browserInstanceId && <span>实例：{attempt.browserInstanceId}</span>}
+                  {attempt.batchTaskId && <span>Batch：<code className="font-mono text-primary">{attempt.batchTaskId.slice(0, 12)}…</code></span>}
+                </div>
+                {attempt.error && <div className="mt-1 text-red-400 break-all">{attempt.error}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 历史尝试记录（旧数据兼容） */}
+      {(!item.attemptHistory || item.attemptHistory.length === 0) && item.batchTaskHistory && item.batchTaskHistory.length > 0 && (
         <div>
           <div className="font-medium text-muted-foreground mb-2">历史尝试（{item.batchTaskHistory.length} 次失败）</div>
           <div className="space-y-1.5">
@@ -489,6 +580,14 @@ function ItemRow({ item, expanded, onToggle }: { item: DispatcherItem; expanded:
         </td>
         <td className="px-4 py-2.5"><StatusBadge status={item.status} /></td>
         <td className="px-4 py-2.5 text-xs text-muted-foreground text-center">{item.attempts}</td>
+        <td className="px-4 py-2.5 text-xs">
+          {item.failureCategory ? (
+            <span className="text-red-400">{failureCategoryLabel(item.failureCategory)}</span>
+          ) : (
+            <span className="text-muted-foreground">-</span>
+          )}
+        </td>
+        <td className="px-4 py-2.5 text-xs text-muted-foreground">{formatMaybeMs(item.durationMs)}</td>
         <td className="px-4 py-2.5">
           {primaryMedia && isImage ? (
             <img src={primaryMedia} alt="" className="w-10 h-10 object-cover rounded border border-border" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
@@ -505,7 +604,7 @@ function ItemRow({ item, expanded, onToggle }: { item: DispatcherItem; expanded:
       </tr>
       {expanded && (
         <tr className="bg-muted/20">
-          <td colSpan={7} className="px-5 py-4">
+          <td colSpan={9} className="px-5 py-4">
             <ItemExpandedDetail item={item} />
           </td>
         </tr>
@@ -791,12 +890,26 @@ export default function AdsDispatcherDetailPage() {
             <span>创建：{formatTime(task.createdAt)}</span>
             <span>开始：{formatTime(task.startedAt)}</span>
             <span>结束：{formatTime(task.endedAt)}</span>
+            <span>总耗时：{formatMaybeMs(task.durationMs)}</span>
             <span>分配总数：{task.metrics.totalAssignments}</span>
             <span>完成总数：{task.metrics.totalCompletions}</span>
+            {typeof task.result?.retriedItemCount === 'number' && <span>发生重试：{task.result.retriedItemCount} 项</span>}
             <span className={task.metrics.idleCyclesWithoutAssignment > 5 ? 'text-amber-400' : ''}>
               空闲轮次：{task.metrics.idleCyclesWithoutAssignment}
             </span>
           </div>
+
+          {task.result?.failureCategoryStats && Object.keys(task.result.failureCategoryStats).length > 0 && (
+            <div className="flex flex-wrap gap-2 text-xs">
+              {Object.entries(task.result.failureCategoryStats)
+                .sort((a, b) => b[1] - a[1])
+                .map(([category, count]) => (
+                  <span key={category} className="px-2 py-0.5 rounded border border-red-500/25 text-red-400 bg-red-500/10">
+                    {failureCategoryLabel(category)}: {count}
+                  </span>
+                ))}
+            </div>
+          )}
 
           {/* Error */}
           {task.error && (
@@ -883,13 +996,15 @@ export default function AdsDispatcherDetailPage() {
               ))}
             </div>
             <div className="bg-card border border-border rounded-xl overflow-x-auto">
-              <table className="w-full text-sm min-w-[640px]">
+              <table className="w-full text-sm min-w-[860px]">
                 <thead className="bg-muted/50 border-b border-border">
                   <tr>
                     <th className="text-left px-4 py-2.5 font-medium text-muted-foreground w-10">#</th>
                     <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Prompt</th>
                     <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">状态</th>
                     <th className="text-center px-4 py-2.5 font-medium text-muted-foreground">尝试</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">失败分类</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">耗时</th>
                     <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">媒体</th>
                     <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">错误</th>
                     <th className="px-4 py-2.5 w-6" />

@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
         send('done', JSON.stringify({
           success: result.success,
           error: result.error,
-          result: { success: result.success, output: result.output },
+          result: { success: result.success, output: result.output, durationMs: result.durationMs },
           vars: Object.fromEntries(Object.entries(wfCtx.vars).filter(([key]) => key !== '__pauseToken')),
         }));
       } catch (e) {

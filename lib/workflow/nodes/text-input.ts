@@ -41,6 +41,35 @@ export async function executeTextInput(
       .evaluate((node) => node instanceof HTMLElement && node.isContentEditable)
       .catch(() => false);
 
+    const readTargetText = async () => {
+      if (isContentEditable) {
+        return await el.evaluate((node) => {
+          const target = node as HTMLElement;
+          return String(target.innerText || target.textContent || '');
+        }).catch(() => '');
+      }
+      const valueByApi = await el.inputValue().catch(() => '');
+      if (typeof valueByApi === 'string') return valueByApi;
+      return await el.evaluate((node) => {
+        const target = node as HTMLInputElement | HTMLTextAreaElement;
+        return typeof target?.value === 'string' ? target.value : '';
+      }).catch(() => '');
+    };
+
+    const readSubmitMarkers = async () => {
+      const sendVisible = await page
+        .locator('button[aria-label="Submit"], button[aria-label*="Submit" i], button[aria-label="Send message"], button[aria-label*="Send" i], button[aria-label*="发送"], .send-button-container button')
+        .last()
+        .isVisible()
+        .catch(() => false);
+      const stopVisible = await page
+        .locator('button[aria-label*="Stop" i], button[aria-label*="停止"]')
+        .first()
+        .isVisible()
+        .catch(() => false);
+      return { sendVisible, stopVisible };
+    };
+
     if (isContentEditable) {
       await el.click({ timeout: 10_000 });
       if (params.clear !== false) {
@@ -99,6 +128,92 @@ export async function executeTextInput(
     }
 
     log.push(`✅ 已填入：${value.slice(0, 30)}${value.length > 30 ? '...' : ''}`);
+    
+    // ── 自动回车逻辑 ──────────────────────────────────────────────────────────
+    if (params.autoEnter) {
+      const beforeText = (await readTargetText()).trim();
+      const beforeLen = beforeText.length;
+      const beforeMarkers = await readSubmitMarkers();
+      const osPreferred = process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter';
+      const altCombo = process.platform === 'darwin' ? 'Control+Enter' : 'Meta+Enter';
+      const hotkeys = Array.from(new Set(['Enter', osPreferred, altCombo]));
+
+      await page.bringToFront().catch(() => {});
+      await page.evaluate(() => window.focus()).catch(() => {});
+      await el.click({ timeout: 10_000 }).catch(() => {});
+      log.push(`⌨️ 自动发送尝试：${hotkeys.join(' / ')}`);
+
+      let submitted = false;
+      for (const hotkey of hotkeys) {
+        try {
+          await page.keyboard.press(hotkey);
+          await page.waitForTimeout(320);
+          const afterText = (await readTargetText()).trim();
+          const afterLen = afterText.length;
+          const afterMarkers = await readSubmitMarkers();
+          const cleared = beforeLen > 0 && afterLen === 0;
+          const significantlyChanged = beforeLen > 0 && afterLen <= Math.max(0, beforeLen - 2);
+          const sendToStop = !beforeMarkers.stopVisible && afterMarkers.stopVisible;
+          const sendHidden = beforeMarkers.sendVisible && !afterMarkers.sendVisible && afterLen <= beforeLen;
+          if (cleared || significantlyChanged || sendToStop || sendHidden) {
+            submitted = true;
+            log.push(`✅ 自动发送成功：${hotkey}`);
+            break;
+          }
+          log.push(`⚠️ ${hotkey} 未确认生效，尝试下一个组合键`);
+        } catch {
+          log.push(`⚠️ ${hotkey} 执行失败，尝试下一个组合键`);
+        }
+      }
+
+      if (!submitted) {
+        const clickSelectors = [
+          'button[aria-label="Submit"]',
+          'button[aria-label*="Submit" i]',
+          'button[aria-label="Send message"]',
+          'button[aria-label*="Send" i]',
+          'button[aria-label*="发送"]',
+          '.send-button-container button',
+        ];
+        for (const selector of clickSelectors) {
+          try {
+            const btn = page.locator(selector).last();
+            await btn.waitFor({ state: 'visible', timeout: 1_500 });
+            await btn.click({ timeout: 2_000, force: true });
+            await page.waitForTimeout(250);
+            const afterMarkers = await readSubmitMarkers();
+            if ((!beforeMarkers.stopVisible && afterMarkers.stopVisible) || (beforeMarkers.sendVisible && !afterMarkers.sendVisible)) {
+              submitted = true;
+              log.push(`✅ 自动发送成功：点击按钮 ${selector}`);
+              break;
+            }
+          } catch {
+            // continue
+          }
+        }
+      }
+
+      if (!submitted) {
+        const box = await el.boundingBox().catch(() => null);
+        if (box) {
+          const cx = Math.max(0, Math.round(box.x + box.width - 20));
+          const cy = Math.max(0, Math.round(box.y + box.height - 20));
+          await page.mouse.move(cx, cy).catch(() => {});
+          await page.mouse.click(cx, cy).catch(() => {});
+          await page.waitForTimeout(220);
+          const afterMarkers = await readSubmitMarkers();
+          if ((!beforeMarkers.stopVisible && afterMarkers.stopVisible) || (beforeMarkers.sendVisible && !afterMarkers.sendVisible)) {
+            submitted = true;
+            log.push(`✅ 自动发送成功：输入框右下角坐标点击 (${cx}, ${cy})`);
+          }
+        }
+      }
+
+      if (!submitted) {
+        log.push('⚠️ 未能确认自动发送成功，建议保留后续点击发送节点兜底');
+      }
+    }
+
     const screenshot = await captureScreenshot(page);
     return { success: true, log, screenshot };
   } catch (e) {

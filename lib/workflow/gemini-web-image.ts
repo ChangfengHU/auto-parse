@@ -157,6 +157,12 @@ async function closeSessionPageSafely(session: WorkflowSession): Promise<'closed
   }
 }
 
+async function interruptSessionPage(session: WorkflowSession) {
+  const page = session._page;
+  if (!page || page.isClosed()) return;
+  await page.close({ runBeforeUnload: false }).catch(() => {});
+}
+
 async function ensureRuntimePageForNode(input: {
   session: WorkflowSession;
   node: NodeDef;
@@ -253,6 +259,24 @@ async function runTask(taskId: string) {
         await tempBrowser.close().catch(() => {});
       }
     }
+    const cancelledAfterStep = taskStore().get(taskId)?.cancelRequested;
+    if (cancelledAfterStep) {
+      updateTask(taskId, { status: 'cancelled', endedAt: new Date().toISOString() });
+      addCheckpoint(taskId, {
+        stepIndex: i,
+        name: node.label ?? node.type,
+        status: 'cancelled',
+        message: '任务已取消',
+        timestamp: new Date().toISOString(),
+      });
+      if (session._page) {
+        await interruptSessionPage(session);
+      }
+      if (taskStore().get(taskId)?.autoCloseTab) {
+        deleteSession(session.id);
+      }
+      return;
+    }
     const nextVars = Object.fromEntries(
       Object.entries(ctx.vars).filter(([key]) => key !== '__pauseToken')
     );
@@ -299,6 +323,19 @@ async function runTask(taskId: string) {
     });
 
     if (failed) {
+      if (taskStore().get(taskId)?.cancelRequested) {
+        updateTask(taskId, {
+          status: 'cancelled',
+          endedAt: new Date().toISOString(),
+        });
+        if (session._page) {
+          await interruptSessionPage(session);
+        }
+        if (taskStore().get(taskId)?.autoCloseTab) {
+          deleteSession(session.id);
+        }
+        return;
+      }
       updateTask(taskId, {
         status: 'failed',
         error: result.error ?? '节点执行失败',
@@ -401,5 +438,12 @@ export function cancelGeminiWebImageTask(id: string): GeminiWebImageTask | undef
   const task = getGeminiWebImageTask(id);
   if (!task) return undefined;
   if (task.status === 'success' || task.status === 'failed' || task.status === 'cancelled') return task;
-  return updateTask(id, { cancelRequested: true });
+  const updated = updateTask(id, { cancelRequested: true });
+  if (updated) {
+    const session = getSession(updated.sessionId);
+    if (session?._page) {
+      void interruptSessionPage(session);
+    }
+  }
+  return updated;
 }

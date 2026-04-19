@@ -23,7 +23,7 @@ interface ContentImageAsset {
   sourceLabel: string;
 }
 interface SessionStepDonePayload {
-  result?: { success: boolean; error?: string };
+  result?: { success: boolean; error?: string; durationMs?: number };
   vars?: Record<string, string>;
   executedStep: number;
   nextStep: number;
@@ -31,6 +31,8 @@ interface SessionStepDonePayload {
   failed: boolean;
   skipped?: boolean;
   relay: boolean;
+  durationMs?: number;
+  totalDurationMs?: number;
 }
 
 export interface WorkflowEditorProps {
@@ -380,6 +382,7 @@ function RuntimeContextPanel({
   onResetJsonFromCurrent,
   onLoadJsonDefault,
   onSaveJsonDefault,
+  onSaveCurrentDefault,
 }: {
   fieldKeys: string[];
   values: Record<string, string>;
@@ -397,22 +400,10 @@ function RuntimeContextPanel({
   onResetJsonFromCurrent: () => void;
   onLoadJsonDefault: () => void;
   onSaveJsonDefault: () => void;
+  onSaveCurrentDefault: () => void;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [showJsonEditor, setShowJsonEditor] = useState(true);
-  const autoCollapsedForSessionRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!sessionId) {
-      autoCollapsedForSessionRef.current = null;
-      setCollapsed(false);
-      return;
-    }
-    if (autoCollapsedForSessionRef.current === sessionId) return;
-    autoCollapsedForSessionRef.current = sessionId;
-    setCollapsed(true);
-    setShowJsonEditor(false);
-  }, [sessionId]);
+  const [collapsed, setCollapsed] = useState(true);
+  const [showJsonEditor, setShowJsonEditor] = useState(false);
 
   const previewPairs = fieldKeys
     .map((key) => [key, values[key] ?? ''] as const)
@@ -440,6 +431,13 @@ function RuntimeContextPanel({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onSaveCurrentDefault}
+            className="rounded-lg border border-border px-2.5 py-1.5 text-[11px] text-muted-foreground hover:bg-muted"
+          >
+            保存默认入参
+          </button>
           {adsEnabled && fieldKeys.includes('browserInstanceId') && !collapsed && (
             <button
               type="button"
@@ -1606,6 +1604,7 @@ function NodeDetailPanel({
   humanOptions,
   onVarsChange,
   onStepStatusChange,
+  onStepDurationChange,
 }: {
   node: NodeDef;
   idx: number;
@@ -1618,6 +1617,7 @@ function NodeDetailPanel({
   humanOptions: HumanOptions;
   onVarsChange?: (vars: Record<string, string>) => void;
   onStepStatusChange?: (idx: number, status: 'success' | 'error' | 'running') => void;
+  onStepDurationChange?: (idx: number, durationMs: number) => void;
 }) {
   const catalog = getCatalogItem(node.type);
   const referencedVars = useMemo(() => getNodeReferencedVars(node), [node]);
@@ -1769,18 +1769,22 @@ function NodeDetailPanel({
               const p = JSON.parse(evt.payload) as { token: string; message: string };
               setPauseState(p);
             }
-            if (evt.type === 'done') {
-              setPauseState(null);
-              const d = JSON.parse(evt.payload) as {
-                success?: boolean;
-                vars?: Record<string, string>;
-                result?: { success: boolean };
-              };
-              if (d.vars) onVarsChange?.(d.vars);
-              const ok = d.success ?? d.result?.success ?? false;
-              setExecResult({ success: ok });
-              onStepStatusChange?.(idx, ok ? 'success' : 'error');
-            }
+              if (evt.type === 'done') {
+                setPauseState(null);
+                const d = JSON.parse(evt.payload) as {
+                  success?: boolean;
+                  vars?: Record<string, string>;
+                  result?: { success: boolean; durationMs?: number };
+                  durationMs?: number;
+                };
+                if (d.vars) onVarsChange?.(d.vars);
+                const ok = d.success ?? d.result?.success ?? false;
+                setExecResult({ success: ok });
+                onStepStatusChange?.(idx, ok ? 'success' : 'error');
+                
+                const dur = d.durationMs ?? d.result?.durationMs;
+                if (dur !== undefined) onStepDurationChange?.(idx, dur);
+              }
             if (evt.type === 'error') {
               setPauseState(null);
               addLog(`❌ ${evt.payload}`);
@@ -2274,13 +2278,13 @@ function AddNodeModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-2xl shadow-2xl w-80 p-4" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-80 p-4 max-h-[calc(100vh-2rem)] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm font-semibold">选择节点类型</p>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-sm">✕</button>
         </div>
-        <div className="space-y-3">
+        <div className="space-y-3 min-h-0 flex-1 overflow-y-auto pr-1">
           {(['basic', 'advanced'] as const).map(cat => (
             <div key={cat}>
               <p className="text-[9px] uppercase tracking-wide text-muted-foreground mb-1.5">
@@ -2312,11 +2316,13 @@ function AddNodeModal({
 // ── 右键菜单 ──────────────────────────────────────────────────────────────────
 
 function ContextMenu({
-  x, y, onEdit, onCopy, onDelete, onInsertBefore, onInsertAfter, onClose,
+  x, y, onEdit, onCopy, onDelete, onInsertBefore, onInsertAfter, onToggleDisable, onClose, nodeDisabled,
 }: {
   x: number; y: number;
   onEdit: () => void; onCopy: () => void; onDelete: () => void;
-  onInsertBefore: () => void; onInsertAfter: () => void; onClose: () => void;
+  onInsertBefore: () => void; onInsertAfter: () => void; onToggleDisable: () => void;
+  onClose: () => void;
+  nodeDisabled?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -2331,6 +2337,8 @@ function ContextMenu({
     { sep: true },
     { label: '⬆ 在上方插入', fn: onInsertBefore },
     { label: '⬇ 在下方插入', fn: onInsertAfter },
+    { sep: true },
+    { label: nodeDisabled ? '✅ 启用节点' : '⏸ 禁用节点', fn: onToggleDisable },
     { sep: true },
     { label: '🗑 删除节点', fn: onDelete, danger: true },
   ];
@@ -2370,6 +2378,8 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   const [currentStep, setCurrentStep] = useState(0);
   const [lastExecutedStep, setLastExecutedStep] = useState<number | null>(null); // 接力追踪
   const [stepStatus, setStepStatus] = useState<StepStatus[]>(initialWorkflow.nodes.map(() => 'pending'));
+  const [stepDurations, setStepDurations] = useState<(number | undefined)[]>(initialWorkflow.nodes.map(() => undefined));
+  const [totalDuration, setTotalDuration] = useState<number | null>(null);
   const [humanOptions, setHumanOptions] = useState<HumanOptions>(() => {
     if (typeof window === 'undefined') return { ...DEFAULT_HUMAN_OPTIONS };
     try {
@@ -2599,6 +2609,23 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
     setRuntimeJsonError(null);
   }, [currentSessionVars]);
 
+  const saveCurrentRuntimeAsDefault = useCallback(() => {
+    try {
+      const next = serializeRuntimeVarsAsJson(currentSessionVars);
+      const parsed = next.trim() ? JSON.parse(next) : {};
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(runtimeJsonStorageKey, JSON.stringify(parsed, null, 2));
+      }
+      setRuntimeJsonDraft(JSON.stringify(parsed, null, 2));
+      setRuntimeJsonDirty(false);
+      setRuntimeJsonError(null);
+      appendLog(`💾 已保存当前运行上下文为默认入参（${Object.keys(currentSessionVars).length} 个字段）`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeJsonError(`默认入参保存失败：${message}`);
+    }
+  }, [appendLog, currentSessionVars, runtimeJsonStorageKey]);
+
   const saveRuntimeJsonAsDefault = useCallback(() => {
     try {
       const raw = runtimeJsonDraft.trim();
@@ -2758,10 +2785,22 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                 ? 'success'
                 : 'warn';
               setStepStatus(prev => { const n = [...prev]; n[idx] = st; return n; });
+              
+              const dur = donePayload.durationMs ?? donePayload.result?.durationMs;
+              if (dur !== undefined) {
+                setStepDurations(prev => { const n = [...prev]; n[idx] = dur; return n; });
+              }
+
               setLastExecutedStep(donePayload.executedStep ?? idx);
               if (donePayload.done) {
                 setCurrentStep(nodes.length);
-                appendLog('\n🎉 工作流完成！');
+                const totalDur = donePayload.totalDurationMs;
+                if (totalDur !== undefined) {
+                  setTotalDuration(totalDur);
+                  appendLog(`\n🎉 工作流完成！总耗时: ${(totalDur / 1000).toFixed(1)}s`);
+                } else {
+                  appendLog('\n🎉 工作流完成！');
+                }
               } else {
                 setCurrentStep(donePayload.nextStep);
               }
@@ -2796,6 +2835,8 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
         if (attempt > 0) {
           appendLog(`⚠️ 工作流执行不稳定，触发自动重试（第 ${attempt}/${maxRetries} 次），从第 1 步重新开始`);
           setStepStatus(nodes.map(() => 'pending'));
+          setStepDurations(nodes.map(() => undefined));
+          setTotalDuration(null);
           setCurrentStep(0);
           setLastExecutedStep(null);
         }
@@ -2855,6 +2896,8 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
       setCurrentStep(0);
       setLastExecutedStep(null);
       setStepStatus(nodes.map(() => 'pending'));
+      setStepDurations(nodes.map(() => undefined));
+      setTotalDuration(null);
       setEditingIdx(null);
       appendLog(autoRun
         ? `✅ 会话已创建（${data.totalSteps} 步）— 开始顺序执行`
@@ -2926,6 +2969,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
           {/* 节点卡片 */}
           {nodes.map((node, i) => {
             const status = stepStatus[i] ?? 'pending';
+            const durationMs = stepDurations[i];
             const isCurrent = !!sessionId && i === currentStep && !isDone;
             const isSelected = editingIdx === i;
             const catalog = getCatalogItem(node.type);
@@ -2945,6 +2989,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                   onClick={() => setEditingIdx(isSelected ? null : i)}
                   onContextMenu={e => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY, nodeIdx: i }); }}
                   className={`rounded-lg border transition-all select-none ${
+                    node.disabled ? 'border-muted/40 bg-muted/10 opacity-60' :
                     isCurrent ? 'border-primary bg-primary/5' :
                     isRelay ? 'border-green-500/60 bg-green-500/5' :
                     isSelected ? 'border-primary/70 bg-primary/5 shadow-sm' :
@@ -2957,6 +3002,14 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                       <span className="text-[10px] text-muted-foreground w-4 text-center shrink-0">{i + 1}</span>
                       <span className="text-sm shrink-0">{catalog?.icon ?? '⚙️'}</span>
                       <span className="text-[11px] font-medium text-foreground flex-1 truncate">{node.label ?? node.type}</span>
+                      {node.disabled && (
+                        <span className="text-[8px] px-1 py-0.5 rounded-full bg-muted text-muted-foreground border border-muted-foreground/30 shrink-0">禁用</span>
+                      )}
+                      {durationMs !== undefined && (
+                        <span className="text-[9px] text-muted-foreground/60 font-mono shrink-0">
+                          ⏱️ {(durationMs / 1000).toFixed(1)}s
+                        </span>
+                      )}
                       {/* 接力徽章 */}
                       {isRelay && (
                         <span className="text-[8px] px-1 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30 shrink-0">接力</span>
@@ -3129,6 +3182,11 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                 {isDone ? '已完成' : running ? '执行中...' : lastExecutedStep !== null ? `已执行步骤 ${lastExecutedStep + 1}` : '点击任意节点 ▶'}
               </span>
             )}
+            {isDone && totalDuration !== null && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted/50 text-muted-foreground border border-border/50">
+                ⏱️ 总计 {(totalDuration / 1000).toFixed(1)}s
+              </span>
+            )}
             {rightPanelMode === 'node' && editingIdx !== null && !sessionId && (
               <span className="text-[10px] text-muted-foreground">
                 步骤 {editingIdx + 1}：{nodes[editingIdx]?.label ?? nodes[editingIdx]?.type}
@@ -3141,6 +3199,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
         </div>
 
         <RuntimeContextPanel
+          key={sessionId ?? 'idle'}
           fieldKeys={runtimeContextKeys}
           values={currentSessionVars}
           adsEnabled={adsWorkflowEnabled}
@@ -3161,6 +3220,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
           onResetJsonFromCurrent={resetRuntimeJsonFromCurrent}
           onLoadJsonDefault={loadRuntimeJsonDefault}
           onSaveJsonDefault={saveRuntimeJsonAsDefault}
+          onSaveCurrentDefault={saveCurrentRuntimeAsDefault}
         />
 
         {/* ── 节点详情 + 执行面板（选中节点时始终显示）── */}
@@ -3193,6 +3253,13 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                 return n;
               });
               if (status !== 'running') setLastExecutedStep(i);
+            }}
+            onStepDurationChange={(i, dur) => {
+              setStepDurations(prev => {
+                const n = [...prev];
+                n[i] = dur;
+                return n;
+              });
             }}
           />
         )}
@@ -3338,6 +3405,10 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
           onDelete={() => deleteNode(contextMenu.nodeIdx)}
           onInsertBefore={() => setAddNodeAfterIdx(contextMenu.nodeIdx - 1)}
           onInsertAfter={() => setAddNodeAfterIdx(contextMenu.nodeIdx)}
+          onToggleDisable={() => {
+            updateNode(contextMenu.nodeIdx, { disabled: !nodes[contextMenu.nodeIdx].disabled });
+          }}
+          nodeDisabled={nodes[contextMenu.nodeIdx]?.disabled}
           onClose={() => setContextMenu(null)}
         />
       )}
