@@ -8,6 +8,7 @@ import { captureScreenshot } from '../utils';
 import { withSystemClipboardLock } from '../clipboard-lock';
 import { uploadBuffer } from '../../oss';
 import { normalizeFailFastAction, normalizeFailFastTextIncludes } from './fail-fast-text';
+import { parseWorkflowStepErrorMessage } from '../step-error-meta';
 
 function pickIndex(count: number, wanted: number): number {
   if (count <= 0) return -1;
@@ -121,12 +122,30 @@ async function uploadBufferToLocalFilesApi(
   }
 }
 
+/** Gemini 英文整句失败提示（单字 error/again 会在 normalize 中被剔除，故在此默认追加） */
+const DEFAULT_FAIL_FAST_EXTRA_PHRASES = ['encountered an error', 'could you try again'] as const;
+
+function buildExtractDownloadFailFastTexts(params: ExtractImageDownloadParams): string[] {
+  const normalized = normalizeFailFastTextIncludes(
+    (params as { failFastTextIncludes?: unknown }).failFastTextIncludes
+  );
+  const hasSelector = String(params.failFastSelector || '').trim().length > 0;
+  const userConfiguredFailFast = normalized.length > 0 || hasSelector;
+  const merge =
+    userConfiguredFailFast &&
+    (params as { failFastMergeDefaultPhrases?: boolean }).failFastMergeDefaultPhrases !== false;
+  const extra = merge ? [...DEFAULT_FAIL_FAST_EXTRA_PHRASES] : [];
+  return Array.from(new Set([...normalized, ...extra]));
+}
+
 class FailFastError extends Error {
-  code = 'FAIL_FAST';
+  readonly errorCode = 'FAIL_FAST' as const;
+  readonly errorMsg: string;
   constructor(reason: string) {
     // 供上层调度器精确识别：仅 extract_image_download 的 fail-fast 才允许触发强制改写
     super(`FAIL_FAST: NODE=extract_image_download; ${reason}`);
     this.name = 'FailFastError';
+    this.errorMsg = reason;
   }
 }
 
@@ -209,23 +228,79 @@ async function readImageBufferFromPage(page: Page, src: string): Promise<{ buffe
   return { buffer: Buffer.from(payload.data), mimeType: payload.mimeType || 'image/png' };
 }
 
+/**
+ * 优先取 model-response / generated-image 内的图（避免与输入框参考图预览混淆），再按 selector 全页兜底。
+ */
 async function pickBestImageSrc(page: Page, selector: string): Promise<string> {
   const src = await page.evaluate((sel) => {
-    const nodes = Array.from(document.querySelectorAll(sel)) as HTMLImageElement[];
-    const ranked = nodes
-      .map((img) => {
-        const rect = img.getBoundingClientRect();
-        const width = img.naturalWidth || rect.width || 0;
-        const height = img.naturalHeight || rect.height || 0;
-        const area = Math.max(0, width) * Math.max(0, height);
-        const s = img.currentSrc || img.src || '';
-        return { s, area };
-      })
-      .filter((it) => !!it.s && it.area > 0)
-      .sort((a, b) => b.area - a.area);
-    return ranked[0]?.s || '';
+    const rank = (nodes: HTMLImageElement[]) =>
+      nodes
+        .map((img) => {
+          const rect = img.getBoundingClientRect();
+          const width = img.naturalWidth || rect.width || 0;
+          const height = img.naturalHeight || rect.height || 0;
+          const area = Math.max(0, width) * Math.max(0, height);
+          const s = img.currentSrc || img.src || '';
+          return { s, area };
+        })
+        .filter((it) => !!it.s && it.area > 0)
+        .sort((a, b) => b.area - a.area);
+
+    const genImgs = Array.from(
+      document.querySelectorAll(
+        'model-response generated-image img, response-element generated-image img, generated-image img'
+      )
+    ) as HTMLImageElement[];
+    const bestGen = rank(genImgs);
+    if (bestGen[0]?.s) return bestGen[0].s;
+
+    try {
+      const nodes = Array.from(document.querySelectorAll(sel)) as HTMLImageElement[];
+      const best = rank(nodes);
+      return best[0]?.s || '';
+    } catch {
+      return '';
+    }
   }, selector);
   return src || '';
+}
+
+/** 点击「复制图片」后读剪贴板（需页面已授予 clipboard-read） */
+async function tryExtractViaCopyButton(
+  page: Page,
+  copySel: string,
+  beforeClipHash: string | null,
+  minFileSizeBytes: number,
+  log: string[]
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
+  const sel = copySel.trim();
+  if (!sel) return null;
+  try {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
+    const loc = page.locator(sel).first();
+    await loc.waitFor({ state: 'visible', timeout: 12_000 });
+    await loc.click({ timeout: 8_000 });
+    await page.waitForTimeout(700);
+    const clip = await readImageFromClipboard(page);
+    if (!clip?.buffer.length) {
+      log.push('⚠️ 复制按钮已点，剪贴板无图片');
+      return null;
+    }
+    const h = sha256(clip.buffer);
+    if (beforeClipHash && h === beforeClipHash) {
+      log.push('⚠️ 复制后剪贴板与点击前相同，跳过（疑似未复制到新图）');
+      return null;
+    }
+    if (minFileSizeBytes > 0 && clip.buffer.length < minFileSizeBytes) {
+      log.push(`⚠️ 复制兜底图片过小(${clip.buffer.length} bytes)`);
+      return null;
+    }
+    log.push(`✅ 复制按钮兜底 (${(clip.buffer.length / 1024).toFixed(1)} KB)`);
+    return { buffer: clip.buffer, mimeType: clip.mimeType };
+  } catch (e) {
+    log.push(`⚠️ 复制按钮兜底失败: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
 }
 
 async function readImageFromClipboard(page: Page): Promise<{ buffer: Buffer; mimeType: string } | null> {
@@ -316,6 +391,7 @@ export async function executeExtractImageDownload(
     const menuTriggerSelector = (params.menuTriggerSelector || 'button[aria-label*="More options"], button[aria-label*="更多"]').trim();
     const menuItemSelector = (params.menuItemSelector || '[role="menuitem"]:has-text("Download"), [role="menuitem"]:has-text("下载"), button:has-text("Download"), button:has-text("下载")').trim();
     const fallbackImageSelector = (params.fallbackImageSelector || 'img[src^="blob:"], img[src^="data:image"], img').trim();
+    const copyImageButtonSelector = String(params.copyImageButtonSelector ?? '').trim();
     const uploadToOSS = params.uploadToOSS ?? true;
     const useLocalApi = params.storageBackend === 'local_api';
     const useOss = !useLocalApi && uploadToOSS;
@@ -325,9 +401,7 @@ export async function executeExtractImageDownload(
     const waitForNewTimeout = params.waitForNewTimeout ?? 120_000;
     const failFastAction = normalizeFailFastAction((params as { failFastAction?: unknown }).failFastAction);
 
-    const failFastTextIncludes = normalizeFailFastTextIncludes(
-      (params as { failFastTextIncludes?: unknown }).failFastTextIncludes
-    );
+    const failFastTextIncludes = buildExtractDownloadFailFastTexts(params);
     const failFastSelector = String(params.failFastSelector || '').trim();
     if (failFastTextIncludes.length > 0 || failFastSelector) {
       log.push(
@@ -476,15 +550,53 @@ export async function executeExtractImageDownload(
     if (params.preferDomExtraction) {
       pushLog(`🚀 DOM 优先提取：直接 fetch 页面图片（跳过浏览器下载）`);
       const domFallbackSel = (params.fallbackImageSelector || 'img[src^="blob:"], img[src^="data:image"], img').trim();
+      const minSizeDom = Math.max(0, params.minFileSizeBytes ?? 0);
       try {
+        if (copyImageButtonSelector) {
+          const clipBefore = allowClipboardFallback ? await readImageFromClipboard(page).catch(() => null) : null;
+          const clipBeforeHash = clipBefore?.buffer?.length ? sha256(clipBefore.buffer) : null;
+          const viaCopy = await tryExtractViaCopyButton(
+            page,
+            copyImageButtonSelector,
+            clipBeforeHash,
+            minSizeDom,
+            log
+          );
+          if (viaCopy) {
+            const ffReason = await detectFailFast(
+              page,
+              { textIncludes: failFastTextIncludes, selector: failFastSelector },
+              300
+            );
+            if (ffReason) {
+              log.push(`🛑 失败快判（复制兜底前）：${ffReason}`);
+              throw new FailFastError(ffReason);
+            }
+            imageBuffer = viaCopy.buffer;
+            contentType = viaCopy.mimeType;
+            extractionMethod = 'clipboard';
+            log.push(
+              `✅ DOM 优先路径：复制按钮兜底成功 (${(imageBuffer.length / 1024).toFixed(1)} KB)，跳过浏览器下载`
+            );
+          }
+        }
+        if (!imageBuffer) {
         const src = await pickBestImageSrc(page, domFallbackSel);
         if (src) {
           log.push(`🖼️ 找到图片 src: ${src.slice(0, 100)}`);
           const extracted = await readImageBufferFromPage(page, src);
-          const minSize = Math.max(0, params.minFileSizeBytes ?? 0);
-          if (minSize > 0 && extracted.buffer.length < minSize) {
-            log.push(`⚠️ DOM 优先提取过小 (${extracted.buffer.length} bytes < ${minSize})，回退到下载流程`);
+          if (minSizeDom > 0 && extracted.buffer.length < minSizeDom) {
+            log.push(`⚠️ DOM 优先提取过小 (${extracted.buffer.length} bytes < ${minSizeDom})，回退到下载流程`);
           } else {
+            const ffReason = await detectFailFast(
+              page,
+              { textIncludes: failFastTextIncludes, selector: failFastSelector },
+              300
+            );
+            if (ffReason) {
+              log.push(`🛑 失败快判（DOM 优先前）：${ffReason}`);
+              throw new FailFastError(ffReason);
+            }
             imageBuffer = extracted.buffer;
             contentType = extracted.mimeType;
             extractionMethod = 'dom';
@@ -492,6 +604,7 @@ export async function executeExtractImageDownload(
           }
         } else {
           log.push(`⚠️ DOM 优先提取：未找到图片 src，回退到下载流程`);
+        }
         }
       } catch (e) {
         log.push(`⚠️ DOM 优先提取失败，回退到下载流程: ${e instanceof Error ? e.message : String(e)}`);
@@ -653,7 +766,34 @@ export async function executeExtractImageDownload(
             }
             log.push(`⚠️ 下载失败: ${message}`);
 
-            // 兜底优先级调整：先尝试 DOM 兜底（更可能拿到 img/src 原图），最后才尝试剪贴板兜底。
+            if (copyImageButtonSelector) {
+              const viaCopy = await tryExtractViaCopyButton(
+                page,
+                copyImageButtonSelector,
+                beforeClipHash,
+                minFileSizeBytes,
+                log
+              );
+              if (viaCopy) {
+                const ffReason = await detectFailFast(
+                  page,
+                  { textIncludes: failFastTextIncludes, selector: failFastSelector },
+                  300
+                );
+                if (ffReason) {
+                  log.push(`🛑 失败快判（复制兜底前）：${ffReason}`);
+                  throw new FailFastError(ffReason);
+                }
+                imageBuffer = viaCopy.buffer;
+                contentType = viaCopy.mimeType;
+                fileName = `download-copy-${Date.now()}.png`;
+                extractionMethod = 'clipboard';
+                log.push(`✅ 下载失败后复制按钮兜底成功 (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
+                return true;
+              }
+            }
+
+            // 再尝试 DOM（pickBestImageSrc 已优先 generated-image 内大图，减轻误选参考图预览）
             if (allowDomFallback) {
               try {
                 const src = await pickBestImageSrc(page, fallbackImageSelector);
@@ -662,6 +802,15 @@ export async function executeExtractImageDownload(
                   if (minFileSizeBytes > 0 && extracted.buffer.length < minFileSizeBytes) {
                     log.push(`⚠️ DOM 兜底图片过小(${extracted.buffer.length} bytes)，低于阈值 ${minFileSizeBytes}`);
                   } else {
+                    const ffReason = await detectFailFast(
+                      page,
+                      { textIncludes: failFastTextIncludes, selector: failFastSelector },
+                      300
+                    );
+                    if (ffReason) {
+                      log.push(`🛑 失败快判（DOM 兜底前）：${ffReason}`);
+                      throw new FailFastError(ffReason);
+                    }
                     imageBuffer = extracted.buffer;
                     contentType = extracted.mimeType;
                     fileName = `download-dom-${Date.now()}.png`;
@@ -703,7 +852,9 @@ export async function executeExtractImageDownload(
         };
         try {
           const ok = await withSystemClipboardLock(runAttempt, {
-            enabled: allowClipboardFallback && serializeClipboardAccess,
+            enabled:
+              serializeClipboardAccess &&
+              (allowClipboardFallback || Boolean(copyImageButtonSelector)),
           });
           if (ok || imageBuffer) break;
         } catch (err) {
@@ -725,20 +876,62 @@ export async function executeExtractImageDownload(
       if (beforeFallbackVideoState.isVideo) {
         log.push(`🎬 DOM 兜底前确认当前结果为视频（${beforeFallbackVideoState.reason || '非图片结果'}）`);
       }
-      if (!allowDomFallback) {
-        log.push(`↩️ 下载链路未拿到媒体，强制启用一次 DOM 兜底提取（即使 allowDomFallback=false）`);
+      if (copyImageButtonSelector) {
+        const clip0 = await readImageFromClipboard(page).catch(() => null);
+        const h0 = clip0?.buffer?.length ? sha256(clip0.buffer) : null;
+        const viaCopyFinal = await tryExtractViaCopyButton(
+          page,
+          copyImageButtonSelector,
+          h0,
+          minFileSizeBytes,
+          log
+        );
+        if (viaCopyFinal) {
+          const ffReason = await detectFailFast(
+            page,
+            { textIncludes: failFastTextIncludes, selector: failFastSelector },
+            300
+          );
+          if (ffReason) {
+            log.push(`🛑 失败快判（最终复制兜底前）：${ffReason}`);
+            throw new FailFastError(ffReason);
+          }
+          imageBuffer = viaCopyFinal.buffer;
+          contentType = viaCopyFinal.mimeType;
+          fileName = `fallback-copy-${Date.now()}.png`;
+          extractionMethod = 'clipboard';
+          log.push(`✅ 最终复制按钮兜底 (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
+        }
       }
-      log.push(`↩️ 下载事件失败，尝试 DOM 兜底提取: ${fallbackImageSelector}`);
-      const src = await pickBestImageSrc(page, fallbackImageSelector);
-      if (!src) throw new Error(`兜底提取失败：未找到图片 src (${fallbackImageSelector})`);
-      const extracted = await readImageBufferFromPage(page, src);
-      imageBuffer = extracted.buffer;
-      contentType = extracted.mimeType;
-      fileName = `fallback-${Date.now()}.png`;
-      if (minFileSizeBytes > 0 && imageBuffer.length < minFileSizeBytes) {
-        throw new Error(`兜底图片过小(${imageBuffer.length} bytes)，低于阈值 ${minFileSizeBytes}`);
+      if (!imageBuffer) {
+        if (!allowDomFallback) {
+          log.push(`↩️ 下载链路未拿到媒体，强制启用一次 DOM 兜底提取（即使 allowDomFallback=false）`);
+        }
+        log.push(`↩️ 下载事件失败，尝试 DOM 兜底提取: ${fallbackImageSelector}`);
+        const src = await pickBestImageSrc(page, fallbackImageSelector);
+        if (!src) throw new Error(`兜底提取失败：未找到图片 src (${fallbackImageSelector})`);
+        const extracted = await readImageBufferFromPage(page, src);
+        const ffReasonFinal = await detectFailFast(
+          page,
+          { textIncludes: failFastTextIncludes, selector: failFastSelector },
+          300
+        );
+        if (ffReasonFinal) {
+          log.push(`🛑 失败快判（最终 DOM 兜底前）：${ffReasonFinal}`);
+          throw new FailFastError(ffReasonFinal);
+        }
+        imageBuffer = extracted.buffer;
+        contentType = extracted.mimeType;
+        fileName = `fallback-${Date.now()}.png`;
+        if (minFileSizeBytes > 0 && imageBuffer.length < minFileSizeBytes) {
+          throw new Error(`兜底图片过小(${imageBuffer.length} bytes)，低于阈值 ${minFileSizeBytes}`);
+        }
+        log.push(`✅ DOM 兜底提取成功 (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
       }
-      log.push(`✅ DOM 兜底提取成功 (${(imageBuffer.length / 1024).toFixed(1)} KB)`);
+    }
+
+    if (!imageBuffer) {
+      throw new Error('提取失败：未获得图片 buffer');
     }
 
     const detectedMedia = sniffMediaType(imageBuffer, fileName || ossPath);
@@ -798,10 +991,10 @@ export async function executeExtractImageDownload(
     } else {
       ctx.vars.imageUrl = mediaUrl;
     }
-    const referenceImageUrl = String(ctx.vars.sourceImageUrl ?? ctx.vars.sourceImageUrls ?? '').trim();
+    const refHint = String(ctx.vars.sourceImageUrl ?? ctx.vars.sourceImageUrls ?? '').trim();
     pushLog(
       `🧩 本节点产出：${useLocalApi ? '本地 API' : useOss ? 'OSS' : '本地路径'} → ${outputVar}=${mediaUrl}` +
-        (referenceImageUrl ? `；参考图（输入）见 sourceImageUrl` : '')
+        (refHint ? `；输入参考图仍在任务变量 sourceImageUrl（勿与 generatedImageUrl 混淆）` : '')
     );
 
     const screenshot = await captureScreenshot(page);
@@ -824,7 +1017,6 @@ export async function executeExtractImageDownload(
         mimeType: contentType,
         extractionMethod,
         storageBackend: useLocalApi ? 'local_api' : useOss ? 'oss' : 'none',
-        ...(referenceImageUrl ? { referenceImageUrl } : {}),
       },
     };
   } catch (e) {
@@ -848,7 +1040,16 @@ export async function executeExtractImageDownload(
     }
     log.push(`❌ 下载提取失败: ${error}`);
     const screenshot = await captureScreenshot(page).catch(() => undefined);
-    return { success: false, log, error, screenshot };
+    const parsed = parseWorkflowStepErrorMessage(error);
+    const ff = e instanceof FailFastError ? e : null;
+    return {
+      success: false,
+      log,
+      error,
+      errorCode: ff?.errorCode ?? parsed.error_code,
+      errorMsg: ff?.errorMsg ?? parsed.error_msg,
+      screenshot,
+    };
   } finally {
     if (tempDir) {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});

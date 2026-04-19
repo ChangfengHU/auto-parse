@@ -131,7 +131,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
           attempt: Number(attempt?.attempt || 0),
           prompt: attempt?.prompt,
           browserInstanceId: attempt?.browserInstanceId,
-          batchTaskId: attempt?.batchTaskId,
+          workflowTaskId: attempt?.workflowTaskId ?? attempt?.batchTaskId,
+          batchTaskId: attempt?.workflowTaskId ?? attempt?.batchTaskId,
           startedAt: attempt?.startedAt,
           endedAt: attempt?.endedAt,
           durationMs: attempt?.durationMs ?? durationMs(attempt?.startedAt, attempt?.endedAt),
@@ -162,8 +163,10 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       primaryImageUrl: images[0] || null,
       error: item.error,
       failureCategory: item.failureCategory,
-      batchTaskId: item.batchTaskId,
-      batchTaskHistory: item.batchTaskHistory ?? [],
+      workflowTaskId: item.workflowTaskId ?? item.batchTaskId,
+      workflowTaskHistory: item.workflowTaskHistory ?? item.batchTaskHistory ?? [],
+      batchTaskId: item.workflowTaskId ?? item.batchTaskId,
+      batchTaskHistory: item.workflowTaskHistory ?? item.batchTaskHistory ?? [],
       startedAt: item.startedAt,
       endedAt: item.endedAt,
       durationMs: durationMs(item.startedAt, item.endedAt),
@@ -190,7 +193,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       error: item.error,
       failureCategory: item.failureCategory,
       browserInstanceId: item.browserInstanceId,
-      batchTaskId: item.batchTaskId,
+      workflowTaskId: item.workflowTaskId ?? item.batchTaskId,
+      batchTaskId: item.workflowTaskId ?? item.batchTaskId,
       durationMs: durationMs(item.startedAt, item.endedAt),
     }));
 
@@ -208,6 +212,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
     ...task,
     durationMs: taskDurationMs,
     items: sanitizedItems,
+    instances: Array.isArray((task as any).instances)
+      ? (task as any).instances.map((inst: any) => ({
+          ...inst,
+          workflowTaskId: inst.workflowTaskId ?? inst.batchTaskId,
+          batchTaskId: inst.workflowTaskId ?? inst.batchTaskId,
+        }))
+      : task.instances,
     queue: getGeminiAdsDispatcherQueueInfo(task.id),
     traceUrl: `/api/task-traces?namespace=gemini-ads-dispatcher&taskId=${encodeURIComponent(task.id)}`,
     done,
@@ -224,7 +235,13 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
       failureCategoryStats,
       retriedItems,
       items: sanitizedItems,
-      instances: task.instances,
+      instances: Array.isArray((task as any).instances)
+        ? (task as any).instances.map((inst: any) => ({
+            ...inst,
+            workflowTaskId: inst.workflowTaskId ?? inst.batchTaskId,
+            batchTaskId: inst.workflowTaskId ?? inst.batchTaskId,
+          }))
+        : task.instances,
     },
   });
 }

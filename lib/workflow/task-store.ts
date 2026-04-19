@@ -5,6 +5,7 @@
  */
 
 import type { WorkflowDef, NodeResult, NodeDef } from './types';
+import { parseWorkflowStepErrorMessage } from './step-error-meta';
 import {
   deleteWorkflowTaskRecord,
   loadWorkflowTask,
@@ -60,6 +61,9 @@ export interface WorkflowTaskStep {
   screenshot?: string;
   output?: Record<string, unknown>;
   error?: string;
+  /** 与 parseWorkflowStepErrorMessage / NodeResult 对齐 */
+  errorCode?: string;
+  errorMsg?: string;
   executedAt?: number;
 }
 
@@ -77,6 +81,9 @@ export interface WorkflowTask {
 
   isError: boolean;
   errorMessage?: string;
+  /** 从 errorMessage 解析或步骤失败时写入 */
+  errorCode?: string;
+  errorMsg?: string;
   failedStepIdx?: number;
 
   startedAt: number;
@@ -173,7 +180,12 @@ export function updateTaskStatus(
   const prev = task.status;
   task.status = status;
   if (isError !== undefined) task.isError = isError;
-  if (errorMessage !== undefined) task.errorMessage = errorMessage;
+  if (errorMessage !== undefined) {
+    task.errorMessage = errorMessage;
+    const p = parseWorkflowStepErrorMessage(errorMessage);
+    task.errorCode = p.error_code;
+    task.errorMsg = p.error_msg;
+  }
   if (status === 'done' || status === 'error' || status === 'stopped') {
     task.completedAt = Date.now();
     task.totalDuration = task.completedAt - task.startedAt;
@@ -244,7 +256,8 @@ export function setTaskStepError(
   taskId: string,
   stepIdx: number,
   error: string,
-  duration: number
+  duration: number,
+  meta?: { errorCode?: string; errorMsg?: string }
 ): void {
   const task = TASK_STORE.get(taskId);
   if (!task || !task.steps[stepIdx]) return;
@@ -252,6 +265,12 @@ export function setTaskStepError(
   task.steps[stepIdx].status = 'error';
   task.steps[stepIdx].duration = duration;
   task.steps[stepIdx].error = error;
+  const parsed = parseWorkflowStepErrorMessage(error);
+  task.steps[stepIdx].errorCode = meta?.errorCode ?? parsed.error_code;
+  task.steps[stepIdx].errorMsg = meta?.errorMsg ?? parsed.error_msg;
+  if (task.failedStepIdx === undefined) {
+    task.failedStepIdx = stepIdx;
+  }
   persistWorkflowTask(task);
 }
 
@@ -283,6 +302,9 @@ export function stopTask(taskId: string, reason?: string): void {
   task.totalDuration = task.stoppedAt - task.startedAt;
   task.isError = true;
   task.errorMessage = reason || 'Task stopped by user';
+  const sp = parseWorkflowStepErrorMessage(task.errorMessage);
+  task.errorCode = sp.error_code;
+  task.errorMsg = sp.error_msg;
   wfTaskDiag('task.stopped', { taskId, reason: task.errorMessage ?? '' });
   persistWorkflowTask(task);
 }

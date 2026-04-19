@@ -1,5 +1,10 @@
 import type { Page } from 'playwright';
-import type { TextInputParams, NodeResult, WorkflowContext } from '../types';
+import {
+  DEFAULT_TEXT_INPUT_POLL_UNTIL_SELECTOR,
+  type NodeResult,
+  type TextInputParams,
+  type WorkflowContext,
+} from '../types';
 import { captureScreenshot } from '../utils';
 
 export async function executeTextInput(
@@ -56,17 +61,53 @@ export async function executeTextInput(
       }).catch(() => '');
     };
 
+    /** Gemini/Angular CDK：tooltip 在隐藏池里；查可见 button 的 aria-label（Stop/停止…）或 aria-describedby→「停止回答」「Stop response」。 */
+    const stopButtonVisibleIncludingCdkDescribedby = async (): Promise<boolean> => {
+      const byLabel = await page
+        .locator(
+          'button[aria-label*="Stop" i], button[aria-label*="Stop response" i], button[aria-label*="停止"], button[aria-label*="停止回答"]'
+        )
+        .first()
+        .isVisible()
+        .catch(() => false);
+      if (byLabel) return true;
+      return page.evaluate(() => {
+        const cdkTipStop = (text: string) => /停止回答|stop\s+response/i.test(text.trim());
+        const ariaStop = (al: string) => /stop|停止回答|停止/i.test(al);
+        const isShown = (el: HTMLElement) => {
+          const r = el.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) return false;
+          const cs = getComputedStyle(el);
+          if (cs.visibility === 'hidden' || cs.display === 'none') return false;
+          const op = parseFloat(cs.opacity);
+          if (!Number.isNaN(op) && op < 0.05) return false;
+          return true;
+        };
+        for (const btn of document.querySelectorAll('button')) {
+          if (!(btn instanceof HTMLElement)) continue;
+          if (!isShown(btn)) continue;
+          const al = btn.getAttribute('aria-label') || '';
+          if (ariaStop(al)) return true;
+          const adb = btn.getAttribute('aria-describedby');
+          if (!adb) continue;
+          for (const tid of adb.trim().split(/\s+/)) {
+            if (!tid) continue;
+            const tip = document.getElementById(tid);
+            const text = (tip?.textContent || '').trim();
+            if (cdkTipStop(text)) return true;
+          }
+        }
+        return false;
+      });
+    };
+
     const readSubmitMarkers = async () => {
       const sendVisible = await page
         .locator('button[aria-label="Submit"], button[aria-label*="Submit" i], button[aria-label="Send message"], button[aria-label*="Send" i], button[aria-label*="发送"], .send-button-container button')
         .last()
         .isVisible()
         .catch(() => false);
-      const stopVisible = await page
-        .locator('button[aria-label*="Stop" i], button[aria-label*="停止"]')
-        .first()
-        .isVisible()
-        .catch(() => false);
+      const stopVisible = await stopButtonVisibleIncludingCdkDescribedby();
       return { sendVisible, stopVisible };
     };
 
@@ -131,6 +172,53 @@ export async function executeTextInput(
     
     // ── 自动回车逻辑 ──────────────────────────────────────────────────────────
     if (params.autoEnter) {
+      if (params.autoEnterPollUntilStop) {
+        const pollInterval = Math.max(500, params.autoEnterPollIntervalMs ?? 3000);
+        const pollMaxMs = Math.max(pollInterval, params.autoEnterPollMaxMs ?? 180_000);
+        const untilRaw = String(params.autoEnterPollUntilSelector ?? '').trim();
+        const untilSel =
+          untilRaw.length > 0 ? untilRaw : DEFAULT_TEXT_INPUT_POLL_UNTIL_SELECTOR;
+        const pollDone = async (): Promise<boolean> => {
+          const custom = await page
+            .locator(untilSel)
+            .first()
+            .isVisible()
+            .catch(() => false);
+          if (custom) return true;
+          return (await readSubmitMarkers()).stopVisible;
+        };
+        const untilDesc = `选择器匹配或内置 CDK：${untilSel.slice(0, 100)}${untilSel.length > 100 ? '…' : ''}`;
+        await page.bringToFront().catch(() => {});
+        await page.evaluate(() => window.focus()).catch(() => {});
+        log.push(
+          `⌨️ 定时提交：每 ${pollInterval / 1000}s 按一次 Enter，直到 ${untilDesc}（最长 ${pollMaxMs / 1000}s）`
+        );
+        const start = Date.now();
+        let attempt = 0;
+        while (Date.now() - start < pollMaxMs) {
+          if (await pollDone()) {
+            log.push(`✅ 已满足结束条件（第 ${attempt + 1} 次检查）`);
+            break;
+          }
+          attempt++;
+          await el.click({ timeout: 10_000 }).catch(() => {});
+          await page.keyboard.press('Enter');
+          await page.waitForTimeout(400);
+          if (await pollDone()) {
+            log.push(`✅ 第 ${attempt} 次 Enter 后已满足结束条件`);
+            break;
+          }
+          log.push(
+            `⏳ 第 ${attempt} 次 Enter 后条件未满足，${pollInterval / 1000}s 后重试…`
+          );
+          await page.waitForTimeout(pollInterval);
+        }
+        if (!(await pollDone())) {
+          log.push(
+            `⚠️ ${pollMaxMs / 1000}s 内未满足结束条件（选择器与内置 CDK 均未命中），建议用后续点击节点兜底`
+          );
+        }
+      } else {
       const beforeText = (await readTargetText()).trim();
       const beforeLen = beforeText.length;
       const beforeMarkers = await readSubmitMarkers();
@@ -211,6 +299,7 @@ export async function executeTextInput(
 
       if (!submitted) {
         log.push('⚠️ 未能确认自动发送成功，建议保留后续点击发送节点兜底');
+      }
       }
     }
 

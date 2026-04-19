@@ -83,6 +83,10 @@ export interface MaterialParams {
   outputTitleVar?: string
 }
 
+/** 定时回车「结束条件」默认值：逗号分隔多条 CSS，任一匹配即视为「停止按钮可见」（Playwright 语法）。另见 text-input 内置 CDK 兜底。 */
+export const DEFAULT_TEXT_INPUT_POLL_UNTIL_SELECTOR =
+  'button[aria-label*="Stop" i], button[aria-label*="Stop response" i], button[aria-label*="停止"], button[aria-label*="停止回答"]';
+
 export interface TextInputParams {
   selector: string
   value: string
@@ -91,6 +95,17 @@ export interface TextInputParams {
   clear?: boolean   // 是否先清空（默认 true）
   delay?: number    // 每字符延迟 ms（模拟人工输入，默认 0）
   autoEnter?: boolean // 输入完成后是否自动回车
+  /** 与 autoEnter 同时开启：每隔一段时间按 Enter，直到满足结束条件（见 autoEnterPollUntilSelector） */
+  autoEnterPollUntilStop?: boolean
+  /**
+   * 结束条件：Playwright 支持的 CSS/XPath 等，逗号分隔多条表示「任一匹配」。
+   * 未配置或空字符串时使用 DEFAULT_TEXT_INPUT_POLL_UNTIL_SELECTOR；仍会叠加内置 CDK（aria-describedby→停止文案）检测。
+   */
+  autoEnterPollUntilSelector?: string
+  /** 轮询间隔 ms，默认 3000 */
+  autoEnterPollIntervalMs?: number
+  /** 最长等待 ms，默认 180000 */
+  autoEnterPollMaxMs?: number
 }
 
 export interface PressHotkeyParams {
@@ -257,6 +272,11 @@ export interface ExtractImageDownloadParams {
   allowClipboardFallback?: boolean;
   serializeClipboardAccess?: boolean;
   fallbackImageSelector?: string;
+  /**
+   * 下载事件未触发时的优先兜底：点击「复制图片」后再读剪贴板（避免全页最大 img 误选输入区参考图预览）。
+   * 例：model-response generated-image … copy-button button, 或 [aria-label*="复制图片"]
+   */
+  copyImageButtonSelector?: string;
   buttonIndex?: number;
   buttonTimeout?: number;
   downloadTimeout?: number;
@@ -279,9 +299,14 @@ export interface ExtractImageDownloadParams {
 
   /**
    * 失败快判（减少无效等待）：当页面出现这些文本片段时直接判定失败。
-   * 例如："抱歉，今天没办法帮你生成更多视频了"。
+   * 单字词 error、again、but、wrong 会在归一化时剔除（防误报）；请写完整短语。
    */
   failFastTextIncludes?: string[];
+  /**
+   * 为 true（默认）时，在归一化后的关键词之外追加 Gemini 常见英文失败句（encountered an error、could you try again），
+   * 避免仅配置 error 等被过滤后英文错误页漏检。
+   */
+  failFastMergeDefaultPhrases?: boolean;
   /** 失败快判：当页面出现这些 DOM（可见）时直接判定失败 */
   failFastSelector?: string;
   /** fast-fail 命中后的处理策略：skip_node=跳过当前节点继续；fail_workflow=直接失败（默认 skip_node） */
@@ -470,6 +495,10 @@ export interface NodeResult {
   /** 节点被禁用等：不计入 output，避免污染 finalVars；由引擎/任务层标记「步骤已跳过」 */
   stepSkipped?: boolean
   error?: string
+  /** 结构化错误码，如 FAIL_FAST、ERROR（与 error 一致时可由任务层解析） */
+  errorCode?: string
+  /** 结构化说明，不含 FAIL_FAST: NODE=… 前缀 */
+  errorMsg?: string
   durationMs?: number              // 执行耗时（毫秒）
   newPage?: unknown                // 可选：用于工作流中途强制替换浏览器页面的游标引用
   newBrowser?: unknown             // 可选：用于存放伴随的新浏览器实例

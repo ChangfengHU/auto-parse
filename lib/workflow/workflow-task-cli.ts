@@ -18,8 +18,93 @@ import {
   wfTaskDiag,
   type WorkflowTask,
 } from '@/lib/workflow/task-store';
+import { parseWorkflowStepErrorMessage } from '@/lib/workflow/step-error-meta';
 import { getWorkflow } from '@/lib/workflow/workflow-db';
 import type { WorkflowDef } from '@/lib/workflow/types';
+
+const OUTPUT_PREVIEW_MAX = 280;
+
+function stringifyOutputValue(v: unknown): string {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') {
+    return v.length > OUTPUT_PREVIEW_MAX ? `${v.slice(0, OUTPUT_PREVIEW_MAX)}…` : v;
+  }
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  try {
+    const j = JSON.stringify(v);
+    return j.length > OUTPUT_PREVIEW_MAX ? `${j.slice(0, OUTPUT_PREVIEW_MAX)}…` : j;
+  } catch {
+    return String(v);
+  }
+}
+
+function summarizeStepOutput(output: Record<string, unknown> | undefined): {
+  output_keys: string[];
+  output_preview: Record<string, string>;
+} | undefined {
+  if (!output || typeof output !== 'object') return undefined;
+  const keys = Object.keys(output);
+  if (keys.length === 0) return undefined;
+  const output_preview: Record<string, string> = {};
+  for (const k of keys) {
+    output_preview[k] = stringifyOutputValue(output[k]);
+  }
+  return { output_keys: keys, output_preview };
+}
+
+function inferPrimaryOutputVar(workflow: WorkflowDef): string | null {
+  for (let i = workflow.nodes.length - 1; i >= 0; i--) {
+    const n = workflow.nodes[i];
+    if (n.disabled) continue;
+    if (n.type === 'extract_image_download' || n.type === 'extract_image_clipboard') {
+      const v = (n.params as { outputVar?: string }).outputVar;
+      return typeof v === 'string' && v.trim() ? v.trim() : 'imageUrl';
+    }
+  }
+  return null;
+}
+
+function buildResultHighlights(
+  finalVars: Record<string, string>,
+  workflow: WorkflowDef
+): {
+  primaryGeneratedImageUrl: string | null;
+  referenceImageUrl: string | null;
+  primaryOutputVar: string | null;
+  primaryOutputVarUrl: string | null;
+  hint: string;
+} {
+  const primaryOutputVar = inferPrimaryOutputVar(workflow);
+  const gen = finalVars.generatedImageUrl?.trim() || null;
+  const primary = finalVars.primaryMediaUrl?.trim() || null;
+  const src = finalVars.sourceImageUrl?.trim() || null;
+  const img = finalVars.imageUrl?.trim() || null;
+  const media = finalVars.mediaUrl?.trim() || null;
+
+  let primaryOutputVarUrl: string | null = null;
+  if (primaryOutputVar && finalVars[primaryOutputVar]) {
+    const u = finalVars[primaryOutputVar].trim();
+    if (u.startsWith('http')) primaryOutputVarUrl = u;
+  }
+
+  let primaryGeneratedImageUrl = gen || primary || null;
+  if (!primaryGeneratedImageUrl && primaryOutputVarUrl) primaryGeneratedImageUrl = primaryOutputVarUrl;
+  if (!primaryGeneratedImageUrl && img && img !== src) primaryGeneratedImageUrl = img;
+  if (!primaryGeneratedImageUrl) primaryGeneratedImageUrl = media;
+
+  const hint =
+    primaryOutputVar != null
+      ? `主产出：优先看 resultHighlights.primaryGeneratedImageUrl；与工作流最后一个提取节点 outputVar「${primaryOutputVar}」对应；sourceImageUrl 为入参参考图。`
+      : '主产出：优先看 resultHighlights.primaryGeneratedImageUrl、generatedImageUrl；sourceImageUrl 为入参参考图。';
+
+  return {
+    primaryGeneratedImageUrl,
+    referenceImageUrl: src,
+    primaryOutputVar,
+    primaryOutputVarUrl,
+    hint,
+  };
+}
 
 export interface WorkflowTaskSummaryView {
   taskId: string;
@@ -40,11 +125,32 @@ export interface WorkflowTaskSummaryView {
     label?: string;
     nodeType: string;
     duration: number | null;
+    /** 本步 status=error 时的失败原因（与 steps[].error 一致，便于摘要接口直接展示） */
+    error?: string;
+    error_code?: string;
+    error_msg?: string;
+    /** 本步节点写入的 output 字段名（有 output 时） */
+    output_keys?: string[];
+    /** 与 output_keys 对应的值预览（已截断） */
+    output_preview?: Record<string, string>;
   }>;
+  /** 首个失败步骤的 1-based 序号，无失败为 null */
+  failedStepIdx: number | null;
   lastLog: string;
+  /** 从 finalVars 提炼：主生成图 URL、参考图 URL、工作流主输出变量名 */
+  resultHighlights: {
+    primaryGeneratedImageUrl: string | null;
+    referenceImageUrl: string | null;
+    primaryOutputVar: string | null;
+    primaryOutputVarUrl: string | null;
+    hint: string;
+  };
   finalVars: Record<string, string>;
   isError: boolean;
   errorMessage: string | null;
+  /** 与 errorMessage 同源拆分，便于客户端分支 */
+  error_code: string | null;
+  error_msg: string | null;
   startedAt: number;
   completedAt: number | null;
   totalDuration: number | null;
@@ -62,9 +168,10 @@ export interface WorkflowTaskDetailView extends WorkflowTaskSummaryView {
     logs: string[];
     output: Record<string, unknown> | null;
     error: string | null;
+    error_code: string | null;
+    error_msg: string | null;
     executedAt: number | null;
   }>;
-  failedStepIdx: number | null;
 }
 
 export interface WorkflowTaskArtifacts {
@@ -160,7 +267,10 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
           if (skipped) setTaskStepSkipped(taskId, stepIdx);
           else setTaskStepSuccess(taskId, stepIdx, result, dur);
         } else {
-          setTaskStepError(taskId, stepIdx, result.error ?? 'failed', dur);
+          setTaskStepError(taskId, stepIdx, result.error ?? 'failed', dur, {
+            errorCode: result.errorCode,
+            errorMsg: result.errorMsg,
+          });
         }
       },
     });
@@ -244,6 +354,13 @@ function findLastLog(task: WorkflowTask): string {
   return '';
 }
 
+/** 1-based，无失败步骤为 null（兼容旧任务：仅 steps 有 error、未写 failedStepIdx） */
+function resolveFailedStepIdx1(task: WorkflowTask): number | null {
+  if (task.failedStepIdx !== undefined) return task.failedStepIdx + 1;
+  const i = task.steps.findIndex((s) => s.status === 'error');
+  return i >= 0 ? i + 1 : null;
+}
+
 export async function startWorkflowTask(input: {
   workflowId: string;
   vars?: Record<string, unknown>;
@@ -296,17 +413,39 @@ export function getWorkflowTaskSummary(taskId: string): WorkflowTaskSummaryView 
       elapsed: progress.elapsed,
       estimated: progress.estimated,
     },
-    stepStatus: task.steps.map((s) => ({
-      idx: s.idx + 1,
-      status: s.status,
-      label: s.label,
-      nodeType: s.nodeType,
-      duration: s.duration,
-    })),
+    stepStatus: task.steps.map((s) => {
+      const row: WorkflowTaskSummaryView['stepStatus'][number] = {
+        idx: s.idx + 1,
+        status: s.status,
+        label: s.label,
+        nodeType: s.nodeType,
+        duration: s.duration,
+      };
+      if (s.status === 'error' && s.error) {
+        row.error = s.error;
+        row.error_code =
+          s.errorCode ?? parseWorkflowStepErrorMessage(s.error).error_code;
+        row.error_msg = s.errorMsg ?? parseWorkflowStepErrorMessage(s.error).error_msg;
+      }
+      const outSum = summarizeStepOutput(s.output as Record<string, unknown> | undefined);
+      if (outSum) {
+        row.output_keys = outSum.output_keys;
+        row.output_preview = outSum.output_preview;
+      }
+      return row;
+    }),
+    failedStepIdx: resolveFailedStepIdx1(task),
     lastLog: findLastLog(task),
+    resultHighlights: buildResultHighlights(task.finalVars, task.workflow),
     finalVars: task.finalVars,
     isError: task.isError,
     errorMessage: task.errorMessage || null,
+    error_code:
+      task.errorCode ??
+      (task.errorMessage ? parseWorkflowStepErrorMessage(task.errorMessage).error_code : null),
+    error_msg:
+      task.errorMsg ??
+      (task.errorMessage ? parseWorkflowStepErrorMessage(task.errorMessage).error_msg : null),
     startedAt: task.startedAt,
     completedAt: task.completedAt || null,
     totalDuration: task.totalDuration || null,
@@ -331,9 +470,12 @@ export function getWorkflowTaskDetail(taskId: string): WorkflowTaskDetailView | 
       logs: s.logs,
       output: s.output || null,
       error: s.error || null,
+      error_code:
+        s.errorCode ?? (s.error ? parseWorkflowStepErrorMessage(s.error).error_code : null),
+      error_msg:
+        s.errorMsg ?? (s.error ? parseWorkflowStepErrorMessage(s.error).error_msg : null),
       executedAt: s.executedAt || null,
     })),
-    failedStepIdx: task.failedStepIdx !== undefined ? task.failedStepIdx + 1 : null,
   };
 }
 

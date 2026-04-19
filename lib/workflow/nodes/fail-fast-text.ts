@@ -17,7 +17,8 @@ function sanitizeToken(token: string): string {
 
 function isLowSignalToken(token: string): boolean {
   const lower = token.toLowerCase();
-  // 高频误判词：在自然描述里极易出现，不能单独作为 fail-fast 判据
+  // 高频误判词：在自然描述里极易出现，不能单独作为 fail-fast 判据（整词匹配时丢弃）。
+  // 若需匹配「I encountered an error」类文案，请在节点里写完整短语，或依赖 extract_image_download 的 failFastMergeDefaultPhrases 追加英文默认句。
   if (['but', 'again', 'wrong', 'error'].includes(lower)) return true;
   if (/^[a-z]+$/i.test(token) && token.length <= 3) return true;
   return false;

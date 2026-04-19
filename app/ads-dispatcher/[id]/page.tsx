@@ -309,20 +309,19 @@ function CheckpointTimeline({ checkpoints }: { checkpoints: Checkpoint[] }) {
 }
 
 function HistoricalAttempt({ attemptIndex, batchTaskId }: { attemptIndex: number; batchTaskId: string }) {
-  const [detail, setDetail] = useState<{ status: string; error?: string; workflowName?: string; startedAt?: string; endedAt?: string } | null>(null);
+  const [detail, setDetail] = useState<{ status: string; error?: string; workflowId?: string; startedAt?: number; completedAt?: number } | null>(null);
 
   useEffect(() => {
-    fetch(`/api/gemini-web/image/ads-batch/tasks/${batchTaskId}`)
+    fetch(`/api/workflows/tasks/${batchTaskId}`)
       .then(r => r.ok ? r.json() : null)
-      .then((bt: any) => {
-        if (!bt) return;
-        const run = bt.result?.runs?.[0];
+      .then((wt: any) => {
+        if (!wt) return;
         setDetail({
-          status: bt.status,
-          workflowName: bt.workflowName,
-          error: run?.error || bt.error,
-          startedAt: bt.startedAt,
-          endedAt: bt.endedAt,
+          status: wt.status,
+          workflowId: wt.workflowId,
+          error: wt.errorMessage || undefined,
+          startedAt: wt.startedAt,
+          completedAt: wt.completedAt,
         });
       })
       .catch(() => null);
@@ -334,14 +333,14 @@ function HistoricalAttempt({ attemptIndex, batchTaskId }: { attemptIndex: number
       <div className="flex-1 min-w-0 space-y-0.5">
         <div className="flex items-center gap-2">
           <code className="font-mono text-muted-foreground">{batchTaskId.slice(0, 12)}…</code>
-          {detail?.workflowName && <span className="text-muted-foreground">{detail.workflowName}</span>}
+          {detail?.workflowId && <span className="text-muted-foreground">{detail.workflowId.slice(0, 8)}…</span>}
           {detail && <StatusBadge status={detail.status} />}
         </div>
         {detail?.error && (
           <div className="text-red-400 break-all">{detail.error}</div>
         )}
-        {detail?.endedAt && (
-          <div className="text-muted-foreground">结束：{formatTime(detail.endedAt)}</div>
+        {detail?.completedAt && (
+          <div className="text-muted-foreground">结束：{formatTime(detail.completedAt)}</div>
         )}
       </div>
     </div>
@@ -349,23 +348,15 @@ function HistoricalAttempt({ attemptIndex, batchTaskId }: { attemptIndex: number
 }
 
 function ItemExpandedDetail({ item }: { item: DispatcherItem }) {
-  const [batchTask, setBatchTask] = useState<BatchTask | null>(null);
-  const [webTask, setWebTask] = useState<WebImageTask | null>(null);
+  const [wfTask, setWfTask] = useState<any | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchAll = useCallback(async () => {
     if (!item.batchTaskId) return;
     try {
-      const bRes = await fetch(`/api/gemini-web/image/ads-batch/tasks/${item.batchTaskId}`);
-      if (!bRes.ok) { setFetchError(`batch task ${bRes.status}`); return; }
-      const bt: BatchTask = await bRes.json();
-      setBatchTask(bt);
-
-      const run = bt.result?.runs?.[0];
-      if (run?.taskId) {
-        const wRes = await fetch(`/api/gemini-web/image/tasks/${run.taskId}`);
-        if (wRes.ok) setWebTask(await wRes.json());
-      }
+      const wRes = await fetch(`/api/workflows/tasks/${item.batchTaskId}`);
+      if (!wRes.ok) { setFetchError(`workflow task ${wRes.status}`); return; }
+      setWfTask(await wRes.json());
       setFetchError(null);
     } catch (e) {
       setFetchError(String(e));
@@ -375,15 +366,12 @@ function ItemExpandedDetail({ item }: { item: DispatcherItem }) {
   useEffect(() => { void fetchAll(); }, [fetchAll]);
 
   // Poll while running
-  const isActive = item.status === 'running' ||
-    (webTask !== null && !['success', 'failed', 'cancelled'].includes(webTask.status));
+  const isActive = Boolean(item.batchTaskId) && (wfTask === null || !['done', 'error', 'stopped'].includes(String(wfTask.status)));
   useEffect(() => {
     if (!isActive) return;
     const t = setInterval(() => void fetchAll(), 2000);
     return () => clearInterval(t);
   }, [isActive, fetchAll]);
-
-  const run = batchTask?.result?.runs?.[0];
 
   return (
     <div className="space-y-4 text-xs">
@@ -397,13 +385,12 @@ function ItemExpandedDetail({ item }: { item: DispatcherItem }) {
           <span>实例：<code className="font-mono text-foreground">{item.browserInstanceId}</code></span>
         )}
         {item.batchTaskId && (
-          <span>Batch：<code className="font-mono text-primary">{item.batchTaskId.slice(0, 12)}…</code></span>
+          <span>子任务：<code className="font-mono text-primary">{item.batchTaskId.slice(0, 12)}…</code></span>
         )}
-        {run?.taskId && (
-          <span>WebTask：<code className="font-mono text-primary">{run.taskId.slice(0, 12)}…</code></span>
-        )}
-        {batchTask && (
-          <span>工作流：<span className="text-foreground">{batchTask.workflowName}</span></span>
+        {item.batchTaskId && (
+          <a className="text-primary hover:underline" href={`/api/workflows/tasks/${item.batchTaskId}`} target="_blank" rel="noreferrer">
+            打开子任务详情(JSON)
+          </a>
         )}
       </div>
 
@@ -478,31 +465,40 @@ function ItemExpandedDetail({ item }: { item: DispatcherItem }) {
                 实时
               </span>
             )}
-            {webTask && (
-              <StatusBadge status={webTask.status} />
-            )}
+            {wfTask && <StatusBadge status={wfTask.status} />}
           </div>
           {fetchError ? (
             <div className="text-red-400">{fetchError}</div>
-          ) : !batchTask ? (
+          ) : !wfTask ? (
             <div className="text-muted-foreground">加载中…</div>
-          ) : !run?.taskId ? (
-            <div className="text-muted-foreground">子任务启动中…</div>
-          ) : !webTask ? (
-            <div className="text-muted-foreground">加载工作流详情…</div>
           ) : (
             <div className="bg-muted/20 rounded-lg p-3 border border-border">
-              <CheckpointTimeline checkpoints={webTask.checkpoints} />
-              {webTask.status === 'running' && (
-                <div className="mt-2 text-blue-400 flex items-center gap-1.5">
-                  <span className="animate-spin">⟳</span>
-                  <span>执行中…</span>
+              {wfTask.resultHighlights?.primaryGeneratedImageUrl && (
+                <div className="mb-2">
+                  <div className="text-muted-foreground mb-1">主产出</div>
+                  <a className="text-primary hover:underline break-all" href={wfTask.resultHighlights.primaryGeneratedImageUrl} target="_blank" rel="noreferrer">
+                    {wfTask.resultHighlights.primaryGeneratedImageUrl}
+                  </a>
                 </div>
               )}
-              {webTask.error && (
-                <div className="mt-2 bg-red-500/10 border border-red-500/20 rounded p-2 text-red-400">
-                  {webTask.error}
+              {Array.isArray(wfTask.stepStatus) && wfTask.stepStatus.length > 0 ? (
+                <div className="space-y-1">
+                  {wfTask.stepStatus.map((s: any) => (
+                    <div key={s.idx} className="flex items-start gap-2">
+                      <span className="shrink-0 w-5 text-right text-muted-foreground">{s.idx}</span>
+                      <span className="shrink-0 w-16"><StatusBadge status={s.status} /></span>
+                      <span className="shrink-0 text-muted-foreground">{s.label || s.nodeType}</span>
+                      {s.output_preview && (
+                        <span className="text-muted-foreground break-all line-clamp-2">
+                          {Object.entries(s.output_preview).slice(0, 3).map(([k, v]) => `${k}=${v}`).join('  ')}
+                        </span>
+                      )}
+                      {s.error && <span className="text-red-400 break-all">{s.error}</span>}
+                    </div>
+                  ))}
                 </div>
+              ) : (
+                <div className="text-muted-foreground">暂无 stepStatus</div>
               )}
             </div>
           )}

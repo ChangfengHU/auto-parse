@@ -79,6 +79,7 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
         sourceImageUrl: item.sourceImageUrls?.[0] ?? null,
         status: item.status,
         attempts: item.attempts,
+        workflowTaskId: (item as any).workflowTaskId ?? (item as any).batchTaskId ?? null,
         primaryMediaUrl: media[0] ?? null,
         primaryMediaType: item.primaryMediaType ?? null,
         primaryImageUrl: images[0] ?? null,

@@ -2,6 +2,7 @@
  * 节点目录 — 所有可用节点的元数据、默认参数、参数说明
  */
 import type { NodeType } from './types';
+import { DEFAULT_TEXT_INPUT_POLL_UNTIL_SELECTOR } from './types';
 
 export interface ParamMeta {
   label: string       // 显示名称
@@ -211,7 +212,16 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
     icon: '✏️',
     category: 'basic',
     desc: '在输入框中填写文本，支持 {{变量名}} 模板动态插值',
-    defaultParams: { selector: '', value: '', inputMode: 'fill', autoEnter: false },
+    defaultParams: {
+      selector: '',
+      value: '',
+      inputMode: 'fill',
+      autoEnter: false,
+      autoEnterPollUntilStop: false,
+      autoEnterPollUntilSelector: DEFAULT_TEXT_INPUT_POLL_UNTIL_SELECTOR,
+      autoEnterPollIntervalMs: 3000,
+      autoEnterPollMaxMs: 180000,
+    },
     paramMeta: {
       selector: SELECTOR_META,
       value: {
@@ -245,6 +255,32 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         label: '⌨️ 自动回车',
         desc: '输入完成后是否自动按下回车键（模拟 Enter 键）',
         type: 'boolean',
+      },
+      autoEnterPollUntilStop: {
+        label: '定时回车直到结束',
+        desc:
+          '开启后：按「轮询间隔」重复在输入框按 Enter，直到满足下方「结束条件」。默认检测页面「停止 / 停止回答」按钮（aria-label 含 Stop、停止）。需同时开启「自动回车」',
+        type: 'boolean',
+      },
+      autoEnterPollUntilSelector: {
+        ...SELECTOR_META,
+        label: '结束条件',
+        required: false,
+        desc:
+          '默认已填：英文/中文停止按钮的 aria-label「包含」匹配（逗号=多条任一命中）。改关键词：把 *= 后面改成你的词，例如 button[aria-label*="完成"]；多条用英文逗号拼接。另有一层内置检测：Gemini CDK 的 aria-describedby→「停止回答」「Stop response」等（勿选 #cdk-describedby-message-* 的 div）。判定：**选择器命中 或 内置命中** 即结束',
+        example: DEFAULT_TEXT_INPUT_POLL_UNTIL_SELECTOR,
+      },
+      autoEnterPollIntervalMs: {
+        label: '轮询间隔（ms）',
+        desc: '两次 Enter 之间的等待时间，默认 3000（3 秒）',
+        type: 'number',
+        example: '3000',
+      },
+      autoEnterPollMaxMs: {
+        label: '最长等待（ms）',
+        desc: '超过此时间仍未出现停止按钮则结束并记日志警告，默认 180000（3 分钟）',
+        type: 'number',
+        example: '180000',
       },
     },
   },
@@ -859,7 +895,10 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       allowClipboardFallback: true,
       serializeClipboardAccess: true,
       fallbackImageSelector: 'img[src^="blob:"], img[src^="data:image"], img',
+      copyImageButtonSelector:
+        'generated-image copy-button button, [aria-label="Copy image"], [aria-label*="复制图片"]',
       failFastTextIncludes: ['抱歉，今天没办法帮你生成更多视频了'],
+      failFastMergeDefaultPhrases: true,
       failFastSelector: '',
       failFastAction: 'skip_node',
       buttonIndex: -1,
@@ -981,17 +1020,34 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         type: 'boolean',
         example: 'true',
       },
+      copyImageButtonSelector: {
+        label: '复制图片按钮（下载失败优先）',
+        desc:
+          '未收到浏览器 Download 事件时，优先点击此按钮再读剪贴板，避免全页最大 img 误选输入区「参考图预览」（与入参同图）。可逗号多选。DOM 兜底仍会优先 model-response/generated-image 内的图',
+        type: 'selector',
+        example:
+          'generated-image copy-button button, [aria-label*="复制图片"]',
+        required: false,
+      },
       fallbackImageSelector: {
         label: '兜底图片选择器',
-        desc: '下载事件抓不到时，按该选择器读取页面图片 src 再抓取原图 Buffer（不使用剪贴板）',
+        desc: '复制与下载均失败时，按该选择器选 img 再 fetch；内置已优先 generated-image 内大图，再全页匹配本选择器',
         type: 'selector',
         example: 'img[src^="blob:"], img[src^="data:image"], img',
       },
       failFastTextIncludes: {
         label: '失败快判文本',
-        desc: '页面出现任一文本片段则立即失败（减少无效等待）。例如："抱歉，今天没办法帮你生成更多视频了"',
+        desc:
+          '页面 body 文本包含任一片段即失败。勿只填 error、again 等单词（会被归一化剔除）；应写完整句如 encountered an error。已配置本项或「失败快判选择器」时，默认追加英文句 encountered an error / could you try again（见下一项）',
         type: 'array',
-        example: '["抱歉，今天没办法帮你生成更多视频了"]',
+        example: '["抱歉，今天没办法帮你生成更多视频了","encountered an error"]',
+      },
+      failFastMergeDefaultPhrases: {
+        label: '追加英文默认失败句',
+        desc:
+          '开启（默认）时在本节点关键词之外追加 Gemini 常见英文失败整句，避免仅配 error 被过滤后漏检。仅当已配置「失败快判文本」或「失败快判选择器」时生效；全空配置不会启用快判',
+        type: 'boolean',
+        example: 'true',
       },
       failFastSelector: {
         label: '失败快判选择器',

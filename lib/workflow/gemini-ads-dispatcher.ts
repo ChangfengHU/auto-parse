@@ -10,10 +10,11 @@ import {
   type InstanceStatus,
 } from '@/lib/ads-instance-pool';
 import {
-  cancelGeminiAdsBatchTask,
-  createGeminiAdsBatchTask,
-  getGeminiAdsBatchTask,
-} from './gemini-ads-batch';
+  collectWorkflowTaskArtifacts,
+  getWorkflowTask,
+  startWorkflowTask,
+  stopWorkflowTask,
+} from '@/lib/workflow/workflow-task-cli';
 import {
   appendTaskTrace,
   pruneTaskTraces,
@@ -99,9 +100,13 @@ export interface GeminiAdsDispatcherItem {
   status: DispatcherItemStatus;
   attempts: number;
   browserInstanceId?: string;
-  batchTaskId?: string;
-  /** 历史所有 batch task IDs（按尝试顺序，不含当前 batchTaskId） */
-  batchTaskHistory?: string[];
+  /**
+   * 子工作流任务 ID（来自 /api/workflows/tasks 的 taskId）。
+   * 为了兼容旧字段名，外层 API 仍可能以 batchTaskId 暴露同一个值。
+   */
+  workflowTaskId?: string;
+  /** 历史所有 workflow task IDs（按尝试顺序，不含当前 workflowTaskId） */
+  workflowTaskHistory?: string[];
   mediaUrls: string[];
   imageUrls: string[];
   primaryMediaType?: 'image' | 'video' | 'unknown';
@@ -111,7 +116,7 @@ export interface GeminiAdsDispatcherItem {
     attempt: number;
     prompt: string;
     browserInstanceId?: string;
-    batchTaskId?: string;
+    workflowTaskId?: string;
     startedAt?: string;
     endedAt?: string;
     durationMs?: number;
@@ -131,7 +136,8 @@ export interface GeminiAdsDispatcherInstance {
   leaseId?: string;
   currentItemId?: string;
   currentPrompt?: string;
-  batchTaskId?: string;
+  /** 当前运行中的子工作流 taskId（兼容旧 batchTaskId 语义） */
+  workflowTaskId?: string;
   startedAt?: string;
   lastAssignedAt?: string;
   lastReleasedAt?: string;
@@ -530,8 +536,8 @@ async function forceStopRunningTaskInstances(taskId: string, reason?: string) {
   trace(taskId, 'task_force_stop_instances', { reason: reason || 'force preempt' });
 
   for (const instance of task.instances) {
-    if (instance.batchTaskId) {
-      cancelGeminiAdsBatchTask(instance.batchTaskId);
+    if (instance.workflowTaskId) {
+      stopWorkflowTask(instance.workflowTaskId, reason || 'force preempt');
     }
   }
 
@@ -792,6 +798,50 @@ function isTerminal(status: string) {
   return status === 'success' || status === 'failed' || status === 'cancelled';
 }
 
+function isWorkflowTaskTerminal(status: string | undefined): boolean {
+  return status === 'done' || status === 'error' || status === 'stopped';
+}
+
+function buildChildVars(input: {
+  promptVarName: string;
+  browserInstanceId: string;
+  prompt: string;
+  sourceImageUrls: string[];
+}) {
+  const prompt = input.prompt.trim();
+  const sourceImageUrls = normalizeSourceImageUrls(input.sourceImageUrls)
+    .filter((u) => /^https?:\/\//i.test(u));
+  return {
+    prompt,
+    userPrompt: prompt,
+    noteUrl: prompt,
+    note_url: prompt,
+    text: prompt,
+    input: prompt,
+    prompts: JSON.stringify([prompt]),
+    [input.promptVarName]: prompt,
+    browserInstanceId: input.browserInstanceId.trim(),
+    sourceImageUrl: sourceImageUrls[0] || '',
+    sourceImageUrls: JSON.stringify(sourceImageUrls),
+    imageUrl: sourceImageUrls[0] || '',
+    imageUrls: JSON.stringify(sourceImageUrls),
+  } as Record<string, string>;
+}
+
+function filterReferenceMediaUrls(urls: string[], sourceImageUrls: string[]): string[] {
+  if (!Array.isArray(urls) || urls.length === 0) return [];
+  const blocked = new Set((sourceImageUrls || []).map((item) => String(item || '').trim()).filter(Boolean));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of urls) {
+    const url = String(raw || '').trim();
+    if (!url || blocked.has(url) || seen.has(url)) continue;
+    seen.add(url);
+    out.push(url);
+  }
+  return out;
+}
+
 function isInCooldown(instance: GeminiAdsDispatcherInstance, nowMs = Date.now()) {
   if (!instance.cooldownUntil) return false;
   const until = Date.parse(instance.cooldownUntil);
@@ -867,12 +917,12 @@ function shouldForceRewrite(
 }
 
 function adaptiveChildTimeoutMs(baseMs: number, attempts: number): number {
-  // 第一轮也做上限收敛，避免单个子任务长时间占用分身拖慢整体吞吐。
-  const cappedBase = Math.min(baseMs, 5 * 60_000);
-  if (attempts <= 1) return cappedBase;
-  if (attempts === 2) return Math.max(180_000, Math.floor(cappedBase * 0.7));
-  if (attempts === 3) return Math.max(150_000, Math.floor(cappedBase * 0.55));
-  return Math.max(120_000, Math.floor(cappedBase * 0.45));
+  // 允许业务通过 childTaskTimeoutMs 控制首轮超时，避免被固定 5 分钟上限误杀。
+  const normalizedBase = Math.max(60_000, Math.min(baseMs, 30 * 60_000));
+  if (attempts <= 1) return normalizedBase;
+  if (attempts === 2) return Math.max(180_000, Math.floor(normalizedBase * 0.8));
+  if (attempts === 3) return Math.max(150_000, Math.floor(normalizedBase * 0.65));
+  return Math.max(120_000, Math.floor(normalizedBase * 0.5));
 }
 
 function appendAttemptHistoryEntry(
@@ -1313,7 +1363,7 @@ async function releaseInstance(taskId: string, instanceId: string, leaseId?: str
             leaseId: undefined,
             currentItemId: undefined,
             currentPrompt: undefined,
-            batchTaskId: undefined,
+            workflowTaskId: undefined,
             startedAt: undefined,
             lastReleasedAt: nowIso(),
             detail: isInCooldown(instance, nowMs)
@@ -1449,7 +1499,7 @@ async function assignNextItem(taskId: string, instanceId: string) {
             leaseId: lease.leaseId,
             currentItemId: nextItem.id,
             currentPrompt: nextItem.prompt,
-            batchTaskId: undefined,
+            workflowTaskId: undefined,
             startedAt,
             lastAssignedAt: startedAt,
             detail: '已分配任务，准备提交子任务',
@@ -1478,17 +1528,19 @@ async function assignNextItem(taskId: string, instanceId: string) {
   });
 
   try {
-    const child = await createGeminiAdsBatchTask({
-      runs: [{
+    const workflowId = String(current.settings.workflowId || '').trim();
+    if (!workflowId) {
+      throw new Error('缺少 workflowId（请在调度任务参数里传 workflowId）');
+    }
+    const promptVarName = String(current.settings.promptVarName || 'noteUrl').trim() || 'noteUrl';
+    const child = await startWorkflowTask({
+      workflowId,
+      vars: buildChildVars({
+        promptVarName,
         browserInstanceId: instanceId,
         prompt: nextItem.prompt,
         sourceImageUrls: nextItem.sourceImageUrls,
-      }],
-      workflowId: current.settings.workflowId,
-      promptVarName: current.settings.promptVarName,
-      maxConcurrency: 1,
-      maxAttemptsPerRun: 1,
-      autoCloseTab: current.settings.autoCloseTab,
+      }),
     });
     updateTaskState(taskId, (task) => {
       const items = task.items.map((item) =>
@@ -1496,12 +1548,12 @@ async function assignNextItem(taskId: string, instanceId: string) {
           ? item
           : {
               ...item,
-              batchTaskId: child.id,
-              batchTaskHistory: item.batchTaskId
-                ? [...(item.batchTaskHistory ?? []), item.batchTaskId]
-                : (item.batchTaskHistory ?? []),
+              workflowTaskId: child.taskId,
+              workflowTaskHistory: item.workflowTaskId
+                ? [...(item.workflowTaskHistory ?? []), item.workflowTaskId]
+                : (item.workflowTaskHistory ?? []),
               attemptHistory: patchLatestAttemptHistory(item, {
-                batchTaskId: child.id,
+                workflowTaskId: child.taskId,
               }),
             }
       );
@@ -1510,8 +1562,8 @@ async function assignNextItem(taskId: string, instanceId: string) {
           ? item
           : {
               ...item,
-              batchTaskId: child.id,
-              detail: `子任务已启动: ${child.id}`,
+              workflowTaskId: child.taskId,
+              detail: `子任务已启动: ${child.taskId}`,
             }
       );
       return {
@@ -1525,7 +1577,7 @@ async function assignNextItem(taskId: string, instanceId: string) {
     trace(taskId, 'child_task_created', {
       instanceId,
       itemId: nextItem.id,
-      batchTaskId: child.id,
+      workflowTaskId: child.taskId,
       attempt: nextItem.attempts + 1,
       childTimeoutMs: adaptiveChildTimeoutMs(current.settings.childTaskTimeoutMs, nextItem.attempts + 1),
     });
@@ -1595,7 +1647,7 @@ async function assignNextItem(taskId: string, instanceId: string) {
           : {
               ...item,
               state: 'idle' as const,
-              batchTaskId: undefined,
+              workflowTaskId: undefined,
               currentItemId: undefined,
               currentPrompt: undefined,
               startedAt: undefined,
@@ -1645,26 +1697,26 @@ async function reconcileRunningInstances(taskId: string) {
 
   let completedCount = 0;
 
-  for (const instance of current.instances.filter((item) => item.state === 'running' && item.currentItemId && item.batchTaskId)) {
+  for (const instance of current.instances.filter((item) => item.state === 'running' && item.currentItemId && item.workflowTaskId)) {
     const fresh = taskStore().get(taskId);
     if (!fresh) return completedCount;
-    const batchTaskId = instance.batchTaskId;
+    const workflowTaskId = instance.workflowTaskId;
     const currentItemId = instance.currentItemId;
-    if (!batchTaskId || !currentItemId) {
+    if (!workflowTaskId || !currentItemId) {
       continue;
     }
 
     if (fresh.cancelRequested) {
-      cancelGeminiAdsBatchTask(batchTaskId);
+      stopWorkflowTask(workflowTaskId, 'dispatcher_cancel_requested');
     }
 
-    const child = getGeminiAdsBatchTask(batchTaskId);
+    const child = getWorkflowTask(workflowTaskId);
     if (!child) continue;
-    if (!isTerminal(child.status)) {
+    if (!isWorkflowTaskTerminal(child.status)) {
       const item = fresh.items.find((entry) => entry.id === currentItemId);
       const timeoutMs = adaptiveChildTimeoutMs(fresh.settings.childTaskTimeoutMs, item?.attempts || 1);
       if (instance.startedAt && Date.now() - Date.parse(instance.startedAt) > timeoutMs) {
-        cancelGeminiAdsBatchTask(batchTaskId);
+        stopWorkflowTask(workflowTaskId, 'dispatcher_child_timeout');
         const exhausted = (item?.attempts || 0) >= fresh.settings.maxAttemptsPerPrompt;
         const timeoutMessage = `子任务超时（>${Math.floor(timeoutMs / 1000)}s）`;
         const failureCategory = parseFailureCategory(timeoutMessage);
@@ -1726,7 +1778,7 @@ async function reconcileRunningInstances(taskId: string) {
         trace(taskId, 'child_task_timeout', {
           instanceId: instance.instanceId,
           itemId: currentItemId,
-          batchTaskId,
+          workflowTaskId,
           prompt: item?.prompt,
           attempts: item?.attempts,
           timeoutMs,
@@ -1739,7 +1791,7 @@ async function reconcileRunningInstances(taskId: string) {
           trace(taskId, 'item_retry_scheduled', {
             instanceId: instance.instanceId,
             itemId: currentItemId,
-            batchTaskId,
+            workflowTaskId,
             status: 'pending',
             error: timeoutMessage,
             category: failureCategory,
@@ -1760,20 +1812,20 @@ async function reconcileRunningInstances(taskId: string) {
       continue;
     }
 
-    const run = child.runs[0];
-    const mediaUrls = run?.mediaUrls ?? run?.imageUrls ?? [];
-    const imageUrls = run?.imageUrls ?? [];
-    const success = child.status === 'success' && mediaUrls.length > 0;
-    const cancelled = child.status === 'cancelled';
+    const item = fresh.items.find((entry) => entry.id === currentItemId);
+    const artifacts = collectWorkflowTaskArtifacts(workflowTaskId);
+    const mediaUrls = filterReferenceMediaUrls(artifacts?.mediaUrls ?? [], item?.sourceImageUrls ?? []);
+    const imageUrls = filterReferenceMediaUrls(artifacts?.imageUrls ?? [], item?.sourceImageUrls ?? []);
+    const success = child.status === 'done' && mediaUrls.length > 0;
+    const cancelled = child.status === 'stopped';
     const message = success
       ? undefined
       : cancelled
         ? undefined
-        : run?.error || (mediaUrls.length === 0 ? '任务未返回媒体 URL' : '子任务失败');
+        : child.errorMessage || (mediaUrls.length === 0 ? '任务未返回媒体 URL' : '子任务失败');
     const failureCategory = !success && !cancelled
       ? parseFailureCategory(message || '子任务失败')
       : undefined;
-    const item = fresh.items.find((entry) => entry.id === currentItemId);
 
     // Fast-fail 策略处理
     const isFastFail = !success && !cancelled && Boolean(message?.includes('FAIL_FAST:'));
@@ -1787,7 +1839,7 @@ async function reconcileRunningInstances(taskId: string) {
     trace(taskId, 'child_task_terminal', {
       instanceId: instance.instanceId,
       itemId: currentItemId,
-      batchTaskId,
+      workflowTaskId,
       childStatus: child.status,
       success,
       cancelled,
@@ -1845,7 +1897,7 @@ async function reconcileRunningInstances(taskId: string) {
             status: 'success' as const,
             mediaUrls,
             imageUrls,
-            primaryMediaType: run?.primaryMediaType,
+            primaryMediaType: artifacts?.primaryMediaType,
             error: undefined,
             failureCategory: undefined,
             endedAt,
@@ -1881,7 +1933,7 @@ async function reconcileRunningInstances(taskId: string) {
             status: 'failed' as const,
             mediaUrls: mediaUrls.length > 0 ? mediaUrls : entry.mediaUrls,
             imageUrls: imageUrls.length > 0 ? imageUrls : entry.imageUrls,
-            primaryMediaType: run?.primaryMediaType || entry.primaryMediaType,
+            primaryMediaType: artifacts?.primaryMediaType || entry.primaryMediaType,
             error: message,
             failureCategory,
             endedAt,
@@ -1906,7 +1958,7 @@ async function reconcileRunningInstances(taskId: string) {
           lastPromptOptimizedAt: retryOptimizedCount && retryOptimizedCount > (entry.promptOptimizedCount ?? 0) ? nowIso() : entry.lastPromptOptimizedAt,
           mediaUrls: mediaUrls.length > 0 ? mediaUrls : entry.mediaUrls,
           imageUrls: imageUrls.length > 0 ? imageUrls : entry.imageUrls,
-          primaryMediaType: run?.primaryMediaType || entry.primaryMediaType,
+          primaryMediaType: artifacts?.primaryMediaType || entry.primaryMediaType,
           error: message,
           failureCategory,
           endedAt: undefined,
@@ -1939,7 +1991,7 @@ async function reconcileRunningInstances(taskId: string) {
     trace(taskId, resultStatus === 'retry' ? 'item_retry_scheduled' : 'item_settled', {
       instanceId: instance.instanceId,
       itemId: currentItemId,
-      batchTaskId,
+      workflowTaskId,
       prompt: resultStatus === 'retry' ? retryPrompt : item?.prompt,
       attempts: item?.attempts,
       status: resultStatus === 'retry' ? 'pending' : resultStatus,
@@ -1971,7 +2023,7 @@ async function reconcileRunningInstances(taskId: string) {
       outcome: success ? 'success' : cancelled || fresh.cancelRequested ? 'cancelled' : 'failed',
       itemId: currentItemId,
       mediaUrl: mediaUrls[0] || null,
-      mediaType: run?.primaryMediaType,
+      mediaType: artifacts?.primaryMediaType,
       imageUrl: imageUrls[0] || null,
       error: success ? undefined : message,
     });
@@ -1989,9 +2041,9 @@ async function finalizeTaskWithFailure(taskId: string, reason: string) {
   const endedAt = nowIso();
   const failureCategory = parseFailureCategory(reason);
 
-  for (const instance of current.instances.filter((item) => item.batchTaskId)) {
-    if (instance.batchTaskId) {
-      cancelGeminiAdsBatchTask(instance.batchTaskId);
+  for (const instance of current.instances.filter((item) => item.workflowTaskId)) {
+    if (instance.workflowTaskId) {
+      stopWorkflowTask(instance.workflowTaskId, 'dispatcher_finalize_failure');
     }
   }
 
@@ -2032,7 +2084,7 @@ async function finalizeTaskWithFailure(taskId: string, reason: string) {
       state: instance.state === 'inactive' ? 'inactive' : 'idle',
       currentItemId: undefined,
       currentPrompt: undefined,
-      batchTaskId: undefined,
+      workflowTaskId: undefined,
       leaseId: undefined,
       startedAt: undefined,
     })),
@@ -2070,9 +2122,9 @@ async function runDispatcherTask(taskId: string) {
     if (!latest) return;
 
     if (latest.suspendRequested) {
-      const active = latest.instances.filter((item) => item.state === 'running' && item.batchTaskId);
+      const active = latest.instances.filter((item) => item.state === 'running' && item.workflowTaskId);
       for (const instance of active) {
-        if (instance.batchTaskId) cancelGeminiAdsBatchTask(instance.batchTaskId);
+        if (instance.workflowTaskId) stopWorkflowTask(instance.workflowTaskId, 'dispatcher_suspended');
       }
       if (active.length === 0) break;
       await sleep(latest.settings.pollIntervalMs);
@@ -2080,7 +2132,7 @@ async function runDispatcherTask(taskId: string) {
     }
 
     if (latest.cancelRequested) {
-      const active = latest.instances.filter((item) => item.state === 'running' && item.batchTaskId);
+      const active = latest.instances.filter((item) => item.state === 'running' && item.workflowTaskId);
       if (active.length === 0) break;
       await sleep(latest.settings.pollIntervalMs);
       continue;
@@ -2138,7 +2190,7 @@ async function runDispatcherTask(taskId: string) {
             ...item,
             status: 'pending' as const,
             browserInstanceId: undefined,
-            batchTaskId: undefined,
+            workflowTaskId: undefined,
             error: undefined,
             failureCategory: undefined,
             endedAt: undefined,
@@ -2170,7 +2222,7 @@ async function runDispatcherTask(taskId: string) {
         state: instance.state === 'inactive' ? 'inactive' : 'idle',
         currentItemId: undefined,
         currentPrompt: undefined,
-        batchTaskId: undefined,
+        workflowTaskId: undefined,
         leaseId: undefined,
         startedAt: undefined,
       })),
@@ -2218,7 +2270,7 @@ async function runDispatcherTask(taskId: string) {
         state: instance.state === 'inactive' ? 'inactive' : 'idle',
         currentItemId: undefined,
         currentPrompt: undefined,
-        batchTaskId: undefined,
+        workflowTaskId: undefined,
         leaseId: undefined,
         startedAt: undefined,
       })),
@@ -2258,7 +2310,7 @@ async function runDispatcherTask(taskId: string) {
       state: instance.state === 'inactive' ? 'inactive' : 'idle',
       currentItemId: undefined,
       currentPrompt: undefined,
-      batchTaskId: undefined,
+      workflowTaskId: undefined,
       leaseId: undefined,
       startedAt: undefined,
     })),
@@ -2579,7 +2631,7 @@ export async function cancelGeminiAdsDispatcherTask(taskId: string, reason?: str
 }
 
 export async function pauseGeminiAdsDispatcherTask(taskId: string, reason?: string) {
-  const task = getGeminiAdsDispatcherTask(taskId);
+  const task = await getGeminiAdsDispatcherTask(taskId);
   if (!task) return undefined;
   if (isTerminal(task.status)) return task;
 
@@ -2618,7 +2670,7 @@ export async function pauseGeminiAdsDispatcherTask(taskId: string, reason?: stri
 }
 
 export async function resumeGeminiAdsDispatcherTask(taskId: string, options?: { mode?: 'front' | 'back' }) {
-  const task = getGeminiAdsDispatcherTask(taskId);
+  const task = await getGeminiAdsDispatcherTask(taskId);
   if (!task) return undefined;
   if (isTerminal(task.status)) return task;
   if (task.status !== 'paused') return task;
