@@ -35,6 +35,7 @@ function leaseStore() {
 }
 
 const DEFAULT_LEASE_TTL_MS = Number(process.env.ADS_INSTANCE_LEASE_TTL_MS || 15 * 60 * 1000);
+const DEFAULT_SESSION_OCCUPANCY_TTL_MS = Number(process.env.ADS_SESSION_OCCUPANCY_TTL_MS || 10 * 60 * 1000);
 
 function pruneExpiredLeases() {
   const now = Date.now();
@@ -76,12 +77,22 @@ export function resolvePoolInstanceIds(explicit?: string[]): string[] {
 
 function findSessionOccupancy(instanceId: string): InstanceStatus | null {
   const sessions = listLiveSessions();
+  const now = Date.now();
   for (const session of sessions) {
     const sid = String(session.vars?.browserInstanceId || '').trim();
     if (!sid || sid !== instanceId) continue;
     const page = session._page;
     const tabOpen = Boolean(page && !page.isClosed());
     if (!tabOpen) continue;
+    const lastHistoryAt = session.history.reduce((max, step) => Math.max(max, step.executedAt || 0), 0);
+    const lastActivityAt = Math.max(session.createdAt || 0, lastHistoryAt);
+    if (
+      DEFAULT_SESSION_OCCUPANCY_TTL_MS > 0 &&
+      lastActivityAt > 0 &&
+      now - lastActivityAt > DEFAULT_SESSION_OCCUPANCY_TTL_MS
+    ) {
+      continue;
+    }
     const sessionUrl = (() => {
       try {
         return page?.url?.() || '';

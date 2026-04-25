@@ -121,7 +121,7 @@ async function pingDouyin() {
 
 
 // ── Supabase 同步（发布平台凭证）────────────────────────
-const SUPABASE_URL = 'https://okkgchwzppghiyfgmrlj.supabase.co';
+const SUPABASE_URL = 'https://supabase.vyibc.com';
 const SUPABASE_ANON_KEY = '';
 
 async function syncToSupabase(cookieStr, platform = 'douyin') {

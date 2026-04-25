@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import { ImageGalleryPreview } from '@/components/image-gallery-preview';
@@ -347,7 +347,7 @@ function HistoricalAttempt({ attemptIndex, batchTaskId }: { attemptIndex: number
   );
 }
 
-function ItemExpandedDetail({ item }: { item: DispatcherItem }) {
+function ItemExpandedDetail({ item, onOpenGallery }: { item: DispatcherItem; onOpenGallery: () => void }) {
   const [wfTask, setWfTask] = useState<any | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
 
@@ -488,6 +488,11 @@ function ItemExpandedDetail({ item }: { item: DispatcherItem }) {
                       <span className="shrink-0 w-5 text-right text-muted-foreground">{s.idx}</span>
                       <span className="shrink-0 w-16"><StatusBadge status={s.status} /></span>
                       <span className="shrink-0 text-muted-foreground">{s.label || s.nodeType}</span>
+                      {(s.status === 'success' || s.status === 'done') && typeof s.duration === 'number' && (
+                        <span className="shrink-0 text-[11px] text-muted-foreground">
+                          耗时 {formatMs(s.duration)}
+                        </span>
+                      )}
                       {s.output_preview && (
                         <span className="text-muted-foreground break-all line-clamp-2">
                           {Object.entries(s.output_preview).slice(0, 3).map(([k, v]) => `${k}=${v}`).join('  ')}
@@ -508,17 +513,26 @@ function ItemExpandedDetail({ item }: { item: DispatcherItem }) {
       {/* Media result */}
       {(item.mediaUrls?.length > 0 || item.imageUrls?.length > 0) && (
         <div>
-          <div className="font-medium text-muted-foreground mb-1.5">生成结果</div>
+          <div className="font-medium text-muted-foreground mb-1.5 flex items-center gap-2">
+            <span>生成结果</span>
+            <button
+              type="button"
+              onClick={onOpenGallery}
+              className="px-2 py-0.5 text-[11px] bg-primary/20 text-primary border border-primary/30 rounded hover:bg-primary/30 transition-colors"
+            >
+              查看全部出图
+            </button>
+          </div>
           <div className="flex flex-wrap gap-3">
             {(item.mediaUrls?.length > 0 ? item.mediaUrls : item.imageUrls).map((url, i) => (
-              <a key={i} href={url} target="_blank" rel="noreferrer" className="group">
+              <button key={i} type="button" onClick={onOpenGallery} className="group">
                 <img
                   src={url}
                   alt={`result-${i}`}
                   className="w-24 h-24 object-cover rounded-lg border border-border group-hover:border-primary transition-colors"
                   onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 />
-              </a>
+              </button>
             ))}
           </div>
         </div>
@@ -558,7 +572,21 @@ function ProgressSection({ summary }: { summary: TaskSummary }) {
   );
 }
 
-function ItemRow({ item, expanded, onToggle }: { item: DispatcherItem; expanded: boolean; onToggle: () => void }) {
+function ItemRow({
+  item,
+  expanded,
+  onToggle,
+  onRetryItem,
+  onOpenGallery,
+  retrying,
+}: {
+  item: DispatcherItem;
+  expanded: boolean;
+  onToggle: () => void;
+  onRetryItem: (item: DispatcherItem) => void;
+  onOpenGallery: () => void;
+  retrying: boolean;
+}) {
   const primaryMedia = item.mediaUrls?.[0] || item.imageUrls?.[0];
   const isImage = item.primaryMediaType === 'image' || (!item.primaryMediaType && primaryMedia);
   return (
@@ -586,7 +614,16 @@ function ItemRow({ item, expanded, onToggle }: { item: DispatcherItem; expanded:
         <td className="px-4 py-2.5 text-xs text-muted-foreground">{formatMaybeMs(item.durationMs)}</td>
         <td className="px-4 py-2.5">
           {primaryMedia && isImage ? (
-            <img src={primaryMedia} alt="" className="w-10 h-10 object-cover rounded border border-border" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenGallery();
+              }}
+              title="点击查看全部出图"
+            >
+              <img src={primaryMedia} alt="" className="w-10 h-10 object-cover rounded border border-border hover:border-primary transition-colors" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+            </button>
           ) : primaryMedia ? (
             <span className="text-[10px] text-blue-400 border border-blue-500/30 rounded px-1">视频</span>
           ) : null}
@@ -595,13 +632,28 @@ function ItemRow({ item, expanded, onToggle }: { item: DispatcherItem; expanded:
           {item.error && <span className="text-[11px] text-red-400" title={item.error}>{truncate(item.error, 40)}</span>}
         </td>
         <td className="px-4 py-2.5 text-muted-foreground text-[11px]">
-          <span>{expanded ? '▲' : '▼'}</span>
+          <div className="flex items-center justify-end gap-2">
+            {item.status === 'running' && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetryItem(item);
+                }}
+                disabled={retrying}
+                className="px-2 py-1 text-[11px] bg-primary/20 text-primary border border-primary/30 rounded-md hover:bg-primary/30 disabled:opacity-50 transition-colors"
+                title="携带当前子任务入参跳转到工作流调试页"
+              >
+                {retrying ? '跳转中...' : 'Debug执行'}
+              </button>
+            )}
+            <span>{expanded ? '▲' : '▼'}</span>
+          </div>
         </td>
       </tr>
       {expanded && (
         <tr className="bg-muted/20">
           <td colSpan={9} className="px-5 py-4">
-            <ItemExpandedDetail item={item} />
+            <ItemExpandedDetail item={item} onOpenGallery={onOpenGallery} />
           </td>
         </tr>
       )}
@@ -696,8 +748,10 @@ export default function AdsDispatcherDetailPage() {
   const [itemFilter, setItemFilter] = useState<string>('all');
   const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set());
   const [operating, setOperating] = useState(false);
+  const [retryingItemId, setRetryingItemId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
+  const [copiedRuns, setCopiedRuns] = useState(false);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -747,7 +801,9 @@ export default function AdsDispatcherDetailPage() {
       if (s.workflowId) body.workflowId = s.workflowId;
       if (s.promptVarName) body.promptVarName = s.promptVarName;
       body.maxAttemptsPerPrompt = s.maxAttemptsPerPrompt;
-      body.autoCloseTab = s.autoCloseTab;
+      body.force = true;
+      body.forceReason = 'beach朋友圈 test';
+      body.autoCloseTab = false;
       const cr = await fetch('/api/gemini-web/image/ads-dispatcher', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -757,6 +813,36 @@ export default function AdsDispatcherDetailPage() {
       router.push(`/ads-dispatcher/${nt.taskId}`);
     } catch (e) { alert(String(e)); }
     finally { setOperating(false); }
+  }
+
+  async function handleRetrySingleItem(item: DispatcherItem) {
+    if (!task) return;
+    if (!confirm('将携带该子任务入参跳转到工作流调试页，确认继续？')) return;
+    setRetryingItemId(item.id);
+    try {
+      const s = task.settings;
+      if (!s.workflowId) throw new Error('当前任务缺少 workflowId，无法跳转到工作流调试页');
+      const params = new URLSearchParams();
+      const promptVarName = String(s.promptVarName || 'noteUrl').trim();
+      params.set(promptVarName, item.prompt || '');
+      if (item.browserInstanceId) {
+        params.set('browserInstanceId', item.browserInstanceId);
+      } else if (Array.isArray(s.instanceIds) && s.instanceIds.length > 0) {
+        params.set('browserInstanceId', s.instanceIds[0]);
+      }
+      const sourceImageUrls = Array.isArray(item.sourceImageUrls)
+        ? item.sourceImageUrls.filter((url) => typeof url === 'string' && url.trim())
+        : [];
+      if (sourceImageUrls.length > 0) {
+        params.set('sourceImageUrl', sourceImageUrls[0]);
+        params.set('sourceImageUrls', JSON.stringify(sourceImageUrls));
+      }
+      router.push(`/workflows/${s.workflowId}?${params.toString()}`);
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setRetryingItemId(null);
+    }
   }
 
   const toggleItem = (itemId: string) => {
@@ -780,6 +866,26 @@ export default function AdsDispatcherDetailPage() {
           }));
         })
     : [];
+
+  const runsInput = useMemo(() => {
+    if (!task) return [];
+    return task.items.map((item) => ({
+      prompt: item.prompt || '',
+      sourceImageUrls: Array.isArray(item.sourceImageUrls)
+        ? item.sourceImageUrls.filter((url) => typeof url === 'string' && url.trim())
+        : [],
+    }));
+  }, [task]);
+
+  async function copyRunsInputJson() {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(runsInput, null, 2));
+      setCopiedRuns(true);
+      setTimeout(() => setCopiedRuns(false), 1800);
+    } catch (e) {
+      alert(String(e));
+    }
+  }
 
   // Show preview mode
   if (previewMode && !loading && task) {
@@ -842,6 +948,13 @@ export default function AdsDispatcherDetailPage() {
             </div>
             {/* Operation buttons */}
             <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => void copyRunsInputJson()}
+                className="px-3 py-1.5 text-xs bg-muted hover:bg-muted/80 rounded-lg transition-colors"
+                title="复制该调度任务 prompts 入参（runs JSON）"
+              >
+                {copiedRuns ? '✅ 已复制入参' : '复制任务入参(JSON)'}
+              </button>
               {galleryImages.length > 0 && (
                 <button
                   onClick={() => setPreviewMode(true)}
@@ -869,7 +982,7 @@ export default function AdsDispatcherDetailPage() {
                   停止
                 </button>
               )}
-              {(task.status === 'failed' || task.status === 'cancelled') && (
+              {(task.status === 'failed' || task.status === 'cancelled' || task.status === 'success') && (
                 <button disabled={operating} onClick={() => void handleRestart()}
                   className="px-3 py-1.5 text-xs bg-primary/20 text-primary border border-primary/30 rounded-lg hover:bg-primary/30 disabled:opacity-50 transition-colors">
                   重新创建
@@ -1013,6 +1126,9 @@ export default function AdsDispatcherDetailPage() {
                       item={item}
                       expanded={expandedItems.has(item.id)}
                       onToggle={() => toggleItem(item.id)}
+                      onRetryItem={handleRetrySingleItem}
+                      onOpenGallery={() => setPreviewMode(true)}
+                      retrying={retryingItemId === item.id}
                     />
                   ))}
                 </tbody>

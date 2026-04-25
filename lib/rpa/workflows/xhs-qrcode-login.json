@@ -1,0 +1,32 @@
+{
+  "id": "xhs-qrcode-login",
+  "name": "小红书扫码登录",
+  "description": "打开小红书登录页，展示二维码，等待用户扫码，登录成功后自动保存 Cookie 到浏览器上下文",
+  "nodes": [
+    {
+      "type": "navigate",
+      "label": "打开小红书登录页",
+      "params": {
+        "url": "https://www.xiaohongshu.com/login",
+        "timeout": 30000,
+        "waitUntil": "domcontentloaded"
+      }
+    },
+    {
+      "type": "qrcode",
+      "label": "扫码登录小红书",
+      "params": {
+        "timeout": 300000,
+        "excludeUrls": [
+          "/login",
+          "passport",
+          "signinwithredirect"
+        ],
+        "cookieDomain": "xiaohongshu.com",
+        "refreshInterval": 110000,
+        "successUrlContains": "xiaohongshu.com/explore"
+      }
+    }
+  ],
+  "vars": []
+}

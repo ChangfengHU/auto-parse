@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 import time
 from typing import Any
@@ -37,6 +38,11 @@ from .signing import build_get_uri, sign_main_api
 logger = logging.getLogger(__name__)
 
 
+def _ssl_verify_enabled() -> bool:
+    value = os.getenv("XHS_SSL_VERIFY", "true").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
 class XhsClient(
     ReadingEndpointsMixin,
     InteractionEndpointsMixin,
@@ -55,7 +61,11 @@ class XhsClient(
         max_retries: int = 3,
     ):
         self.cookies = cookies
-        self._http = httpx.Client(timeout=timeout, follow_redirects=True)
+        self._http = httpx.Client(
+            timeout=timeout,
+            follow_redirects=True,
+            verify=_ssl_verify_enabled(),
+        )
         self._request_delay = request_delay
         self._base_request_delay = request_delay
         self._max_retries = max_retries

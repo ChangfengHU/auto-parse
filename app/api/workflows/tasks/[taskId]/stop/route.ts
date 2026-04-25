@@ -4,7 +4,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getTask, wfTaskLogLookupMiss } from '@/lib/workflow/task-store';
-import { stopWorkflowTask } from '@/lib/workflow/workflow-task-cli';
+import { forceStopWorkflowTask, stopWorkflowTask } from '@/lib/workflow/workflow-task-cli';
 
 export async function POST(
   req: NextRequest,
@@ -33,15 +33,21 @@ export async function POST(
 
   // 解析请求体获取停止原因
   let reason = 'user_cancelled';
+  let force = false;
+  let mode: 'soft' | 'hard' = 'soft';
   try {
     const body = await req.json();
     if (body.reason) reason = body.reason;
+    force = body.force === true || body.mode === 'hard';
+    mode = force ? 'hard' : 'soft';
   } catch {
     // 无请求体，使用默认原因
   }
 
   // 执行停止操作
-  const stoppedTask = stopWorkflowTask(taskId, reason);
+  const stoppedTask = force
+    ? await forceStopWorkflowTask(taskId, reason)
+    : stopWorkflowTask(taskId, reason);
   if (!stoppedTask) {
     return NextResponse.json({ error: 'Task not found' }, { status: 404 });
   }
@@ -49,9 +55,10 @@ export async function POST(
   return NextResponse.json({
     taskId: stoppedTask.taskId,
     status: stoppedTask.status,
+    stopMode: mode,
     stoppedAt: stoppedTask.stoppedAt,
     reason: reason,
-    message: 'Task stopped successfully',
+    message: force ? 'Task force-stopped successfully' : 'Task stopped successfully',
     totalDuration: stoppedTask.totalDuration,
   });
 }

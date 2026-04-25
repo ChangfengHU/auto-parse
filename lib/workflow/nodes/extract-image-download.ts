@@ -2,13 +2,15 @@ import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import crypto from 'crypto';
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
 import type { ExtractImageDownloadParams, NodeResult, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
 import { withSystemClipboardLock } from '../clipboard-lock';
 import { uploadBuffer } from '../../oss';
 import { normalizeFailFastAction, normalizeFailFastTextIncludes } from './fail-fast-text';
 import { parseWorkflowStepErrorMessage } from '../step-error-meta';
+
+const DEFAULT_LOCAL_FILES_UPLOAD_URL = 'http://127.0.0.1:1002/v1beta/files:upload';
 
 function pickIndex(count: number, wanted: number): number {
   if (count <= 0) return -1;
@@ -174,6 +176,62 @@ async function detectVideoResult(page: Page): Promise<{ isVideo: boolean; reason
     });
   } catch {
     return { isVideo: false };
+  }
+}
+
+async function detectTextOnlyResponse(page: Page): Promise<{ textOnly: boolean; reason?: string }> {
+  try {
+    const result = await page.evaluate(() => {
+      const responses = Array.from(document.querySelectorAll('model-response, response-element'));
+      const latest = responses.length > 0 ? responses[responses.length - 1] : null;
+
+      const scope = latest ?? document.body;
+      if (!scope) return { textOnly: false };
+
+      const hasGeneratedImage =
+        scope.querySelector('generated-image img') !== null ||
+        scope.querySelector('img[src^="blob:"]') !== null ||
+        scope.querySelector('img[src^="data:image"]') !== null;
+      const hasVideo = scope.querySelector('video') !== null;
+      const hasDownloadOrCopyAction =
+        scope.querySelector('[aria-label*="Download" i]') !== null ||
+        scope.querySelector('[aria-label*="下载"]') !== null ||
+        scope.querySelector('[aria-label*="Copy image" i]') !== null ||
+        scope.querySelector('[aria-label*="复制图片"]') !== null;
+
+      if (hasGeneratedImage || hasVideo || hasDownloadOrCopyAction) {
+        return { textOnly: false };
+      }
+
+      const text = String((scope as HTMLElement).innerText || '').replace(/\s+/g, ' ').trim();
+      if (text.length < 20) {
+        return { textOnly: false };
+      }
+      return {
+        textOnly: true,
+        reason: `最新响应仅文本，无图片/视频/下载动作（textLen=${text.length}）`,
+      };
+    });
+    return result;
+  } catch {
+    return { textOnly: false };
+  }
+}
+
+async function resolveLatestResponseScope(page: Page): Promise<{
+  scope: Locator;
+  label: string;
+} | null> {
+  try {
+    const responses = page.locator('model-response, response-element');
+    const count = await responses.count();
+    if (count <= 0) return null;
+    return {
+      scope: responses.nth(count - 1),
+      label: `latest-response#${count}`,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -539,6 +597,16 @@ export async function executeExtractImageDownload(
       `📥 生图阶段结束 → 后续：${params.preferDomExtraction ? 'DOM 优先提取 → ' : ''}查找下载入口 / 浏览器下载事件 → 本地校验 → OSS`
     );
 
+    // 业务硬约束：该节点用于产出视觉媒体；若页面仅文本回复且无可提取视觉元素，立即失败，避免无效重试。
+    {
+      const textOnly = await detectTextOnlyResponse(page);
+      if (textOnly.textOnly) {
+        const reason = textOnly.reason || '检测到仅文本回复';
+        pushLog(`🛑 视觉结果校验失败：${reason}`);
+        throw new FailFastError(reason);
+      }
+    }
+
     // ── 提前声明（preferDomExtraction 可能提前赋值，跳过下载流程） ──────────────────
     let imageBuffer: Buffer | null = null;
     let extractionMethod: 'download' | 'dom' | 'clipboard' = 'download';
@@ -611,11 +679,24 @@ export async function executeExtractImageDownload(
       }
     }
 
+    const latestScopeMeta = await resolveLatestResponseScope(page);
+    const inScope = <T extends Locator>(globalLoc: T, scopedLocFactory: () => T): T =>
+      latestScopeMeta ? scopedLocFactory() : globalLoc;
+    if (latestScopeMeta) {
+      log.push(`🎯 下载动作定位范围：${latestScopeMeta.label}`);
+    } else {
+      log.push('⚠️ 未定位到 response 容器，回退为全页按钮定位');
+    }
+
     // ── waitForNew 模式：先记录当前按钮数，等新按钮出现后再下载 ──────────────────
     if (!imageBuffer && waitForNew) {
       let initialCount = 0;
+      const scopedDownloadLoc = inScope(
+        page.locator(selector),
+        () => latestScopeMeta!.scope.locator(selector)
+      );
       try {
-        initialCount = await page.locator(selector).count();
+        initialCount = await scopedDownloadLoc.count();
       } catch { initialCount = 0; }
       log.push(`⏳ waitForNew 模式：当前下载按钮数 ${initialCount}，等待新按钮出现...`);
       const deadline = Date.now() + waitForNewTimeout;
@@ -634,7 +715,7 @@ export async function executeExtractImageDownload(
         }
 
         try {
-          const cur = await page.locator(selector).count();
+          const cur = await scopedDownloadLoc.count();
           if (cur > initialCount) {
             log.push(`✅ 新按钮已出现: ${cur} 个（原 ${initialCount} 个），继续下载`);
             found = true;
@@ -655,7 +736,18 @@ export async function executeExtractImageDownload(
     log.push(`🔍 查找下载入口: direct=${selector} | menuTrigger=${menuTriggerSelector}`);
     let count = 0;
     let idx = -1;
-    const loc = page.locator(selector);
+    const loc = inScope(
+      page.locator(selector),
+      () => latestScopeMeta!.scope.locator(selector)
+    );
+    const triggerLocBase = inScope(
+      page.locator(menuTriggerSelector),
+      () => latestScopeMeta!.scope.locator(menuTriggerSelector)
+    );
+    const itemLocBase = inScope(
+      page.locator(menuItemSelector),
+      () => latestScopeMeta!.scope.locator(menuItemSelector)
+    );
 
     const entryDeadline = Date.now() + buttonTimeout;
     while (Date.now() < entryDeadline) {
@@ -677,7 +769,7 @@ export async function executeExtractImageDownload(
         break;
       }
 
-      const triggerCount = await page.locator(menuTriggerSelector).count().catch(() => 0);
+      const triggerCount = await triggerLocBase.count().catch(() => 0);
       if (triggerCount > 0) {
         mode = 'menu';
         log.push(`✅ 菜单触发按钮数量: ${triggerCount}`);
@@ -712,14 +804,14 @@ export async function executeExtractImageDownload(
               pushLog(`🖱️ 点击直连下载按钮（第 ${idx + 1} 个）…`);
               await loc.nth(idx).click({ timeout: buttonTimeout });
             } else {
-              const triggerLoc = page.locator(menuTriggerSelector);
+              const triggerLoc = triggerLocBase;
               const triggerCount = await triggerLoc.count();
               if (triggerCount <= 0) throw new Error('菜单触发按钮不存在');
               const triggerIndex = pickIndex(triggerCount, buttonIndex);
               pushLog(`🖱️ 打开「更多」菜单（第 ${triggerIndex + 1} 个触发器）…`);
               await triggerLoc.nth(triggerIndex).click({ timeout: buttonTimeout });
 
-              const itemLoc = page.locator(menuItemSelector);
+              const itemLoc = itemLocBase;
               const menuDeadline = Date.now() + 10_000;
               let itemCount = 0;
               while (Date.now() < menuDeadline) {
@@ -951,7 +1043,7 @@ export async function executeExtractImageDownload(
     let mediaUrl = finalPath;
     if (useLocalApi) {
       const uploadUrl = String(
-        params.localFilesUploadUrl || process.env.WORKFLOW_LOCAL_FILES_UPLOAD_URL || ''
+        params.localFilesUploadUrl || process.env.WORKFLOW_LOCAL_FILES_UPLOAD_URL || DEFAULT_LOCAL_FILES_UPLOAD_URL
       ).trim();
       if (!uploadUrl) {
         throw new Error(

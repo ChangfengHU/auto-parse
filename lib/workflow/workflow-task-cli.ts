@@ -24,6 +24,91 @@ import type { WorkflowDef } from '@/lib/workflow/types';
 
 const OUTPUT_PREVIEW_MAX = 280;
 
+type WorkflowTaskRuntime = {
+  page: Page | null;
+  browser: Browser | null;
+  closePageOnFinish: boolean;
+  closeBrowserOnFinish: boolean;
+  closing: Promise<void> | null;
+};
+
+const TASK_RUNTIME = new Map<string, WorkflowTaskRuntime>();
+
+function registerTaskRuntime(taskId: string, page: Page | null, browser: Browser | null) {
+  TASK_RUNTIME.set(taskId, {
+    page,
+    browser,
+    closePageOnFinish: true,
+    closeBrowserOnFinish: Boolean(browser),
+    closing: null,
+  });
+  wfTaskDiag('runtime.register', {
+    taskId,
+    hasPage: Boolean(page),
+    hasBrowser: Boolean(browser),
+  });
+}
+
+function updateTaskRuntime(
+  taskId: string,
+  patch: Partial<Pick<WorkflowTaskRuntime, 'page' | 'browser' | 'closePageOnFinish' | 'closeBrowserOnFinish'>>
+) {
+  const current = TASK_RUNTIME.get(taskId);
+  if (!current) return;
+  if (patch.page !== undefined) current.page = patch.page;
+  if (patch.browser !== undefined) current.browser = patch.browser;
+  if (patch.closePageOnFinish !== undefined) current.closePageOnFinish = patch.closePageOnFinish;
+  if (patch.closeBrowserOnFinish !== undefined) current.closeBrowserOnFinish = patch.closeBrowserOnFinish;
+  wfTaskDiag('runtime.update', {
+    taskId,
+    hasPage: Boolean(current.page),
+    hasBrowser: Boolean(current.browser),
+    pageClosed: current.page ? current.page.isClosed() : true,
+  });
+}
+
+async function closeTaskRuntimeNow(taskId: string): Promise<void> {
+  const runtime = TASK_RUNTIME.get(taskId);
+  if (!runtime) return;
+  if (runtime.closing) {
+    await runtime.closing;
+    return;
+  }
+
+  runtime.closing = (async () => {
+    const page = runtime.page;
+    const browser = runtime.browser;
+    wfTaskDiag('runtime.close.begin', {
+      taskId,
+      hasPage: Boolean(page),
+      hasBrowser: Boolean(browser),
+      pageClosed: page ? page.isClosed() : true,
+    });
+
+    if (page && !page.isClosed()) {
+      if (runtime.closePageOnFinish) {
+        await page.close().catch(() => {});
+      }
+    }
+    if (browser) {
+      if (runtime.closeBrowserOnFinish) {
+        await browser.close().catch(() => {});
+      }
+    }
+
+    runtime.page = null;
+    runtime.browser = null;
+    wfTaskDiag('runtime.close.end', { taskId });
+  })();
+
+  await runtime.closing;
+}
+
+function clearTaskRuntime(taskId: string) {
+  TASK_RUNTIME.delete(taskId);
+  wfTaskDiag('runtime.clear', { taskId });
+}
+
 function stringifyOutputValue(v: unknown): string {
   if (v === null || v === undefined) return '';
   if (typeof v === 'string') {
@@ -241,6 +326,7 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
       const browserCtx = await getPersistentContext();
       page = await browserCtx.newPage();
     }
+    registerTaskRuntime(taskId, page, placeholderBrowser);
     page.on('dialog', (d) => d.accept());
 
     wfTaskDiag('run.workflow.enter', { taskId, workflowId: task.workflowId });
@@ -260,10 +346,31 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
         if (!t || type !== 'log') return;
         addTaskLog(taskId, t.currentStep, payload);
       },
-      afterStep: (stepIdx, _node, result) => {
+      afterStep: (stepIdx, node, result) => {
+        if (result.newPage || result.newBrowser) {
+          const runtimePatch: Partial<
+            Pick<WorkflowTaskRuntime, 'page' | 'browser' | 'closePageOnFinish' | 'closeBrowserOnFinish'>
+          > = {};
+          if (result.newPage) runtimePatch.page = result.newPage as Page;
+          if (result.newBrowser) runtimePatch.browser = result.newBrowser as Browser;
+          const usesAdsPower =
+            node.type === 'navigate' &&
+            Boolean((node.params as { useAdsPower?: boolean } | undefined)?.useAdsPower);
+          if (usesAdsPower) {
+            // AdsPower/CDP 属于外部会话，不在任务收尾时主动关闭，避免误关用户正在使用的 tab/浏览器。
+            runtimePatch.closePageOnFinish = false;
+            runtimePatch.closeBrowserOnFinish = false;
+          }
+          updateTaskRuntime(taskId, runtimePatch);
+        }
         const dur = result.durationMs ?? 0;
         if (result.success) {
-          const skipped = Boolean((result.output as { skipped?: boolean } | undefined)?.skipped);
+          const out = result.output as
+            | { skipped?: boolean; skippedByFailFast?: boolean; failFastAction?: string }
+            | undefined;
+          const skipped =
+            Boolean(out?.skipped) ||
+            (Boolean(out?.skippedByFailFast) && out?.failFastAction === 'skip_node');
           if (skipped) setTaskStepSkipped(taskId, stepIdx);
           else setTaskStepSuccess(taskId, stepIdx, result, dur);
         } else {
@@ -322,11 +429,8 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
       placeholderClosed: Boolean(placeholderBrowser),
       pageWasClosed: page ? page.isClosed() : true,
     });
-    if (placeholderBrowser) {
-      await placeholderBrowser.close().catch(() => {});
-    } else if (page && !page.isClosed()) {
-      await page.close().catch(() => {});
-    }
+    await closeTaskRuntimeNow(taskId).catch(() => {});
+    clearTaskRuntime(taskId);
   }
 }
 
@@ -550,5 +654,13 @@ export function stopWorkflowTask(taskId: string, reason?: string) {
   const task = getTask(taskId);
   if (!task) return null;
   stopStoredTask(taskId, reason);
+  return getTask(taskId);
+}
+
+export async function forceStopWorkflowTask(taskId: string, reason?: string) {
+  const task = getTask(taskId);
+  if (!task) return null;
+  stopStoredTask(taskId, reason);
+  await closeTaskRuntimeNow(taskId).catch(() => {});
   return getTask(taskId);
 }

@@ -1,0 +1,33 @@
+{
+  "id": "topic-picker-agent-react-v1",
+  "name": "今日选题 Agent（ReAct）",
+  "description": "使用通用 agent_react 节点，循环调用 DailyHot 与评估工具生成今日选题",
+  "nodes": [
+    {
+      "type": "agent_react",
+      "label": "获取今日高价值选题（ReAct Agent）",
+      "params": {
+        "tools": [
+          "dailyhot.fetch_topics"
+        ],
+        "llmModel": "qwen-turbo",
+        "maxTurns": 8,
+        "outputVar": "topicIdeas",
+        "llmBaseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "llmProvider": "qianwen",
+        "outputField": "selected",
+        "llmApiKeyEnv": "QWEN_API_KEY",
+        "systemPrompt": "你是内容选题总监。你必须基于工具返回的数据做决策，不得臆造候选，最终只输出结构化 JSON。",
+        "llmTemperature": 0.2,
+        "responseSchema": "{\"type\":\"object\",\"properties\":{\"selected\":{\"type\":\"array\"},\"summary\":{\"type\":\"string\"},\"discarded\":{\"type\":\"array\"}},\"required\":[\"selected\",\"summary\",\"discarded\"]}",
+        "outputDetailVar": "topicIdeasDetail",
+        "userPromptTemplate": "任务目标：{{goal}}\n输出数量：{{count}}\n来源列表(JSON)：{{sources}}\n\n工作步骤要求：\n1) 调用 dailyhot.fetch_topics，baseUrl 固定使用 https://dailyhotapi-hazel.vercel.app，perSourceLimit 设为 20\n2) 仅基于返回 candidates 做语义筛选，优先满足任务目标关键词；若目标要求某主题（如学生/美国/日本），selected 必须与主题强相关\n3) 如果强相关候选不足，允许返回少于 count，并在 discarded/summary 说明原因\n4) 最后输出 {\"action\":\"final\",\"output\":...}\n\nfinal.output 结构必须为：{\"selected\":[{\"rank\":1,\"title\":\"\",\"source\":\"\",\"sourceName\":\"\",\"score\":0-100,\"reason\":\"\",\"expected\":{\"exposure\":0,\"plays\":0,\"fans\":0},\"url\":\"\"}],\"summary\":\"\",\"discarded\":[{\"title\":\"\",\"reason\":\"\"}]}\n并且 selected 必须按优先级排序。"
+      }
+    }
+  ],
+  "vars": [
+    "goal",
+    "count",
+    "sources"
+  ]
+}

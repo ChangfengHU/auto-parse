@@ -21,7 +21,7 @@ interface SavedXhsPost {
   location?: string;
   publish_time?: string;
   saved_at?: string;
-  images?: { id?: string; original_url: string; oss_url?: string }[];
+  images?: { id?: string; original_url: string; oss_url?: string; live_url?: string; live_oss_url?: string }[];
   video?: { id?: string; original_url: string; oss_url?: string };
   comments?: {
     id: string;
@@ -64,8 +64,8 @@ function StatBadge({ icon, value, label }: { icon: string; value: number; label:
   );
 }
 
-function Lightbox({ src, onClose, onPrev, onNext }: {
-  src: string; onClose: () => void; onPrev?: () => void; onNext?: () => void;
+function Lightbox({ imageSrc, videoSrc, onClose, onPrev, onNext }: {
+  imageSrc: string; videoSrc?: string; onClose: () => void; onPrev?: () => void; onNext?: () => void;
 }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -88,8 +88,21 @@ function Lightbox({ src, onClose, onPrev, onNext }: {
         <button className="absolute right-4 text-white text-4xl opacity-70 hover:opacity-100"
           onClick={e => { e.stopPropagation(); onNext(); }}>›</button>
       )}
-      <img src={src} alt="" onClick={e => e.stopPropagation()}
-        className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl" />
+      {videoSrc ? (
+        <video
+          src={videoSrc}
+          poster={imageSrc}
+          controls
+          autoPlay
+          loop
+          playsInline
+          onClick={e => e.stopPropagation()}
+          className="max-h-[90vh] max-w-[90vw] rounded-lg shadow-2xl bg-black"
+        />
+      ) : (
+        <img src={imageSrc} alt="" onClick={e => e.stopPropagation()}
+          className="max-h-[90vh] max-w-[90vw] object-contain rounded-lg shadow-2xl" />
+      )}
     </div>
   );
 }
@@ -166,7 +179,8 @@ function DetailPageContent() {
   const images = post.images ?? [];
   const comments = post.comments ?? [];
   const videoUrl = post.video?.oss_url || post.video?.original_url || '';
-  const lightboxSrc = lightboxIdx !== null ? (images[lightboxIdx].oss_url || proxyImg(images[lightboxIdx].original_url)) : '';
+  const lightboxImageSrc = lightboxIdx !== null ? (images[lightboxIdx].oss_url || proxyImg(images[lightboxIdx].original_url)) : '';
+  const lightboxVideoSrc = lightboxIdx !== null ? (images[lightboxIdx].live_oss_url || images[lightboxIdx].live_url || '') : '';
 
   return (
     <div className="flex flex-col gap-5 p-6 max-w-6xl mx-auto">
@@ -296,8 +310,22 @@ function DetailPageContent() {
                   />
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-end justify-between p-2 opacity-0 group-hover:opacity-100">
                     <span className="text-white text-xs bg-black/50 rounded px-1.5 py-0.5">{idx + 1}</span>
-                    {img.oss_url && <span className="text-white text-xs bg-green-600/80 rounded px-1.5 py-0.5">OSS</span>}
+                    <div className="flex gap-1">
+                      {(img.live_oss_url || img.live_url) && <span className="text-white text-xs bg-blue-600/80 rounded px-1.5 py-0.5">Live</span>}
+                      {img.oss_url && <span className="text-white text-xs bg-green-600/80 rounded px-1.5 py-0.5">OSS</span>}
+                    </div>
                   </div>
+                  {(img.live_oss_url || img.live_url) && (
+                    <a
+                      href={img.live_oss_url || img.live_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(event) => event.stopPropagation()}
+                      className="absolute left-2 top-2 rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100"
+                    >
+                      动图
+                    </a>
+                  )}
                 </div>
               ))}
             </div>
@@ -354,7 +382,8 @@ function DetailPageContent() {
 
       {lightboxIdx !== null && (
         <Lightbox
-          src={lightboxSrc}
+          imageSrc={lightboxImageSrc}
+          videoSrc={lightboxVideoSrc}
           onClose={() => setLightboxIdx(null)}
           onPrev={lightboxIdx > 0 ? () => setLightboxIdx(i => i! - 1) : undefined}
           onNext={lightboxIdx < images.length - 1 ? () => setLightboxIdx(i => i! + 1) : undefined}

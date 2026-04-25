@@ -1,0 +1,48 @@
+{
+  "id": "baf6afbd-5f16-40c0-bff1-d85b6584ab04",
+  "name": "tmp-ads-login-check-with-cred",
+  "description": "tmp",
+  "nodes": [
+    {
+      "type": "navigate",
+      "label": "导航首页",
+      "params": {
+        "url": "https://gemini.google.com/",
+        "adsApiUrl": "http://127.0.0.1:50325",
+        "waitUntil": "domcontentloaded",
+        "useAdsPower": true,
+        "adsProfileId": "k1ba8vac"
+      }
+    },
+    {
+      "type": "credential_login",
+      "label": "凭证登录",
+      "params": {
+        "strict": true,
+        "platform": "gemini",
+        "credentialId": "{{credentialId}}",
+        "outputCookieVar": "credentialCookieStr"
+      }
+    },
+    {
+      "type": "navigate",
+      "label": "导航到app",
+      "params": {
+        "url": "https://gemini.google.com/app",
+        "adsApiUrl": "http://127.0.0.1:50325",
+        "waitUntil": "domcontentloaded",
+        "useAdsPower": true,
+        "adsProfileId": "k1ba8vac"
+      },
+      "waitAfter": {
+        "action": "appeared",
+        "enabled": true,
+        "timeout": 30000,
+        "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]"
+      }
+    }
+  ],
+  "vars": [
+    "credentialId"
+  ]
+}

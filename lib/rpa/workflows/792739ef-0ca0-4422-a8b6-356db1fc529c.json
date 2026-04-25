@@ -1,0 +1,25 @@
+{
+  "id": "792739ef-0ca0-4422-a8b6-356db1fc529c",
+  "name": "tmp-ads-login-check-no-cred",
+  "description": "tmp",
+  "nodes": [
+    {
+      "type": "navigate",
+      "label": "导航到app",
+      "params": {
+        "url": "https://gemini.google.com/app",
+        "adsApiUrl": "http://127.0.0.1:50325",
+        "waitUntil": "domcontentloaded",
+        "useAdsPower": true,
+        "adsProfileId": "k1ba8vac"
+      },
+      "waitAfter": {
+        "action": "appeared",
+        "enabled": true,
+        "timeout": 30000,
+        "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]"
+      }
+    }
+  ],
+  "vars": []
+}

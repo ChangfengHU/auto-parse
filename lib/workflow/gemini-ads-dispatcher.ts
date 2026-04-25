@@ -11,6 +11,7 @@ import {
 } from '@/lib/ads-instance-pool';
 import {
   collectWorkflowTaskArtifacts,
+  forceStopWorkflowTask,
   getWorkflowTask,
   startWorkflowTask,
   stopWorkflowTask,
@@ -535,16 +536,32 @@ async function forceStopRunningTaskInstances(taskId: string, reason?: string) {
 
   trace(taskId, 'task_force_stop_instances', { reason: reason || 'force preempt' });
 
-  for (const instance of task.instances) {
-    if (instance.workflowTaskId) {
-      stopWorkflowTask(instance.workflowTaskId, reason || 'force preempt');
-    }
-  }
+  await Promise.all(
+    task.instances.map(async (instance) => {
+      if (!instance.workflowTaskId) return;
+      const stopped = await forceStopWorkflowTask(instance.workflowTaskId, reason || 'force preempt');
+      trace(taskId, 'child_task_force_stopped', {
+        instanceId: instance.instanceId,
+        workflowTaskId: instance.workflowTaskId,
+        status: stopped?.status,
+        reason: reason || 'force preempt',
+      });
+    })
+  ).catch((error) => {
+    trace(taskId, 'child_task_force_stop_failed', {
+      reason: reason || 'force preempt',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 
   await Promise.all(
     task.instances.map(async (instance) => {
       if (!instance.leaseId) return;
       await releaseInstance(taskId, instance.instanceId, instance.leaseId);
+      trace(taskId, 'preempt_instance_released', {
+        instanceId: instance.instanceId,
+        leaseId: instance.leaseId,
+      });
     })
   ).catch(() => null);
 }
@@ -1013,11 +1030,47 @@ async function optimizePromptViaGemini(input: {
   }
 }
 
-function fallbackOptimizePrompt(prompt: string) {
+function fallbackOptimizePrompt(prompt: string, failureHint?: string) {
   const base = String(prompt || '').trim();
   if (!base) return base;
-  // 兜底：强制声明为图片，避免被当作视频/动图
-  return `${base}\n\n【强制约束】单张静态图片（image only），不要视频/不要动画/不要动图。输出 PNG。`;
+
+  const normalized = base
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+\n/g, '\n');
+
+  const concise = normalized
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !/^#{1,6}\s/.test(line) && !/^[-*]\s/.test(line))
+    .join(' ')
+    .replace(/\s{2,}/g, ' ')
+    .slice(0, 900)
+    .trim();
+
+  // 发生 fast-fail / policy 类问题时，收敛到更安全、稳定的静态图表达，避免重试继续触发风控。
+  const safetyTriggered = /fail_fast|policy|safety|hard|encountered an error|not create images of people|depict a real person/i.test(
+    String(failureHint || '')
+  );
+  const softened = safetyTriggered
+    ? concise
+        .replace(/feminine curves highlighted/gi, 'fashion silhouette emphasis')
+        .replace(/slightly parted lips/gi, 'natural expression')
+        .replace(/allure|魅惑/gi, 'editorial style')
+    : concise;
+
+  const safetySuffix = safetyTriggered
+    ? 'Use an adult, fully clothed, non-sexual fashion portrait. Keep it tasteful and policy-safe.'
+    : '';
+
+  return [
+    softened,
+    safetySuffix,
+    'Single still image only (image only), no video, no animation, no GIF. Output PNG.',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
 }
 
 async function computeRetryPromptWithOptimization(taskId: string, task: GeminiAdsDispatcherTask, item: GeminiAdsDispatcherItem, failureReason: string) {
@@ -1049,7 +1102,7 @@ async function computeRetryPromptWithOptimization(taskId: string, task: GeminiAd
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     trace(taskId, 'prompt_optimization_failed', { itemId: item.id, reason: 'missing_GEMINI_API_KEY' });
-    const next = fallbackOptimizePrompt(item.prompt);
+    const next = fallbackOptimizePrompt(item.prompt, failureReason);
     return {
       prompt: next,
       history: [...history, next],
@@ -1086,7 +1139,7 @@ async function computeRetryPromptWithOptimization(taskId: string, task: GeminiAd
       reason: message,
       model,
     });
-    const next = fallbackOptimizePrompt(item.prompt);
+    const next = fallbackOptimizePrompt(item.prompt, failureReason);
     return {
       prompt: next,
       history: [...history, next],

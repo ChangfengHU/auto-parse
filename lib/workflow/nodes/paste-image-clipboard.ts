@@ -1,7 +1,8 @@
-import type { Page, Locator } from 'playwright';
+import type { ElementHandle, FileChooser, Locator, Page } from 'playwright';
 import type { NodeResult, PasteImageClipboardParams, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
 import { withSystemClipboardLock } from '../clipboard-lock';
+import { proxyFetch } from '@/lib/proxy-fetch';
 import crypto from 'crypto';
 import fs from 'fs/promises';
 import os from 'os';
@@ -14,6 +15,15 @@ type DownloadedImage = {
   base64: string;
   filePath: string;
 };
+
+function formatErrorWithCause(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const parts = [error.message];
+  if ('cause' in error && error.cause instanceof Error) {
+    parts.push(error.cause.message);
+  }
+  return parts.filter(Boolean).join(' · ');
+}
 
 const DEFAULT_ATTACHMENT_SELECTOR = [
   // 以“缩略图/图片预览”来判断
@@ -169,18 +179,44 @@ export async function executePasteImageClipboard(
     };
 
     const downloadToTemp = async (url: string, index: number): Promise<DownloadedImage> => {
-      const response = await fetch(url);
+      let response;
+      try {
+        response = await proxyFetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            Accept: 'image/webp,image/apng,image/avif,image/*,*/*;q=0.8',
+          },
+          timeoutMs: 15_000,
+        });
+      } catch (error) {
+        log.push(`⚠️ [${index + 1}/${imageUrls.length}] 代理下载失败，尝试直连：${formatErrorWithCause(error)}`);
+        try {
+          response = await proxyFetch(url, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              Accept: 'image/webp,image/apng,image/avif,image/*,*/*;q=0.8',
+            },
+            timeoutMs: 15_000,
+            bypassProxy: true,
+          });
+        } catch (directError) {
+          throw new Error(
+            `第 ${index + 1} 张下载失败：${url} · ` +
+              `proxy=${formatErrorWithCause(error)} · direct=${formatErrorWithCause(directError)}`
+          );
+        }
+      }
       if (!response.ok) {
-        throw new Error(`第 ${index + 1} 张下载失败：HTTP ${response.status}`);
+        throw new Error(`第 ${index + 1} 张下载失败：${url} · HTTP ${response.status}`);
       }
       const contentTypeRaw = response.headers.get('content-type') || '';
       const mimeType = contentTypeRaw.split(';')[0].trim() || 'image/png';
       if (!mimeType.startsWith('image/')) {
-        throw new Error(`第 ${index + 1} 张非图片资源：content-type=${contentTypeRaw || 'unknown'}`);
+        throw new Error(`第 ${index + 1} 张非图片资源：${url} · content-type=${contentTypeRaw || 'unknown'}`);
       }
       const bytes = new Uint8Array(await response.arrayBuffer());
       if (bytes.length === 0) {
-        throw new Error(`第 ${index + 1} 张图片内容为空`);
+        throw new Error(`第 ${index + 1} 张图片内容为空：${url}`);
       }
 
       const base64 = Buffer.from(bytes).toString('base64');
@@ -192,7 +228,7 @@ export async function executePasteImageClipboard(
       await fs.writeFile(filePath, bytes);
       tempFiles.push(filePath);
 
-      log.push(`⬇️ [${index + 1}/${imageUrls.length}] 已下载图片：${(bytes.length / 1024).toFixed(1)} KB (${mimeType})`);
+      log.push(`⬇️ [${index + 1}/${imageUrls.length}] 已下载图片：${(bytes.length / 1024).toFixed(1)} KB (${mimeType}) <- ${url}`);
       return { url, mimeType, bytes, base64, filePath };
     };
 
@@ -201,24 +237,30 @@ export async function executePasteImageClipboard(
 
     const targetHandle = await target.elementHandle();
     if (!targetHandle) throw new Error('无法获取输入框元素句柄');
+    const targetBox = await target.boundingBox().catch(() => null);
 
     const rootHandle = (await targetHandle.evaluateHandle((el) => {
       return (
+        el.closest('input-container') ||
+        el.closest('[class*="input-container"]') ||
+        el.closest('input-area-v2') ||
+        el.closest('[class*="input-area"]') ||
+        el.closest('[class*="composer"], [data-testid*="composer"]') ||
         el.closest('form') ||
         el.closest('footer') ||
         el.closest('[role="dialog"]') ||
         el.closest('main') ||
         document.body
       );
-    })) as any;
+    })) as ElementHandle<Element>;
 
     const getAttachmentSnapshot = async (): Promise<{ count: number; signature: string }> => {
       if (!verifyAttachment) return { count: 0, signature: '' };
       const selector = attachIndicatorSelector;
       const data = await rootHandle
-        .evaluate((root: any, sel: string) => {
+        .evaluate((root: Element, sel: string) => {
           try {
-            const nodes = Array.from(root?.querySelectorAll?.(sel) ?? []) as any[];
+            const nodes = Array.from(root.querySelectorAll(sel));
             const signatureParts = nodes.map((el) => {
               const tag = String(el?.tagName || '').toLowerCase();
               const src = (el?.getAttribute && el.getAttribute('src')) || '';
@@ -489,7 +531,9 @@ export async function executePasteImageClipboard(
                 try {
                   return new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
                 } catch {
-                  const ev = new Event(type, { bubbles: true, cancelable: true }) as any;
+                  const ev = new Event(type, { bubbles: true, cancelable: true }) as Event & {
+                    dataTransfer?: DataTransfer;
+                  };
                   Object.defineProperty(ev, 'dataTransfer', { value: dt });
                   return ev;
                 }
@@ -543,44 +587,97 @@ export async function executePasteImageClipboard(
           '[aria-label*="照片" i]',
         ];
 
+        const rankedVisibleLocators = async (
+          selector: string,
+          limit = 8
+        ): Promise<Array<{ locator: Locator; label: string; score: number }>> => {
+          let locator: Locator;
+          try {
+            locator = page.locator(selector);
+          } catch {
+            return [];
+          }
+          const count = Math.min(await locator.count().catch(() => 0), 40);
+          const candidates: Array<{ locator: Locator; label: string; score: number }> = [];
+
+          for (let index = 0; index < count; index++) {
+            const candidate = locator.nth(index);
+            const visible = await candidate.isVisible().catch(() => false);
+            if (!visible) continue;
+
+            const box = await candidate.boundingBox().catch(() => null);
+            let score = index;
+            if (targetBox && box) {
+              const targetCenterX = targetBox.x + targetBox.width / 2;
+              const targetCenterY = targetBox.y + targetBox.height / 2;
+              const candidateCenterX = box.x + box.width / 2;
+              const candidateCenterY = box.y + box.height / 2;
+              score = Math.hypot(candidateCenterX - targetCenterX, candidateCenterY - targetCenterY);
+            }
+
+            candidates.push({
+              locator: candidate,
+              label: `${selector}#${index + 1}/${count}`,
+              score,
+            });
+          }
+
+          return candidates.sort((a, b) => a.score - b.score).slice(0, limit);
+        };
+
         const tryUploadViaFileChooser = async (): Promise<boolean> => {
           const clickSources = openUploaderSelector ? [openUploaderSelector, ...uploadButtonCandidates] : uploadButtonCandidates;
 
           // Google/Gemini 常见：入口按钮先打开菜单，再点“从电脑上传/选择文件”才会触发 filechooser
           const menuItemCandidates = [
-            'text=/upload files/i',
             '[role="menuitem"]:has-text("Upload files")',
+            '[role="menuitem"]:has-text("Upload file")',
+            '[role="menuitem"]:has-text("Upload from computer")',
+            '[role="menuitem"]:has-text("Choose file")',
+            '[role="menuitem"]:has-text("Select file")',
+            'text=/upload files/i',
+            'text=/upload file/i',
             'text=/upload from computer/i',
             'text=/choose file/i',
             'text=/select file/i',
             'text=从电脑上传',
+            'text=从计算机上传',
+            'text=从设备上传',
             'text=上传文件',
             'text=选择文件',
             'text=本地上传',
             '[role="menuitem"]:has-text("Upload")',
             '[role="menuitem"]:has-text("上传")',
+            '[role="menuitem"]:has-text("文件")',
             '[role="menuitem"]:has-text("图片")',
             '[role="option"]:has-text("Upload")',
             '[role="option"]:has-text("上传")',
           ];
 
-          const clickToFileChooser = async (entrySelector: string): Promise<import('playwright').FileChooser | null> => {
-            const locator = page.locator(entrySelector).first();
-            const visible = await locator.isVisible().catch(() => false);
-            if (!visible) return null;
-            const chooserPromise = page.waitForEvent('filechooser', { timeout: 1800 }).catch(() => null);
-            const clicked = await locator.click({ timeout: 1800 }).then(() => true).catch(() => false);
-            const chooser = await chooserPromise;
-            if (clicked && chooser) return chooser;
+          const clickToFileChooser = async (entrySelector: string): Promise<FileChooser | null> => {
+            const entries = await rankedVisibleLocators(entrySelector);
+            if (entries.length === 0) return null;
 
-            for (const menuSel of menuItemCandidates) {
-              const item = page.locator(menuSel).first();
-              const itemVisible = await item.isVisible().catch(() => false);
-              if (!itemVisible) continue;
-              const chooserPromise2 = page.waitForEvent('filechooser', { timeout: 1400 }).catch(() => null);
-              const clicked2 = await item.click({ timeout: 1400 }).then(() => true).catch(() => false);
-              const chooser2 = await chooserPromise2;
-              if (clicked2 && chooser2) return chooser2;
+            for (const entry of entries) {
+              log.push(`🔘 尝试上传入口：${entry.label}`);
+              const chooserPromise = page.waitForEvent('filechooser', { timeout: 1800 }).catch(() => null);
+              const clicked = await entry.locator.click({ timeout: 1800 }).then(() => true).catch(() => false);
+              const chooser = await chooserPromise;
+              if (clicked && chooser) return chooser;
+              if (!clicked) continue;
+
+              for (const menuSel of menuItemCandidates) {
+                const menuItems = await rankedVisibleLocators(menuSel, 4);
+                for (const item of menuItems) {
+                  const chooserPromise2 = page.waitForEvent('filechooser', { timeout: 1600 }).catch(() => null);
+                  const clicked2 = await item.locator.click({ timeout: 1600 }).then(() => true).catch(() => false);
+                  const chooser2 = await chooserPromise2;
+                  if (clicked2 && chooser2) {
+                    log.push(`📂 上传菜单项触发 filechooser：${item.label}`);
+                    return chooser2;
+                  }
+                }
+              }
             }
 
             return null;
@@ -622,15 +719,17 @@ export async function executePasteImageClipboard(
           const ok = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
           if (ok) return true;
 
-          // 没传 openUploaderSelector 时，做一轮启发式点击，常见于 Gemini（先点“添加图片/上传”才挂 input）
-          for (const cand of uploadButtonCandidates) {
-            const btn = page.locator(cand).first();
-            const clicked = await btn.click({ timeout: 800 }).then(() => true).catch(() => false);
-            if (!clicked) continue;
-            const appeared = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
-            if (appeared) {
-              log.push(`🧩 自动打开上传器成功：${cand}`);
-              return true;
+          const clickSources = openUploaderSelector ? [openUploaderSelector, ...uploadButtonCandidates] : uploadButtonCandidates;
+          for (const cand of clickSources) {
+            const buttons = await rankedVisibleLocators(cand);
+            for (const btn of buttons) {
+              const clicked = await btn.locator.click({ timeout: 800 }).then(() => true).catch(() => false);
+              if (!clicked) continue;
+              const appeared = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
+              if (appeared) {
+                log.push(`🧩 自动打开上传器成功：${btn.label}`);
+                return true;
+              }
             }
           }
 

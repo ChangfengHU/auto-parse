@@ -1,0 +1,102 @@
+{
+  "id": "ed3aab68-5c90-4dd1-9545-62ad414d0169",
+  "name": "gemini流程管理-ads-图片编辑",
+  "description": "Restored non-ads baseline from current ads workflow",
+  "nodes": [
+    {
+      "type": "navigate",
+      "label": "导航",
+      "params": {
+        "url": "https://gemini.google.com/",
+        "adsApiUrl": "http://127.0.0.1:50325",
+        "waitUntil": "domcontentloaded",
+        "useAdsPower": false,
+        "adsProfileId": "",
+        "adsProxyServer": "",
+        "adsManualCdpUrl": ""
+      },
+      "waitAfter": {
+        "action": "appeared",
+        "enabled": true,
+        "timeout": 60000,
+        "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]"
+      }
+    },
+    {
+      "type": "click",
+      "label": "点击",
+      "params": {
+        "text": "Create image",
+        "selector": ""
+      },
+      "waitAfter": {
+        "enabled": false,
+        "timeout": 100000,
+        "selector": "img[src^=\"blob:\"], img[src^=\"data:image\"], button[aria-label=\"Copy image\"]",
+        "delaySeconds": 3
+      },
+      "continueOnError": true
+    },
+    {
+      "type": "paste_image_clipboard",
+      "label": "粘贴参考图（自动）",
+      "params": {
+        "imageUrl": "",
+        "imageUrls": "{{sourceImageUrls}}",
+        "outputVar": "pastedImageUrls",
+        "targetSelector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]",
+        "uploadFallback": true,
+        "waitAfterPaste": 1500,
+        "waitAfterUpload": 2500,
+        "verifyAttachment": true,
+        "fileInputSelector": "",
+        "openUploaderSelector": "",
+        "attachIndicatorSelector": ""
+      }
+    },
+    {
+      "type": "text_input",
+      "label": "文本输入",
+      "params": {
+        "value": "{{noteUrl}}",
+        "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]"
+      }
+    },
+    {
+      "type": "click",
+      "label": "点击",
+      "params": {
+        "text": "",
+        "selector": "button[aria-label=\"Send message\"], button[aria-label*=\"发送\"], .send-button-container button"
+      },
+      "waitAfter": {
+        "enabled": true,
+        "timeout": 180000,
+        "selector": "[aria-label=\"Copy image\"], button[aria-label*=\"复制图片\"], button[aria-label*=\"Copy image\"], button:has-text(\"复制\"), img[src^=\"blob:\"], img[src^=\"data:image\"]",
+        "delaySeconds": 3
+      }
+    },
+    {
+      "type": "extract_image_clipboard",
+      "label": "📋 剪贴板高清提取",
+      "params": {
+        "ossPath": "gemini-images/{{timestamp}}.png",
+        "outputVar": "imageUrl",
+        "uploadToOSS": true,
+        "waitAfterCopy": 1500,
+        "copyButtonSelector": "[aria-label=\"Copy image\"], button[aria-label*=\"复制图片\"], button[aria-label*=\"Copy image\"], button:has-text(\"复制\")"
+      },
+      "waitAfter": {
+        "enabled": true
+      },
+      "continueOnError": false
+    }
+  ],
+  "vars": [
+    "browserInstanceId",
+    "browserWsUrl",
+    "noteUrl",
+    "sourceImageUrl",
+    "sourceImageUrls"
+  ]
+}

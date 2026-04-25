@@ -1,17 +1,8 @@
 {
-  "id": "douyin-publish",
-  "name": "抖音视频发布",
+  "id": "668f2580-ec40-4488-846b-c559b74b8056",
+  "name": "抖音视频发布 (副本)",
   "description": "上传视频到抖音创作者平台并发布",
   "nodes": [
-    {
-      "type": "material",
-      "label": "素材节点",
-      "params": {
-        "materialId": "",
-        "outputTitleVar": "title",
-        "outputVideoVar": "videoUrl"
-      }
-    },
     {
       "type": "navigate",
       "label": "打开创作者首页",
@@ -126,5 +117,8 @@
       "params": {}
     }
   ],
-  "vars": []
+  "vars": [
+    "videoUrl",
+    "title"
+  ]
 }

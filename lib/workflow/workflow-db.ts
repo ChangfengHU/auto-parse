@@ -4,7 +4,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { WorkflowDef } from './types';
-import { normalizeDouyinPublishWorkflow } from './workflows/douyin-publish';
+import { douyinPublishWorkflow, normalizeDouyinPublishWorkflow } from './workflows/douyin-publish';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_KEY =
@@ -186,6 +186,23 @@ export interface WorkflowRow {
   updated_at: string;
 }
 
+export interface ListWorkflowsPageOptions {
+  limit?: number;
+  cursor?: string;
+  page?: number;
+  q?: string;
+  localOnly?: boolean;
+}
+
+export interface ListWorkflowsPageResult {
+  source: 'supabase' | 'local';
+  items: WorkflowRow[];
+  nextCursor: string | null;
+  page: number;
+  totalPages: number;
+  total: number;
+}
+
 function rowToDef(row: WorkflowRow): WorkflowDef {
   return normalizeGeminiAutoEnterWorkflow(normalizeDouyinPublishWorkflow({
     id: row.id,
@@ -220,13 +237,297 @@ function formatFetchError(e: unknown): string {
   return parts.join(' · ');
 }
 
-export async function listWorkflows(): Promise<WorkflowRow[]> {
-  const res = await fetch(
-    `${SUPABASE_URL}/rest/v1/${TABLE}?select=*&order=created_at.asc`,
-    { headers: headers() }
-  );
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+function ensureLocalWorkflowDir() {
+  fs.mkdirSync(LOCAL_WORKFLOW_DIR, { recursive: true });
+}
+
+function localWorkflowFilePath(id: string) {
+  return path.join(LOCAL_WORKFLOW_DIR, `${id}.json`);
+}
+
+function writeWorkflowToLocalFile(row: WorkflowRow) {
+  try {
+    const def = rowToDef(row);
+    ensureLocalWorkflowDir();
+    fs.writeFileSync(localWorkflowFilePath(def.id), JSON.stringify(def, null, 2), 'utf8');
+  } catch (e) {
+    console.warn('[workflow-db] 写入本地工作流镜像失败', row.id, e);
+  }
+}
+
+function removeLocalWorkflowFile(id: string) {
+  try {
+    const file = localWorkflowFilePath(id);
+    if (fs.existsSync(file)) {
+      fs.unlinkSync(file);
+    }
+  } catch (e) {
+    console.warn('[workflow-db] 删除本地工作流镜像失败', id, e);
+  }
+}
+
+function syncRemoteWorkflowsToLocalFiles(rows: WorkflowRow[]) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  for (const row of rows) {
+    writeWorkflowToLocalFile(row);
+  }
+}
+
+function loadAllWorkflowsFromLocalFiles(): WorkflowRow[] {
+  try {
+    if (!fs.existsSync(LOCAL_WORKFLOW_DIR)) return [];
+    const files = fs.readdirSync(LOCAL_WORKFLOW_DIR)
+      .filter((file) => file.endsWith('.json'))
+      .sort();
+
+    return files.flatMap((file) => {
+      try {
+        const fp = path.join(LOCAL_WORKFLOW_DIR, file);
+        const parsed = JSON.parse(fs.readFileSync(fp, 'utf8')) as Partial<WorkflowDef> & { steps?: unknown };
+        const raw = Array.isArray(parsed.nodes)
+          ? parsed as WorkflowDef
+          : parsed.id === 'douyin-publish'
+            ? douyinPublishWorkflow
+            : null;
+        if (!raw) {
+          console.warn('[workflow-db] 跳过旧格式或无效本地工作流文件', file);
+          return [];
+        }
+        const normalized = normalizeGeminiAutoEnterWorkflow(normalizeDouyinPublishWorkflow(raw));
+        const timestamp = new Date(0).toISOString();
+        return [{
+          id: normalized.id,
+          name: normalized.name,
+          description: normalized.description ?? '',
+          nodes: normalized.nodes,
+          vars: normalized.vars ?? [],
+          created_at: timestamp,
+          updated_at: timestamp,
+        }];
+      } catch (e) {
+        console.warn('[workflow-db] 读取本地工作流列表项失败', file, e);
+        return [];
+      }
+    });
+  } catch (e) {
+    console.warn('[workflow-db] 读取本地工作流列表失败', e);
+    return [];
+  }
+}
+
+function mergeWorkflowRows(remoteRows: WorkflowRow[], localRows: WorkflowRow[]): WorkflowRow[] {
+  const merged = new Map<string, WorkflowRow>();
+
+  for (const row of remoteRows) {
+    merged.set(row.id, row);
+  }
+
+  for (const row of localRows) {
+    if (!merged.has(row.id)) {
+      merged.set(row.id, row);
+    }
+  }
+
+  return Array.from(merged.values()).sort((a, b) => {
+    const aTime = new Date(a.updated_at || a.created_at || 0).getTime();
+    const bTime = new Date(b.updated_at || b.created_at || 0).getTime();
+    return bTime - aTime;
+  });
+}
+
+function clampLimit(limit?: number): number {
+  if (!Number.isFinite(limit)) return 50;
+  return Math.max(1, Math.min(200, Math.floor(limit as number)));
+}
+
+function clampPage(page?: number): number {
+  if (!Number.isFinite(page)) return 1;
+  return Math.max(1, Math.floor(page as number));
+}
+
+function matchesWorkflowQuery(row: WorkflowRow, q?: string): boolean {
+  const keyword = String(q || '').trim().toLowerCase();
+  if (!keyword) return true;
+  const haystacks = [row.id, row.name, row.description].map((text) => String(text || '').toLowerCase());
+  return haystacks.some((text) => text.includes(keyword));
+}
+
+function paginateRows(
+  rows: WorkflowRow[],
+  limit: number,
+  cursor?: string,
+  q?: string,
+  page?: number
+): ListWorkflowsPageResult {
+  const sorted = [...rows].sort((a, b) => {
+    const aTs = new Date(a.updated_at || a.created_at || 0).getTime();
+    const bTs = new Date(b.updated_at || b.created_at || 0).getTime();
+    return bTs - aTs;
+  });
+  const byQuery = sorted.filter((row) => matchesWorkflowQuery(row, q));
+  const total = byQuery.length;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+  const safePage = Math.min(clampPage(page), totalPages);
+  const offset = (safePage - 1) * limit;
+  const filtered = cursor
+    ? byQuery.filter((row) => new Date(row.updated_at || row.created_at || 0).getTime() < new Date(cursor).getTime())
+    : byQuery.slice(offset, offset + limit);
+  const items = filtered.slice(0, limit);
+  const nextCursor = items.length > 0 ? (items[items.length - 1].updated_at || items[items.length - 1].created_at || null) : null;
+  return { source: 'local', items, nextCursor, page: safePage, totalPages, total };
+}
+
+function parseContentRangeTotal(contentRange: string | null): number | null {
+  if (!contentRange) return null;
+  const parts = contentRange.split('/');
+  if (parts.length !== 2) return null;
+  const total = Number(parts[1]);
+  if (!Number.isFinite(total)) return null;
+  return Math.max(0, Math.floor(total));
+}
+
+async function syncLocalWorkflowsToSupabase(localRows: WorkflowRow[], remoteRows: WorkflowRow[]) {
+  if (!SUPABASE_URL.trim() || localRows.length === 0) return;
+
+  const remoteIds = new Set(remoteRows.map((row) => row.id));
+  const missingLocals = localRows.filter((row) => !remoteIds.has(row.id));
+  if (missingLocals.length === 0) return;
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}?on_conflict=id`, {
+      method: 'POST',
+      headers: headers({ Prefer: 'resolution=merge-duplicates,return=minimal' }),
+      body: JSON.stringify(missingLocals),
+    });
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+    console.warn(
+      '[workflow-db] 已将本地缺失工作流同步到 Supabase',
+      missingLocals.map((row) => row.id)
+    );
+  } catch (e) {
+    console.warn(
+      '[workflow-db] 本地工作流补同步到 Supabase 失败，已忽略',
+      formatFetchError(e)
+    );
+  }
+}
+
+export async function listWorkflows(options?: { localOnly?: boolean }): Promise<WorkflowRow[]> {
+  const local = () => loadAllWorkflowsFromLocalFiles();
+  const localOnly = options?.localOnly === true;
+
+  if (localOnly || !SUPABASE_URL.trim()) {
+    return local();
+  }
+
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/${TABLE}?select=*&order=created_at.asc`,
+      { headers: headers() }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    const remoteRows = await res.json() as WorkflowRow[];
+    syncRemoteWorkflowsToLocalFiles(remoteRows);
+    const localRows = local();
+    void syncLocalWorkflowsToSupabase(localRows, remoteRows);
+    return mergeWorkflowRows(remoteRows, localRows);
+  } catch (e) {
+    const fallback = local();
+    if (fallback.length > 0) {
+      console.warn(
+        '[workflow-db] Supabase 请求失败，已使用本地工作流列表',
+        formatFetchError(e)
+      );
+      return fallback;
+    }
+    throw new Error(
+      `无法从 Supabase 拉取工作流列表（且无本地 lib/rpa/workflows/*.json）：${formatFetchError(e)}。请检查 SUPABASE_URL、SUPABASE_SERVICE_ROLE_KEY 与网络。`
+    );
+  }
+}
+
+export async function listWorkflowsPage(
+  options: ListWorkflowsPageOptions = {}
+): Promise<ListWorkflowsPageResult> {
+  const localRows = loadAllWorkflowsFromLocalFiles();
+  const limit = clampLimit(options.limit);
+  const cursor = options.cursor?.trim() || undefined;
+  const page = clampPage(options.page);
+  const q = options.q?.trim() || undefined;
+  const localOnly = options.localOnly === true;
+
+  if (localOnly || !SUPABASE_URL.trim()) {
+    return paginateRows(localRows, limit, cursor, q, page);
+  }
+
+  try {
+    const requestPage = async (targetPage: number) => {
+      const url = new URL(`${SUPABASE_URL}/rest/v1/${TABLE}`);
+      const offset = (targetPage - 1) * limit;
+      // 列表页仅需轻量字段，避免把 vars 等大字段一并拉回
+      url.searchParams.set('select', 'id,name,description,nodes,created_at,updated_at');
+      url.searchParams.set('order', 'updated_at.desc');
+      url.searchParams.set('limit', String(limit));
+      url.searchParams.set('offset', String(offset));
+      if (cursor) {
+        url.searchParams.set('updated_at', `lt.${cursor}`);
+      }
+      if (q) {
+        // Supabase ilike 需要转义特殊字符
+        const escaped = q.replace(/[%_,]/g, (m) => `\\${m}`);
+        url.searchParams.set('or', `(id.ilike.*${escaped}*,name.ilike.*${escaped}*,description.ilike.*${escaped}*)`);
+      }
+      const res = await fetch(url.toString(), {
+        headers: headers({ Prefer: 'count=exact,return=representation' }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const items = await res.json() as WorkflowRow[];
+      const total = parseContentRangeTotal(res.headers.get('content-range')) ?? items.length;
+      return { items, total };
+    };
+
+    let requestedPage = page;
+    let { items: remoteRows, total } = await requestPage(requestedPage);
+    let totalPages = Math.max(1, Math.ceil(total / limit));
+    const safePage = Math.min(requestedPage, totalPages);
+    if (safePage !== requestedPage) {
+      requestedPage = safePage;
+      const retry = await requestPage(requestedPage);
+      remoteRows = retry.items;
+      total = retry.total;
+      totalPages = Math.max(1, Math.ceil(total / limit));
+    }
+
+    syncRemoteWorkflowsToLocalFiles(remoteRows);
+
+    // 保持与 listWorkflows 一致：后台异步补同步本地缺失项
+    void syncLocalWorkflowsToSupabase(localRows, remoteRows);
+
+    const nextCursor = remoteRows.length > 0
+      ? (remoteRows[remoteRows.length - 1].updated_at || remoteRows[remoteRows.length - 1].created_at || null)
+      : null;
+    return {
+      source: 'supabase',
+      items: remoteRows,
+      nextCursor,
+      page: requestedPage,
+      totalPages,
+      total,
+    };
+  } catch (e) {
+    if (localRows.length > 0) {
+      console.warn(
+        '[workflow-db] Supabase 分页请求失败，已使用本地工作流列表',
+        formatFetchError(e)
+      );
+      return paginateRows(localRows, limit, cursor, q, page);
+    }
+    throw new Error(
+      `无法从 Supabase 拉取工作流分页列表（且无本地 lib/rpa/workflows/*.json）：${formatFetchError(e)}。请检查 SUPABASE_URL、SUPABASE_SERVICE_ROLE_KEY 与网络。`
+    );
+  }
 }
 
 export async function getWorkflow(id: string): Promise<WorkflowDef | null> {
@@ -243,7 +544,10 @@ export async function getWorkflow(id: string): Promise<WorkflowDef | null> {
     );
     if (!res.ok) throw new Error(await res.text());
     const rows: WorkflowRow[] = await res.json();
-    if (rows[0]) return rowToDef(rows[0]);
+    if (rows[0]) {
+      writeWorkflowToLocalFile(rows[0]);
+      return rowToDef(rows[0]);
+    }
     const fallback = local();
     if (fallback) {
       console.warn('[workflow-db] Supabase 无此 id，已使用本地', id);
@@ -281,6 +585,9 @@ export async function createWorkflow(def: Omit<WorkflowDef, 'id'> & { id?: strin
   });
   if (!res.ok) throw new Error(await res.text());
   const rows: WorkflowRow[] = await res.json();
+  if (rows[0]) {
+    writeWorkflowToLocalFile(rows[0]);
+  }
   return rowToDef(rows[0]);
 }
 
@@ -295,6 +602,9 @@ export async function updateWorkflow(id: string, patch: Partial<Omit<WorkflowDef
   );
   if (!res.ok) throw new Error(await res.text());
   const rows: WorkflowRow[] = await res.json();
+  if (rows[0]) {
+    writeWorkflowToLocalFile(rows[0]);
+  }
   return rowToDef(rows[0]);
 }
 
@@ -304,6 +614,7 @@ export async function deleteWorkflow(id: string): Promise<void> {
     { method: 'DELETE', headers: headers() }
   );
   if (!res.ok) throw new Error(await res.text());
+  removeLocalWorkflowFile(id);
 }
 
 export async function copyWorkflow(id: string): Promise<WorkflowDef> {

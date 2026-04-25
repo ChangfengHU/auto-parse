@@ -1,0 +1,89 @@
+{
+  "id": "4c583b7f-d248-4a49-a726-fb24fe499c38",
+  "name": "测试",
+  "description": "",
+  "nodes": [
+    {
+      "type": "navigate",
+      "label": "导航",
+      "params": {
+        "url": "http://localhost:1007/analysis/xhs",
+        "waitUntil": "domcontentloaded"
+      }
+    },
+    {
+      "type": "text_input",
+      "label": "文本输入",
+      "params": {
+        "value": "https://www.xiaohongshu.com/explore/69bd5ea1000000001f001ff1?xsec_token=ABqIZkUgLw8j5t4-Kc3jrU-cp9O4UhZiJqFUCpLxVwpsw=&xsec_source=pc_feed",
+        "selector": "body > div.flex.min-h-screen > main > div > div.flex.gap-2 > input"
+      }
+    },
+    {
+      "type": "click",
+      "label": "点击",
+      "params": {
+        "text": "分析"
+      }
+    },
+    {
+      "type": "localhost_image_download_debug",
+      "label": "本地图片下载调试",
+      "params": {
+        "pageUrl": "http://localhost:1007/analysis/xhs",
+        "maxImages": 5,
+        "outputVar": "debugImageUrls",
+        "imageSelector": "img",
+        "imageContainerSelector": "div.rounded-lg.overflow-hidden.border"
+      }
+    },
+    {
+      "type": "localhost_image_download",
+      "label": "本地图片批量下载",
+      "params": {
+        "pageUrl": "http://localhost:1007/analysis/xhs",
+        "waitTime": 3000,
+        "maxImages": 2,
+        "ossPrefix": "xhs/localhost-download",
+        "outputVar": "ossImageUrls",
+        "imageSelector": "img",
+        "downloadTimeout": 10000,
+        "imageContainerSelector": "div.rounded-lg.overflow-hidden.border"
+      }
+    },
+    {
+      "type": "extract_image",
+      "label": "提取图片",
+      "params": {
+        "index": 1,
+        "ossPath": "extract-images/{{timestamp}}.jpg",
+        "selector": "img",
+        "outputVar": "imageUrl",
+        "uploadToOSS": true
+      }
+    },
+    {
+      "type": "localhost_image_download",
+      "label": "本地图片批量下载",
+      "params": {
+        "pageUrl": "http://localhost:1007/analysis/xhs",
+        "waitTime": 3000,
+        "maxImages": 10,
+        "ossPrefix": "xhs/localhost-download",
+        "outputVar": "ossImageUrls",
+        "imageSelector": "img",
+        "downloadTimeout": 10000,
+        "imageContainerSelector": ".rounded-xl.overflow-hidden.border"
+      }
+    },
+    {
+      "type": "text_input",
+      "label": "文本输入",
+      "params": {
+        "value": "",
+        "selector": ""
+      }
+    }
+  ],
+  "vars": []
+}

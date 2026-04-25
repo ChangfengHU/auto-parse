@@ -15,6 +15,10 @@ type BackendConfig = {
   browser: {
     headless: boolean;
   };
+  upload: {
+    provider: 'oss' | 'supabase';
+    supabaseBucket: string;
+  };
 };
 
 type BrowserStatus = {
@@ -26,10 +30,21 @@ type BrowserStatus = {
   douyinLoggedIn: boolean;
 };
 
-type TabKey = 'xhs' | 'ads';
+function normalizeConfig(input: BackendConfig): BackendConfig {
+  return {
+    ...input,
+    upload: {
+      provider: input.upload?.provider ?? 'oss',
+      supabaseBucket: input.upload?.supabaseBucket || 'filestore',
+    },
+  };
+}
+
+type TabKey = 'xhs' | 'upload' | 'ads';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'xhs', label: '小红书解析后端' },
+  { key: 'upload', label: '上传配置' },
   { key: 'ads', label: 'Ads Dispatcher' },
 ];
 
@@ -61,7 +76,7 @@ export default function BackendSettingsPage() {
       const res = await fetch('/api/system/backend-config', { cache: 'no-store' });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || '加载配置失败');
-      setConfig(data.data);
+      setConfig(normalizeConfig(data.data));
       setConfigPath(data.meta?.path || '');
       await loadBrowserStatus();
     } catch (error: unknown) {
@@ -85,7 +100,7 @@ export default function BackendSettingsPage() {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || '保存失败');
-      setConfig(data.data);
+      setConfig(normalizeConfig(data.data));
       setConfigPath(data.meta?.path || '');
       setMessage('✓ 配置已保存');
       await loadBrowserStatus();
@@ -132,7 +147,7 @@ export default function BackendSettingsPage() {
       const res = await fetch('/api/system/backend-config', { method: 'DELETE' });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || '重置失败');
-      setConfig(data.data);
+      setConfig(normalizeConfig(data.data));
       setConfigPath(data.meta?.path || '');
       setMessage('✓ 已恢复默认配置');
       await loadBrowserStatus();
@@ -300,6 +315,70 @@ export default function BackendSettingsPage() {
                         >
                           刷新浏览器状态
                         </button>
+                      </div>
+                    </section>
+                  </>
+                )}
+
+                {/* ── Tab: 上传配置 ── */}
+                {tab === 'upload' && (
+                  <>
+                    <section className="space-y-4">
+                      <div>
+                        <h2 className="text-base font-semibold text-foreground">上传存储</h2>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          控制素材上传的默认存储后端。默认使用 OSS；切到 Supabase 后使用 Storage bucket。
+                        </p>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={() => setConfig({ ...config, upload: { ...config.upload, provider: 'oss' } })}
+                          className={`rounded-xl border p-4 text-left transition ${
+                            config.upload.provider === 'oss' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-semibold text-foreground">OSS</span>
+                            <span className="text-[10px] bg-primary/15 text-primary rounded px-1.5 py-0.5 font-medium">默认</span>
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            使用当前阿里云 OSS 配置，兼容现有素材上传流程。
+                          </div>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setConfig({ ...config, upload: { ...config.upload, provider: 'supabase' } })}
+                          className={`rounded-xl border p-4 text-left transition ${
+                            config.upload.provider === 'supabase' ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/30'
+                          }`}
+                        >
+                          <div className="text-sm font-semibold text-foreground">Supabase Storage</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            上传到 Supabase Storage，适合统一走当前 Supabase 项目。
+                          </div>
+                        </button>
+                      </div>
+
+                      <label className="block space-y-1.5">
+                        <span className="text-sm font-medium text-foreground">Supabase Bucket</span>
+                        <input
+                          value={config.upload.supabaseBucket}
+                          onChange={(e) => setConfig({ ...config, upload: { ...config.upload, supabaseBucket: e.target.value } })}
+                          placeholder="filestore"
+                          className="w-full rounded-xl border border-border bg-background px-4 py-2.5 text-sm outline-none focus:border-primary"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          当前建议 bucket：<code>filestore</code>。切换为 Supabase Storage 时会使用这个 bucket。
+                        </p>
+                      </label>
+
+                      <div className="rounded-xl bg-muted/40 p-3 text-xs text-muted-foreground space-y-1">
+                        <div>当前上传后端：{config.upload.provider === 'supabase' ? 'Supabase Storage' : 'OSS'}</div>
+                        <div>Supabase bucket：{config.upload.supabaseBucket || 'filestore'}</div>
+                        <div>配置保存后写入 .runtime/backend-config.json；默认值仍为 OSS。</div>
                       </div>
                     </section>
                   </>

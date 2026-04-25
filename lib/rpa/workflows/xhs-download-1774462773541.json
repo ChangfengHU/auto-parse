@@ -1,0 +1,40 @@
+{
+  "id": "xhs-download-1774462773541",
+  "name": "小红书图片下载",
+  "description": "打开小红书帖子，自动翻页提取所有高清图片并上传到 OSS",
+  "nodes": [
+    {
+      "type": "navigate",
+      "label": "导航",
+      "params": {
+        "url": "https://gemini.google.com/app/c68adda30d2a209d",
+        "waitUntil": "domcontentloaded"
+      }
+    },
+    {
+      "type": "extract_image_clipboard",
+      "label": "📋 剪贴板高清提取",
+      "params": {
+        "ossPath": "gemini-images/{{timestamp}}.png",
+        "outputVar": "imageUrl",
+        "uploadToOSS": true,
+        "waitAfterCopy": 3000,
+        "copyButtonSelector": "[aria-label=\"Copy image\"]"
+      }
+    },
+    {
+      "type": "extract_image",
+      "label": "提取图片",
+      "params": {
+        "index": 0,
+        "ossPath": "extract-images/{{timestamp}}.jpg",
+        "selector": "#model-response-message-contentr_dab38ff570cf1317 > p > div > response-element > generated-image > single-image > div > div > button > img",
+        "outputVar": "imageUrl",
+        "uploadToOSS": true
+      }
+    }
+  ],
+  "vars": [
+    "noteUrl"
+  ]
+}

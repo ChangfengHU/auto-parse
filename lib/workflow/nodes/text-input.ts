@@ -13,6 +13,28 @@ export async function executeTextInput(
   ctx: WorkflowContext
 ): Promise<NodeResult> {
   const log: string[] = [];
+  const sendButtonSelectors = [
+    'button[aria-label="Submit"]',
+    'button[aria-label*="Submit" i]',
+    'button[aria-label="Send message"]',
+    'button[aria-label*="Send" i]',
+    'button[aria-label*="发送"]',
+    '.send-button-container button',
+  ];
+  const stopButtonSelectors = [
+    'button[aria-label*="Stop" i]',
+    'button[aria-label*="Stop response" i]',
+    'button[aria-label*="停止"]',
+    'button[aria-label*="停止回答"]',
+  ];
+
+  const anyVisible = async (selectors: string[]): Promise<boolean> => {
+    for (const selector of selectors) {
+      const visible = await page.locator(selector).first().isVisible().catch(() => false);
+      if (visible) return true;
+    }
+    return false;
+  };
 
   const requestedMode = (params as Partial<TextInputParams>).inputMode;
   const useHumanType = ctx.humanOptions?.humanType ?? false;
@@ -63,13 +85,7 @@ export async function executeTextInput(
 
     /** Gemini/Angular CDK：tooltip 在隐藏池里；查可见 button 的 aria-label（Stop/停止…）或 aria-describedby→「停止回答」「Stop response」。 */
     const stopButtonVisibleIncludingCdkDescribedby = async (): Promise<boolean> => {
-      const byLabel = await page
-        .locator(
-          'button[aria-label*="Stop" i], button[aria-label*="Stop response" i], button[aria-label*="停止"], button[aria-label*="停止回答"]'
-        )
-        .first()
-        .isVisible()
-        .catch(() => false);
+      const byLabel = await anyVisible(stopButtonSelectors);
       if (byLabel) return true;
       return page.evaluate(() => {
         const cdkTipStop = (text: string) => /停止回答|stop\s+response/i.test(text.trim());
@@ -102,13 +118,24 @@ export async function executeTextInput(
     };
 
     const readSubmitMarkers = async () => {
-      const sendVisible = await page
-        .locator('button[aria-label="Submit"], button[aria-label*="Submit" i], button[aria-label="Send message"], button[aria-label*="Send" i], button[aria-label*="发送"], .send-button-container button')
-        .last()
-        .isVisible()
-        .catch(() => false);
+      const sendVisible = await anyVisible(sendButtonSelectors);
       const stopVisible = await stopButtonVisibleIncludingCdkDescribedby();
       return { sendVisible, stopVisible };
+    };
+
+    const tryClickSendButton = async (): Promise<boolean> => {
+      for (const selector of sendButtonSelectors) {
+        try {
+          const btn = page.locator(selector).first();
+          const visible = await btn.isVisible({ timeout: 500 }).catch(() => false);
+          if (!visible) continue;
+          await btn.click({ timeout: 2000, force: true });
+          return true;
+        } catch {
+          // try next selector
+        }
+      }
+      return false;
     };
 
     if (isContentEditable) {
@@ -178,14 +205,30 @@ export async function executeTextInput(
         const untilRaw = String(params.autoEnterPollUntilSelector ?? '').trim();
         const untilSel =
           untilRaw.length > 0 ? untilRaw : DEFAULT_TEXT_INPUT_POLL_UNTIL_SELECTOR;
-        const pollDone = async (): Promise<boolean> => {
-          const custom = await page
-            .locator(untilSel)
-            .first()
-            .isVisible()
-            .catch(() => false);
-          if (custom) return true;
-          return (await readSubmitMarkers()).stopVisible;
+        const beforeTextLen = (await readTargetText()).trim().length;
+        const usingDefaultUntil = untilRaw.length === 0;
+        const pollDone = async (attempt: number): Promise<boolean> => {
+          // 仅当用户显式配置了结束选择器时才直接用 custom 判定；默认 Stop 选择器需走更严格的内置判定，避免误判。
+          if (!usingDefaultUntil) {
+            const custom = await page
+              .locator(untilSel)
+              .first()
+              .isVisible()
+              .catch(() => false);
+            if (custom) return true;
+          }
+
+          const markers = await readSubmitMarkers();
+          // 可靠判据：Stop 可见且 Send 不可见。
+          if (markers.stopVisible && !markers.sendVisible) return true;
+          // 弱判据：至少执行过一次 Enter，且输入框内容显著减少时，允许 Stop 判定生效。
+          if (attempt > 0 && markers.stopVisible) {
+            const currentLen = (await readTargetText()).trim().length;
+            if (beforeTextLen > 0 && currentLen <= Math.max(12, Math.floor(beforeTextLen * 0.35))) {
+              return true;
+            }
+          }
+          return false;
         };
         const untilDesc = `选择器匹配或内置 CDK：${untilSel.slice(0, 100)}${untilSel.length > 100 ? '…' : ''}`;
         await page.bringToFront().catch(() => {});
@@ -196,7 +239,7 @@ export async function executeTextInput(
         const start = Date.now();
         let attempt = 0;
         while (Date.now() - start < pollMaxMs) {
-          if (await pollDone()) {
+          if (await pollDone(attempt)) {
             log.push(`✅ 已满足结束条件（第 ${attempt + 1} 次检查）`);
             break;
           }
@@ -204,16 +247,24 @@ export async function executeTextInput(
           await el.click({ timeout: 10_000 }).catch(() => {});
           await page.keyboard.press('Enter');
           await page.waitForTimeout(400);
-          if (await pollDone()) {
+          if (await pollDone(attempt)) {
             log.push(`✅ 第 ${attempt} 次 Enter 后已满足结束条件`);
             break;
+          }
+          const clicked = await tryClickSendButton();
+          if (clicked) {
+            await page.waitForTimeout(350);
+            if (await pollDone(attempt)) {
+              log.push(`✅ 第 ${attempt} 次 Enter 后通过发送按钮兜底提交成功`);
+              break;
+            }
           }
           log.push(
             `⏳ 第 ${attempt} 次 Enter 后条件未满足，${pollInterval / 1000}s 后重试…`
           );
           await page.waitForTimeout(pollInterval);
         }
-        if (!(await pollDone())) {
+        if (!(await pollDone(attempt))) {
           log.push(
             `⚠️ ${pollMaxMs / 1000}s 内未满足结束条件（选择器与内置 CDK 均未命中），建议用后续点击节点兜底`
           );
@@ -255,17 +306,9 @@ export async function executeTextInput(
       }
 
       if (!submitted) {
-        const clickSelectors = [
-          'button[aria-label="Submit"]',
-          'button[aria-label*="Submit" i]',
-          'button[aria-label="Send message"]',
-          'button[aria-label*="Send" i]',
-          'button[aria-label*="发送"]',
-          '.send-button-container button',
-        ];
-        for (const selector of clickSelectors) {
+        for (const selector of sendButtonSelectors) {
           try {
-            const btn = page.locator(selector).last();
+            const btn = page.locator(selector).first();
             await btn.waitFor({ state: 'visible', timeout: 1_500 });
             await btn.click({ timeout: 2_000, force: true });
             await page.waitForTimeout(250);

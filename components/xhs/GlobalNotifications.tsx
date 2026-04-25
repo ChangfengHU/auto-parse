@@ -7,8 +7,14 @@ export default function GlobalNotifications() {
   const pathname = usePathname();
   const [unread, setUnread] = useState<any>(null);
   const [open, setOpen] = useState(false);
+  const enabled = pathname?.startsWith('/analysis/xhs');
 
   useEffect(() => {
+    if (!enabled) {
+      setUnread(null);
+      setOpen(false);
+      return;
+    }
     // 轮询频率：每 60 秒查一次
     const fetchUnread = async () => {
       try {
@@ -25,7 +31,9 @@ export default function GlobalNotifications() {
     fetchUnread();
     const timer = setInterval(fetchUnread, 60000);
     return () => clearInterval(timer);
-  }, []);
+  }, [enabled]);
+
+  if (!enabled) return null;
 
   if (!unread) return null;
 

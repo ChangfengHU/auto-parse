@@ -1,0 +1,31 @@
+{
+  "id": "f807fb95-ab9d-4c24-beef-db38169e7e6e",
+  "name": "gemini流程管理-ads-批量",
+  "description": "批量调用 gemini流程管理-ads：按 imageCount 自动分发到内置浏览器实例池，超过并发自动排队。",
+  "nodes": [
+    {
+      "type": "workflow_call",
+      "label": "批量分发生图",
+      "params": {
+        "runs": [],
+        "count": "{{imageCount}}",
+        "outputVar": "workflowCallUrls",
+        "minSuccess": "{{imageCount}}",
+        "workflowId": "1532bbd9-6f32-468d-b4e4-4e8c518b0949",
+        "inheritVars": true,
+        "instanceIds": [
+          "k1b908rw",
+          "k1b8yqxe",
+          "k1ba8vac"
+        ],
+        "promptVarName": "noteUrl",
+        "maxConcurrency": 3,
+        "outputDetailVar": "workflowCallResults"
+      }
+    }
+  ],
+  "vars": [
+    "noteUrl",
+    "imageCount"
+  ]
+}

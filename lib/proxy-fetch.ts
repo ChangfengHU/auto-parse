@@ -47,11 +47,31 @@ function getAgent(): HttpsProxyAgent | null {
   return _agent;
 }
 
+function shouldBypassProxy(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl);
+    const host = (url.hostname || '').trim().toLowerCase();
+    if (!host) return true;
+    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
+    if (host.endsWith('.local')) return true;
+    if (/^10\.\d+\.\d+\.\d+$/.test(host)) return true;
+    if (/^192\.168\.\d+\.\d+$/.test(host)) return true;
+    if (/^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+$/.test(host)) return true;
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 export interface ProxyFetchResponse {
   ok: boolean;
   status: number;
+  headers: {
+    get(name: string): string | null;
+  };
   text(): Promise<string>;
   json(): Promise<unknown>;
+  arrayBuffer(): Promise<ArrayBuffer>;
 }
 
 /**
@@ -64,32 +84,56 @@ export async function proxyFetch(
     method?: string;
     headers?: Record<string, string>;
     body?: string;
+    timeoutMs?: number;
+    bypassProxy?: boolean;
   } = {}
 ): Promise<ProxyFetchResponse> {
-  const agent = getAgent();
+  const agent = options.bypassProxy || shouldBypassProxy(url) ? null : getAgent();
+  const controller = options.timeoutMs ? new AbortController() : null;
+  const timeout = controller
+    ? setTimeout(() => controller.abort(), Math.max(1, options.timeoutMs ?? 0))
+    : null;
 
-  if (agent) {
-    const res = await nodeFetch(url, {
-      method: options.method ?? 'GET',
+  try {
+    if (agent) {
+      const res = await nodeFetch(url, {
+        method: options.method ?? 'GET',
+        headers: options.headers,
+        body: options.body,
+        signal: controller?.signal,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        agent: agent as any,
+      });
+      return {
+        ok: res.ok,
+        status: res.status,
+        headers: {
+          get: (name: string) => res.headers.get(name),
+        },
+        text: () => res.text(),
+        json: () => res.json() as Promise<unknown>,
+        arrayBuffer: () => res.arrayBuffer(),
+      };
+    }
+
+    // 无代理时直接用 native fetch
+    const res = await fetch(url, {
+      method: options.method,
       headers: options.headers,
       body: options.body,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      agent: agent as any,
+      signal: controller?.signal,
     });
     return {
       ok: res.ok,
       status: res.status,
+      headers: {
+        get: (name: string) => res.headers.get(name),
+      },
       text: () => res.text(),
       json: () => res.json() as Promise<unknown>,
+      arrayBuffer: () => res.arrayBuffer(),
     };
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
-
-  // 无代理时直接用 native fetch
-  const res = await fetch(url, options);
-  return {
-    ok: res.ok,
-    status: res.status,
-    text: () => res.text(),
-    json: () => res.json() as Promise<unknown>,
-  };
 }

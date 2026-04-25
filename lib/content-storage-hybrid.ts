@@ -57,6 +57,9 @@ type RawImage = {
   url?: string;
   original_url?: string;
   oss_url?: string;
+  liveUrl?: string;
+  live_url?: string;
+  live_oss_url?: string;
   width?: number;
   height?: number;
 };
@@ -105,6 +108,8 @@ async function getImagesByPostId(postId: string): Promise<Array<{
   id: string;
   original_url: string;
   oss_url?: string;
+  live_url?: string;
+  live_oss_url?: string;
   width?: number;
   height?: number;
 }>> {
@@ -119,10 +124,46 @@ async function getImagesByPostId(postId: string): Promise<Array<{
         }
       }
     );
-    if (res.ok) return await res.json();
-    return [];
+    if (!res.ok) return [];
+    const images = await res.json() as Array<{
+      id: string;
+      original_url: string;
+      oss_url?: string;
+      width?: number;
+      height?: number;
+    }>;
+    const liveRows = await getLivePhotosByPostId(postId);
+    return images.map((image, index) => ({
+      ...image,
+      live_url: liveRows[index]?.original_url,
+      live_oss_url: liveRows[index]?.oss_url,
+    }));
   } catch (error) {
     console.warn('查询图片失败:', error);
+    return [];
+  }
+}
+
+async function getLivePhotosByPostId(postId: string): Promise<Array<{ id: string; original_url: string; oss_url?: string }>> {
+  try {
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/rpa_videos?source_post_id=eq.${encodeURIComponent(postId)}&source_post_type=eq.xhs_live_photo&select=id,original_url,oss_url&order=created_at.asc`,
+      {
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+        }
+      }
+    );
+    if (!res.ok) return [];
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows.map((row: Record<string, unknown>) => ({
+      id: String(row.id || ''),
+      original_url: String(row.original_url || ''),
+      oss_url: row.oss_url ? String(row.oss_url) : undefined,
+    })) : [];
+  } catch (error) {
+    console.warn('查询 Live Photo 失败:', error);
     return [];
   }
 }
@@ -289,12 +330,22 @@ export async function saveXhsPost(postData: RawNoteData): Promise<SavedXhsPost> 
             'Authorization': `Bearer ${SUPABASE_KEY}`,
           }
         });
+
+        await fetch(`${SUPABASE_URL}/rest/v1/rpa_videos?source_post_id=eq.${encodeURIComponent(postId)}&source_post_type=eq.xhs_live_photo`, {
+          method: 'DELETE',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+          }
+        });
       }
 
       const images: Array<{
         id: string;
         original_url: string;
         oss_url?: string;
+        live_url?: string;
+        live_oss_url?: string;
         width?: number;
         height?: number;
       }> = [];
@@ -327,10 +378,37 @@ export async function saveXhsPost(postData: RawNoteData): Promise<SavedXhsPost> 
             })
           });
 
+          const liveUrl = imageData.liveUrl || imageData.live_url || '';
+          if (liveUrl) {
+            await fetch(`${SUPABASE_URL}/rest/v1/rpa_videos`, {
+              method: 'POST',
+              headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                id: generateId(),
+                original_url: liveUrl,
+                oss_url: imageData.live_oss_url || null,
+                source_platform: 'xiaohongshu',
+                source_post_type: 'xhs_live_photo',
+                source_post_id: postId,
+                format: 'mp4',
+                upload_status: imageData.live_oss_url ? 'completed' : 'pending',
+                upload_at: imageData.live_oss_url ? now : null,
+                created_at: now,
+                updated_at: now,
+              }),
+            });
+          }
+
           images.push({
             id: imageId,
             original_url: imageData.previewUrl || imageData.originalUrl || imageData.urlDefault || imageData.url || imageData.original_url || '',
             oss_url: imageData.oss_url || undefined,
+            live_url: liveUrl || undefined,
+            live_oss_url: imageData.live_oss_url || undefined,
             width: imageData.width,
             height: imageData.height
           });
@@ -577,6 +655,17 @@ export async function deleteXhsPost(id: string): Promise<void> {
 
     await fetch(
       `${SUPABASE_URL}/rest/v1/rpa_videos?source_post_id=eq.${encodeURIComponent(id)}&source_post_type=eq.xhs_post`,
+      {
+        method: 'DELETE',
+        headers: {
+          'apikey': SUPABASE_KEY,
+          'Authorization': `Bearer ${SUPABASE_KEY}`,
+        }
+      }
+    );
+
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/rpa_videos?source_post_id=eq.${encodeURIComponent(id)}&source_post_type=eq.xhs_live_photo`,
       {
         method: 'DELETE',
         headers: {

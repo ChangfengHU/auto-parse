@@ -25,6 +25,8 @@ export interface SavedXhsPost {
     id: string;
     original_url: string;
     oss_url?: string;
+    live_url?: string;
+    live_oss_url?: string;
     width?: number;
     height?: number;
   }>;
@@ -56,6 +58,9 @@ type RawImage = {
   url?: string;
   original_url?: string;
   oss_url?: string;
+  liveUrl?: string;
+  live_url?: string;
+  live_oss_url?: string;
   width?: number;
   height?: number;
 };
@@ -186,6 +191,8 @@ export function saveXhsPost(postData: RawNoteData, originalUrl?: string): SavedX
         id: `${Date.now()}-img-${index}`,
         original_url: img.originalUrl || img.previewUrl || img.urlDefault || img.url || img.original_url || '',
         oss_url: img.oss_url || undefined,
+        live_url: img.liveUrl || img.live_url || undefined,
+        live_oss_url: img.live_oss_url || undefined,
         width: img.width,
         height: img.height
       }))
@@ -227,6 +234,8 @@ export function saveXhsPost(postData: RawNoteData, originalUrl?: string): SavedX
       id: `${Date.now()}-img-${index}`,
       original_url: img.originalUrl || img.previewUrl || img.urlDefault || img.url || img.original_url || '',
       oss_url: img.oss_url || undefined,
+      live_url: img.liveUrl || img.live_url || undefined,
+      live_oss_url: img.live_oss_url || undefined,
       width: img.width,
       height: img.height
     }))

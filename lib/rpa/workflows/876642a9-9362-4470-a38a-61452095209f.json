@@ -1,26 +1,20 @@
 {
-  "id": "douyin-publish",
-  "name": "抖音视频发布",
+  "id": "876642a9-9362-4470-a38a-61452095209f",
+  "name": "抖音视频发布 (副本)",
   "description": "上传视频到抖音创作者平台并发布",
   "nodes": [
-    {
-      "type": "material",
-      "label": "素材节点",
-      "params": {
-        "materialId": "",
-        "outputTitleVar": "title",
-        "outputVideoVar": "videoUrl"
-      }
-    },
     {
       "type": "navigate",
       "label": "打开创作者首页",
       "params": {
         "url": "https://creator.douyin.com",
-        "waitUntil": "domcontentloaded"
+        "waitUntil": "domcontentloaded",
+        "useAdsPower": false,
+        "adsProfileId": "k1b908rw"
       }
     },
     {
+      "url": "https://images.vyibc.com/api-integration.html",
       "type": "qrcode",
       "label": "检测登录状态（未登录则扫码）",
       "params": {
@@ -126,5 +120,8 @@
       "params": {}
     }
   ],
-  "vars": []
+  "vars": [
+    "videoUrl",
+    "title"
+  ]
 }

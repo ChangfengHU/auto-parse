@@ -33,6 +33,10 @@ export async function POST(req: Request) {
       browser?: {
         headless?: boolean;
       };
+      upload?: {
+        provider?: 'oss' | 'supabase';
+        supabaseBucket?: string;
+      };
     };
 
     const config = await saveRuntimeBackendConfig(body);

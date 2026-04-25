@@ -11,6 +11,8 @@ interface CookieStatus {
   valid?: boolean;
 }
 
+type XhsQrCookies = Record<string, string>;
+
 let initialCookieStatusCache: CookieStatus | null = null;
 let initialCookieStatusPromise: Promise<CookieStatus> | null = null;
 
@@ -42,7 +44,7 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
     code: string | null;
     a1: string | null;
     webid: string | null;
-    initialCookies: any;
+    initialCookies: XhsQrCookies | null;
     statusText: string;
   }>({
     loading: false,
@@ -56,6 +58,14 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
   });
 
   const autoLoginTriedRef = useRef(false);
+  const pollPayloadRef = useRef<{
+    qr_id: string;
+    code: string;
+    a1: string;
+    webid: string;
+    cookies: XhsQrCookies;
+    clientId?: string | null;
+  } | null>(null);
 
   const refresh = useCallback(async (options?: { force?: boolean }) => {
     const d = await (async () => {
@@ -84,8 +94,8 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
     const valid = d.set ? await requestLoginValidity().catch(() => false) : false;
     const nextStatus: CookieStatus = { ...d, valid };
     setStatus(nextStatus);
-    onStatusChange(valid);
-    if (valid) setShowInput(false);
+    onStatusChange(Boolean(nextStatus.set));
+    if (nextStatus.set) setShowInput(false);
   }, [onStatusChange]);
 
   useEffect(() => { void refresh(); }, [refresh]);
@@ -117,6 +127,7 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
       clearInterval(pollTimerRef.current);
       pollTimerRef.current = null;
     }
+    pollPayloadRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -144,36 +155,57 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
 
       // 开始轮询
       stopPolling();
+      pollPayloadRef.current = {
+        qr_id: d.qr_id,
+        code: d.code,
+        a1: d.a1,
+        webid: d.webid,
+        cookies: d.cookies,
+        clientId: input.trim() || pluginClientId,
+      };
       pollTimerRef.current = setInterval(async () => {
         try {
+          const payload = pollPayloadRef.current;
+          if (!payload) return;
+
           const pollRes = await fetch('/api/analysis/xhs/login/poll', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              qr_id: d.qr_id,
-              code: d.code,
-              a1: d.a1,
-              webid: d.webid,
-              cookies: d.cookies,
-              clientId: input.trim() || pluginClientId
-            }),
+            body: JSON.stringify(payload),
           });
           const pollData = await pollRes.json();
-          if (pollData.ok) {
-            if (pollData.status_text === 'scanned') {
-              setQrState(prev => ({ ...prev, statusText: '📲 已扫码，请在手机上点击确认...' }));
-            } else if (pollData.status_text === 'success') {
-              setQrState(prev => ({ ...prev, statusText: '✅ 登录成功！正在同步...' }));
-              stopPolling();
-              setMsg('✅ 登录成功，正在刷新页面...');
-              setTimeout(() => {
-                setQrState(prev => ({ ...prev, qrUrl: null }));
-                void refresh({ force: true });
-              }, 1500);
-            }
+          if (!pollRes.ok || !pollData.ok) {
+            throw new Error(pollData.error || '轮询二维码状态失败');
+          }
+
+          if (pollData.cookies) {
+            pollPayloadRef.current = {
+              ...payload,
+              cookies: pollData.cookies,
+            };
+            setQrState(prev => ({
+              ...prev,
+              initialCookies: pollData.cookies,
+            }));
+          }
+
+          if (pollData.status_text === 'scanned') {
+            setQrState(prev => ({ ...prev, statusText: '📲 已扫码，请在手机上点击确认...' }));
+          } else if (pollData.status_text === 'success') {
+            setQrState(prev => ({ ...prev, statusText: '✅ 登录成功！正在同步...' }));
+            stopPolling();
+            setMsg('✅ 登录成功，正在刷新页面...');
+            setTimeout(() => {
+              setQrState(prev => ({ ...prev, qrUrl: null }));
+              void refresh({ force: true });
+            }, 1500);
           }
         } catch (e) {
           console.error('Polling error:', e);
+          setQrState(prev => ({
+            ...prev,
+            statusText: `轮询失败：${e instanceof Error ? e.message : String(e)}`,
+          }));
         }
       }, 3000);
 
@@ -198,7 +230,7 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
   };
 
   useEffect(() => {
-    if (!pluginClientId || autoLoginTriedRef.current || status?.valid) return;
+    if (!pluginClientId || autoLoginTriedRef.current || status?.set) return;
     autoLoginTriedRef.current = true;
     const run = async () => {
       setSaving(true);
@@ -927,8 +959,9 @@ export default function XhsPage() {
     try {
       const status = await requestCookieStatus().catch(() => ({ set: false } as CookieStatus));
       const valid = status.set ? await requestLoginValidity().catch(() => false) : false;
-      setCookieSet(valid);
-      return { status, valid };
+      const loggedIn = Boolean(status.set);
+      setCookieSet(loggedIn);
+      return { status: { ...status, valid }, valid, loggedIn };
     } finally {
       setCookieChecking(false);
     }
@@ -940,8 +973,8 @@ export default function XhsPage() {
       const result = await refreshCookieValidity();
       if (!alive) return;
 
-      // 未登录：自动打开一次登录抽屉（本次会话只打开一次，避免打扰）
-      if (!result.valid && typeof window !== 'undefined') {
+      // 未保存登录信息时才自动打开登录抽屉；有效性校验失败不阻塞已保存的凭证使用。
+      if (!result.loggedIn && typeof window !== 'undefined') {
         const key = 'xhs_login_drawer_auto_opened_v1';
         const opened = window.sessionStorage.getItem(key) === '1';
         if (!opened && !loginAutoOpenedRef.current) {

@@ -11,12 +11,16 @@ export default function WorkflowDetailPage() {
   const [workflow, setWorkflow] = useState<WorkflowDef | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const initialContext = {
-    videoUrl: searchParams.get('ossUrl') ?? '',
-    title:    searchParams.get('title') ?? '',
-    tags:     searchParams.get('tags') ?? '',
-    clientId: searchParams.get('clientId') ?? '',
-  };
+  const initialContext = (() => {
+    const entries = Array.from(searchParams.entries());
+    const context: Record<string, string> = {};
+    for (const [key, value] of entries) {
+      context[key] = value;
+    }
+    // 兼容旧参数名
+    if (!context.videoUrl && context.ossUrl) context.videoUrl = context.ossUrl;
+    return context;
+  })();
 
   useEffect(() => {
     fetch(`/api/workflows/${id}`)

@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 
 export type XhsBackendSource = 'cli' | 'http';
+export type UploadProvider = 'oss' | 'supabase';
 
 export type FastFailStrategy = 'llm_rewrite' | 'direct_retry' | 'skip';
 
@@ -19,12 +20,17 @@ export interface RuntimeBackendConfig {
   browser: {
     headless: boolean;
   };
+  upload: {
+    provider: UploadProvider;
+    supabaseBucket: string;
+  };
 }
 
 type PartialRuntimeBackendConfig = Partial<{
   xhs: Partial<RuntimeBackendConfig['xhs']>;
   adsDispatcher: Partial<RuntimeBackendConfig['adsDispatcher']>;
   browser: Partial<RuntimeBackendConfig['browser']>;
+  upload: Partial<RuntimeBackendConfig['upload']>;
 }>;
 
 const RUNTIME_DIR = join(process.cwd(), '.runtime');
@@ -34,6 +40,10 @@ const DEFAULT_MAX_QUEUE_SIZE = 20;
 
 function normalizeSource(value: unknown): XhsBackendSource {
   return value === 'http' ? 'http' : 'cli';
+}
+
+function normalizeUploadProvider(value: unknown): UploadProvider {
+  return value === 'supabase' ? 'supabase' : 'oss';
 }
 
 function normalizeBaseUrl(value: unknown): string {
@@ -81,6 +91,10 @@ function buildDefaultConfig(): RuntimeBackendConfig {
     browser: {
       headless: normalizeHeadless(undefined),
     },
+    upload: {
+      provider: normalizeUploadProvider(process.env.UPLOAD_PROVIDER),
+      supabaseBucket: String(process.env.SUPABASE_STORAGE_BUCKET || 'filestore').trim() || 'filestore',
+    },
   };
 }
 
@@ -99,6 +113,10 @@ function mergeConfig(partial?: PartialRuntimeBackendConfig): RuntimeBackendConfi
     },
     browser: {
       headless: normalizeHeadless(partial?.browser?.headless ?? defaults.browser.headless),
+    },
+    upload: {
+      provider: normalizeUploadProvider(partial?.upload?.provider ?? defaults.upload.provider),
+      supabaseBucket: String(partial?.upload?.supabaseBucket ?? defaults.upload.supabaseBucket ?? 'filestore').trim() || 'filestore',
     },
   };
 }
@@ -147,6 +165,10 @@ export async function saveRuntimeBackendConfig(input: PartialRuntimeBackendConfi
     browser: {
       ...(current?.browser ?? {}),
       ...(input.browser ?? {}),
+    },
+    upload: {
+      ...(current?.upload ?? {}),
+      ...(input.upload ?? {}),
     },
   });
 

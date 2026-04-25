@@ -31,6 +31,7 @@ export interface XhsAuthor {
   id: string;
   name: string;
   avatar: string;
+  profileUrl: string;
 }
 
 export interface XhsImage {
@@ -38,11 +39,26 @@ export interface XhsImage {
   previewUrl: string;   // 带压缩后缀的 CDN 地址（直接用于 <img> 预览）
   originalUrl: string;  // 去掉压缩后缀的原图地址
   liveUrl?: string;     // Live Photo 对应的小视频
+  urlDefault?: string;
+  urlPre?: string;
+  livePhoto?: unknown;
+  stream?: unknown;
+  width?: number;
+  height?: number;
+}
+
+export interface XhsVideo {
+  url: string;
+  coverUrl?: string;
+  image?: unknown;
+  streams?: unknown[];
 }
 
 export interface XhsPostData {
   noteId: string;
   postUrl: string;
+  resolvedUrl?: string;
+  xsecToken?: string;
   title: string;
   desc: string;
   type: 'image' | 'video' | 'unknown';
@@ -55,8 +71,12 @@ export interface XhsPostData {
   };
   tags: string[];
   publishTime: string;
+  lastUpdateTime?: string;
+  ipLocation?: string;
+  coverUrl?: string;
+  shareInfo?: unknown;
   images: XhsImage[];
-  video?: { url: string };
+  video?: XhsVideo;
 }
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
@@ -71,7 +91,21 @@ function safeGet(obj: any, path: string, def: unknown = ''): unknown {
   }
 }
 
-const toNum = (v: unknown) => parseInt(String(v ?? '0')) || 0;
+const toNum = (v: unknown) => {
+  const n = parseInt(String(v ?? '0'), 10);
+  return Number.isFinite(n) ? n : 0;
+};
+
+function formatXhsTime(value: unknown): string {
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw <= 0) return '';
+  return new Date(raw).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+}
+
+function extractXsecToken(url: string): string {
+  const tokenMatch = url.match(/xsec_token=([^&\s]+)/);
+  return tokenMatch ? decodeURIComponent(tokenMatch[1]) : '';
+}
 
 // ── request.py 移植：fetchHtml ─────────────────────────────────────────────────
 
@@ -249,6 +283,12 @@ function buildImages(imageList: any[]): XhsImage[] {
       previewUrl: rawUrl,
       originalUrl: toOriginalUrl(rawUrl),
       liveUrl: liveRaw ? decodeURIComponent(liveRaw) : undefined,
+      urlDefault: img.urlDefault || '',
+      urlPre: img.urlPre || '',
+      livePhoto: img.livePhoto,
+      stream: img.stream,
+      width: toNum(img.width),
+      height: toNum(img.height),
     };
   });
 }
@@ -261,10 +301,16 @@ function buildImages(imageList: any[]): XhsImage[] {
  * 对应 XHS-Downloader: Video.deal_video_link()
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildVideo(noteData: Record<string, any>): { url: string } | undefined {
+function buildVideo(noteData: Record<string, any>, coverUrl?: string): XhsVideo | undefined {
   // 方式1：originVideoKey → 拼 CDN 地址
   const originKey: string = safeGet(noteData, 'video.consumer.originVideoKey') as string;
-  if (originKey) return { url: `https://sns-video-bd.xhscdn.com/${originKey}` };
+  if (originKey) {
+    return {
+      url: `https://sns-video-bd.xhscdn.com/${originKey}`,
+      coverUrl,
+      image: safeGet(noteData, 'video.image', undefined),
+    };
+  }
 
   // 方式2：从 h264 + h265 stream 取最高分辨率
   const h264: unknown[] = (safeGet(noteData, 'video.media.stream.h264') as unknown[]) ?? [];
@@ -277,7 +323,7 @@ function buildVideo(noteData: Record<string, any>): { url: string } | undefined 
   streams.sort((a, b) => (a.height ?? 0) - (b.height ?? 0));
   const best = streams[streams.length - 1];
   const url: string = best.backupUrls?.[0] || best.masterUrl || '';
-  return url ? { url } : undefined;
+  return url ? { url, coverUrl, image: safeGet(noteData, 'video.image', undefined), streams } : undefined;
 }
 
 // ── explore.py 移植：extractPostMeta ─────────────────────────────────────────
@@ -290,14 +336,12 @@ function buildVideo(noteData: Record<string, any>): { url: string } | undefined 
 function buildPostMeta(noteData: Record<string, any>, rawUrl: string): XhsPostData {
   const interact = noteData.interactInfo ?? {};
   const tags: string[] = (noteData.tagList ?? []).map((t: { name?: string }) => t.name ?? '').filter(Boolean);
-  const ts: number | undefined = noteData.time;
-  const publishTime = ts
-    ? new Date(ts).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
-    : '';
 
   const imageList: unknown[] = noteData.imageList ?? [];
   const images = buildImages(imageList as Parameters<typeof buildImages>[0]);
-  const video = buildVideo(noteData);
+  const coverUrl = images[0]?.previewUrl || images[0]?.originalUrl || '';
+  const video = buildVideo(noteData, coverUrl);
+  const authorId = (safeGet(noteData, 'user.userId') as string) ?? '';
 
   const type: XhsPostData['type'] =
     noteData.type === 'video' ? 'video' : images.length > 0 ? 'image' : 'unknown';
@@ -305,13 +349,16 @@ function buildPostMeta(noteData: Record<string, any>, rawUrl: string): XhsPostDa
   return {
     noteId: noteData.noteId as string,
     postUrl: rawUrl,
+    resolvedUrl: rawUrl,
+    xsecToken: String(noteData.xsecToken || extractXsecToken(rawUrl) || ''),
     title: (noteData.title as string) ?? '',
     desc: (noteData.desc as string) ?? '',
     type,
     author: {
-      id: (safeGet(noteData, 'user.userId') as string) ?? '',
+      id: authorId,
       name: ((safeGet(noteData, 'user.nickname') as string) || (safeGet(noteData, 'user.nickName') as string)) ?? '',
       avatar: ((safeGet(noteData, 'user.avatar') as string) || (safeGet(noteData, 'user.avatarUrl') as string)) ?? '',
+      profileUrl: authorId ? `https://www.xiaohongshu.com/user/profile/${authorId}` : '',
     },
     stats: {
       likes: toNum(interact.likedCount),
@@ -320,7 +367,11 @@ function buildPostMeta(noteData: Record<string, any>, rawUrl: string): XhsPostDa
       collects: toNum(interact.collectedCount),
     },
     tags,
-    publishTime,
+    publishTime: formatXhsTime(noteData.time),
+    lastUpdateTime: formatXhsTime(noteData.lastUpdateTime),
+    ipLocation: String(noteData.ipLocation || ''),
+    coverUrl,
+    shareInfo: noteData.shareInfo,
     images,
     video,
   };
@@ -330,8 +381,10 @@ function buildPostMeta(noteData: Record<string, any>, rawUrl: string): XhsPostDa
 
 /** 解析单个小红书帖子 */
 export async function fetchXhsPost(url: string): Promise<XhsPostData> {
+  let resolvedUrl = url;
+
   // 解析短链
-  const resolvedUrl = await resolveUrl(url);
+  resolvedUrl = await resolveUrl(url);
 
   const html = await fetchHtml(resolvedUrl);
 

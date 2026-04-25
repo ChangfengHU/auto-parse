@@ -1,0 +1,83 @@
+{
+  "id": "1532bbd9-6f32-468d-b4e4-4e8c518b0949",
+  "name": "gemini流程管理-ads",
+  "description": "基于非Ads基线流程，仅首节点切换Ads并支持浏览器实例参数",
+  "nodes": [
+    {
+      "type": "navigate",
+      "label": "导航",
+      "params": {
+        "url": "https://gemini.google.com/",
+        "adsApiUrl": "http://127.0.0.1:50325",
+        "waitUntil": "domcontentloaded",
+        "useAdsPower": true,
+        "adsProfileId": "{{browserInstanceId}}",
+        "adsProxyServer": "",
+        "adsManualCdpUrl": "{{browserWsUrl}}"
+      },
+      "waitAfter": {
+        "action": "appeared",
+        "enabled": true,
+        "timeout": 60000,
+        "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]"
+      }
+    },
+    {
+      "type": "click",
+      "label": "点击",
+      "params": {
+        "text": "Create image",
+        "selector": ""
+      },
+      "waitAfter": {
+        "enabled": false,
+        "timeout": 100000,
+        "selector": "img[src^=\"blob:\"], img[src^=\"data:image\"], button[aria-label=\"Copy image\"]",
+        "delaySeconds": 3
+      },
+      "continueOnError": true
+    },
+    {
+      "type": "text_input",
+      "label": "文本输入",
+      "params": {
+        "value": "{{noteUrl}}",
+        "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]"
+      }
+    },
+    {
+      "type": "click",
+      "label": "点击",
+      "params": {
+        "text": "",
+        "selector": "button[aria-label=\"Send message\"], button[aria-label*=\"发送\"], .send-button-container button"
+      },
+      "waitAfter": {
+        "enabled": true,
+        "timeout": 240000,
+        "selector": "[aria-label=\"Copy image\"], button[aria-label*=\"复制图片\"], button[aria-label*=\"Copy image\"], button:has-text(\"复制\")",
+        "delaySeconds": 3
+      }
+    },
+    {
+      "type": "extract_image_clipboard",
+      "label": "📋 剪贴板高清提取",
+      "params": {
+        "ossPath": "gemini-images/{{timestamp}}.png",
+        "outputVar": "imageUrl",
+        "uploadToOSS": true,
+        "waitAfterCopy": 1500,
+        "copyButtonSelector": "[aria-label=\"Copy image\"], button[aria-label*=\"复制图片\"], button[aria-label*=\"Copy image\"], button:has-text(\"复制\")"
+      },
+      "waitAfter": {
+        "enabled": true
+      },
+      "continueOnError": false
+    }
+  ],
+  "vars": [
+    "browserInstanceId",
+    "browserWsUrl",
+    "noteUrl"
+  ]
+}

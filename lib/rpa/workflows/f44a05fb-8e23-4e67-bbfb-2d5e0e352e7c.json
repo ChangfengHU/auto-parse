@@ -1,0 +1,86 @@
+{
+  "id": "f44a05fb-8e23-4e67-bbfb-2d5e0e352e7c",
+  "name": "meta ai -流程管理",
+  "description": "Meta AI 图片生成全流程：导航 → 输入提示词 → 生成 → 批量下载高清图片 → 上传 OSS",
+  "nodes": [
+    {
+      "type": "navigate",
+      "label": "1 打开 Meta AI",
+      "params": {
+        "url": "https://www.meta.ai/prompt/9667978a-fccc-4c4a-9502-bc302c03169d",
+        "waitUntil": "domcontentloaded",
+        "useAdsPower": true,
+        "adsProfileId": "k1ba8vac"
+      },
+      "waitAfter": {
+        "action": "button_appeared",
+        "enabled": false,
+        "timeout": 60000,
+        "buttonText": "Create image"
+      }
+    },
+    {
+      "type": "metaai_download",
+      "label": "6 批量下载高清图片",
+      "params": {
+        "maxCount": 4,
+        "outputVar": "metaaiImages",
+        "baselineVar": "_metaai_baseline",
+        "waitForLoad": 3000,
+        "newButtonTimeout": 120000,
+        "waitForNewButtons": false
+      }
+    },
+    {
+      "type": "click",
+      "label": "2 点击 Create image",
+      "params": {
+        "text": "Create image",
+        "selector": ""
+      },
+      "waitAfter": {
+        "enabled": false
+      }
+    },
+    {
+      "type": "vertex_ai",
+      "label": "3 分析参考图生成提示词",
+      "params": {
+        "model": "vertex:gemini-2.5-flash",
+        "prompt": "你是顶级视觉提示词工程师。请根据输入图片生成一条高质量英文 prompt。只输出英文，不要解释。",
+        "purpose": "for_image_gen",
+        "mediaType": "image",
+        "outputVar": "imagePrompt",
+        "capability": "media_understand",
+        "uploadToOSS": false,
+        "inputMediaUrl": "http://articel.oss-cn-hangzhou.aliyuncs.com/xhs/tmp_1775226632920/image_17.jpg",
+        "outputListVar": "promptList"
+      }
+    },
+    {
+      "type": "text_input",
+      "label": "4 输入提示词",
+      "params": {
+        "value": "{{imagePrompt}}",
+        "selector": "body > div.min-w-0.flex.group\\/sidebar-wrapper.min-h-svh.w-full > div.min-h-0.min-w-0.flex.h-dvh.w-dvw.overflow-hidden > div.min-h-0.min-w-0.flex.flex-col.grow.relative.overflow-hidden > div > div > div.pointer-events-none.relative.z-20.flex.w-full.shrink-0.flex-col.items-center.px-6.pb-3 > div.shadow-blur-elevation-01.rounded-32.relative.z-10.w-full.max-w-3xl.pointer-events-auto > div > div > div > div > div.group\\/scroller.overflow-hidden.z-0.scrollbar-hide.relative.perspective-\\[1px\\].perspective-origin-top-right.transform-3d.overscroll-y-contain.flex.min-h-0.flex-1.flex-col.overflow-y-auto.-me-3.pe-3.mt-3 > div.flex.flex-col.relative.grow-1 > div > div > div > div:nth-child(2) > div > div.outline-none.undefined > p"
+      }
+    },
+    {
+      "type": "click",
+      "label": "5 点击发送",
+      "params": {
+        "text": "",
+        "selector": "body > div.min-w-0.flex.group\\/sidebar-wrapper.min-h-svh.w-full > div.min-h-0.min-w-0.flex.h-dvh.w-dvw.overflow-hidden > div.min-h-0.min-w-0.flex.flex-col.grow.relative.overflow-hidden > div > div > div.pointer-events-none.relative.z-20.flex.w-full.shrink-0.flex-col.items-center.px-6.pb-3 > div.shadow-blur-elevation-01.rounded-32.relative.z-10.w-full.max-w-3xl.pointer-events-auto > div > div > div > div > div.flex.shrink-0.items-center.gap-0.pt-3.md\\:gap-1 > div.ms-auto.flex.items-center.gap-2 > div > button"
+      },
+      "waitAfter": {
+        "enabled": true,
+        "timeout": 120000,
+        "selector": "[aria-label=\"Download\"]",
+        "delaySeconds": 5
+      }
+    }
+  ],
+  "vars": [
+    "inputImageUrl"
+  ]
+}

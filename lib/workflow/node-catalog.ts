@@ -4,6 +4,8 @@
 import type { NodeType } from './types';
 import { DEFAULT_TEXT_INPUT_POLL_UNTIL_SELECTOR } from './types';
 
+const DEFAULT_LOCAL_FILES_UPLOAD_URL = 'http://127.0.0.1:1002/v1beta/files:upload';
+
 export interface ParamMeta {
   label: string       // 显示名称
   desc: string        // 悬浮说明
@@ -909,7 +911,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       minFileSizeBytes: 0,
       uploadToOSS: true,
       storageBackend: 'oss',
-      localFilesUploadUrl: '',
+      localFilesUploadUrl: DEFAULT_LOCAL_FILES_UPLOAD_URL,
       localFilesUploadTimeoutMs: 120000,
       ossPath: 'gemini-images/{{timestamp}}.png',
       outputVar: 'imageUrl',
@@ -927,7 +929,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       },
       localFilesUploadUrl: {
         label: '本地 files 上传地址',
-        desc: 'storageBackend=local_api 时使用，如 http://127.0.0.1:1002/v1beta/files:upload。可空，读环境变量 WORKFLOW_LOCAL_FILES_UPLOAD_URL',
+        desc: 'storageBackend=local_api 时使用。默认已内置 http://127.0.0.1:1002/v1beta/files:upload；也可通过环境变量 WORKFLOW_LOCAL_FILES_UPLOAD_URL 覆盖',
         type: 'url',
         example: 'http://127.0.0.1:1002/v1beta/files:upload',
       },

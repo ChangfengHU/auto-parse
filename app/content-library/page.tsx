@@ -31,7 +31,7 @@ interface XhsPost {
   location?: string;
   publish_time?: string;
   saved_at?: string;
-  images?: { id?: string; original_url: string; oss_url?: string }[];
+  images?: { id?: string; original_url: string; oss_url?: string; live_url?: string; live_oss_url?: string }[];
 }
 
 const ITEMS_PER_PAGE = 6;
@@ -319,6 +319,11 @@ function ContentLibraryContent() {
                           {idx === 2 && post.images!.length > 3 && (
                             <div className="absolute inset-0 bg-black/50 flex items-center justify-center text-white text-xs font-semibold">
                               +{post.images!.length - 3}
+                            </div>
+                          )}
+                          {(img.live_oss_url || img.live_url) && (
+                            <div className="absolute left-1 top-1 rounded bg-blue-600/85 px-1 py-0.5 text-[10px] font-medium text-white">
+                              Live
                             </div>
                           )}
                         </div>

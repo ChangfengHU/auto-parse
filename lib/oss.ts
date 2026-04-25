@@ -4,6 +4,7 @@ import fs from 'fs';
 import { Readable } from 'stream';
 import path from 'path';
 import { promisify } from 'util';
+import { getRuntimeBackendConfigSync } from './runtime/backend-config';
 
 const writeFile = promisify(fs.writeFile);
 const unlink = promisify(fs.unlink);
@@ -20,6 +21,76 @@ function createClient() {
     timeout: 600000, // 10分钟超时，支持大文件上传
     secure: useHttps,
   });
+}
+
+function useSupabaseStorage() {
+  try {
+    return getRuntimeBackendConfigSync().upload?.provider === 'supabase';
+  } catch {
+    return false;
+  }
+}
+
+function getSupabaseStorageConfig() {
+  const runtimeConfig = getRuntimeBackendConfigSync();
+  const baseUrl = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/+$/, '');
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    '';
+  const bucket = runtimeConfig.upload?.supabaseBucket || process.env.SUPABASE_STORAGE_BUCKET || 'filestore';
+
+  if (!baseUrl || !key) {
+    throw new Error('Supabase Storage 上传缺少 SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL 或 SUPABASE_SERVICE_ROLE_KEY/SUPABASE_ANON_KEY');
+  }
+
+  return {
+    baseUrl,
+    key,
+    bucket,
+  };
+}
+
+function normalizeObjectKey(key: string) {
+  return key.replace(/^\/+/, '');
+}
+
+function getSupabasePublicUrl(baseUrl: string, bucket: string, key: string) {
+  return `${baseUrl}/storage/v1/object/public/${encodeURIComponent(bucket)}/${normalizeObjectKey(key)
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/')}`;
+}
+
+async function uploadToSupabaseStorage(
+  key: string,
+  body: BodyInit,
+  contentType: string,
+  disposition: 'inline' | 'attachment' = 'inline'
+) {
+  const { baseUrl, key: supabaseKey, bucket } = getSupabaseStorageConfig();
+  const objectKey = normalizeObjectKey(key);
+  const filename = objectKey.split('/').pop() || 'file';
+  const res = await fetch(`${baseUrl}/storage/v1/object/${encodeURIComponent(bucket)}/${objectKey}`, {
+    method: 'POST',
+    headers: {
+      apikey: supabaseKey,
+      Authorization: `Bearer ${supabaseKey}`,
+      'Content-Type': contentType,
+      'Cache-Control': '3600',
+      'Content-Disposition': `${disposition}; filename="${filename}"`,
+      'x-upsert': 'true',
+    },
+    body,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Supabase Storage 上传失败 HTTP ${res.status}: ${text.slice(0, 300)}`);
+  }
+
+  return getSupabasePublicUrl(baseUrl, bucket, objectKey);
 }
 
 function isRetryableOssError(err: unknown): boolean {
@@ -58,6 +129,19 @@ async function withOssUploadRetries<T>(label: string, fn: (client: OssClient) =>
 
 // 从 URL 流式上传（支持大文件，避免内存占用）
 export async function uploadVideoFromUrl(videoUrl: string, key: string): Promise<string> {
+  if (useSupabaseStorage()) {
+    const isXhs = videoUrl.includes('xhscdn.com') || videoUrl.includes('xiaohongshu.com');
+    const response = await axios.get(videoUrl, {
+      responseType: 'arraybuffer',
+      timeout: 600000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Referer: isXhs ? 'https://www.xiaohongshu.com/' : 'https://www.douyin.com/',
+      },
+    });
+    return uploadToSupabaseStorage(key, Buffer.from(response.data), 'video/mp4', 'attachment');
+  }
+
   return withOssUploadRetries('uploadVideoFromUrl', async (client) => {
     const isXhs = videoUrl.includes('xhscdn.com') || videoUrl.includes('xiaohongshu.com');
     const response = await axios.get(videoUrl, {
@@ -162,6 +246,18 @@ export async function uploadXhsImageFromUrl(url: string, key: string, cookies?: 
   }
 
   try {
+    if (useSupabaseStorage()) {
+      const contentType = key.toLowerCase().endsWith('.webp')
+        ? 'image/webp'
+        : key.toLowerCase().endsWith('.png')
+          ? 'image/png'
+          : 'image/jpeg';
+      const buffer = await fs.promises.readFile(tempFilePath);
+      const supabaseUrl = await uploadToSupabaseStorage(key, buffer, contentType, 'inline');
+      console.log(`✅ 图片上传 Supabase Storage 成功: ${supabaseUrl}`);
+      return supabaseUrl;
+    }
+
     const httpsUrl = await withOssUploadRetries('uploadXhsImageFromUrl', async (client) => {
       const filename = key.split('/').pop() ?? 'image.jpg';
       const result = await client.put(key, tempFilePath, {
@@ -218,6 +314,18 @@ export async function uploadFromUrl(url: string, key: string, contentType?: stri
 
   const ct = inferredContentType;
 
+  if (useSupabaseStorage()) {
+    const response = await axios.get(url, {
+      responseType: 'arraybuffer',
+      timeout: 600000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible)',
+        Referer: 'https://www.xiaohongshu.com/',
+      },
+    });
+    return uploadToSupabaseStorage(key, Buffer.from(response.data), ct || 'application/octet-stream', 'inline');
+  }
+
   return withOssUploadRetries('uploadFromUrl', async (client) => {
     const response = await axios.get(url, {
       responseType: 'stream',
@@ -246,6 +354,10 @@ export async function uploadFromUrl(url: string, key: string, contentType?: stri
 
 // 从 Buffer 上传
 export async function uploadBuffer(buffer: Buffer, key: string, contentType: string = 'image/jpeg'): Promise<string> {
+  if (useSupabaseStorage()) {
+    return uploadToSupabaseStorage(key, buffer as unknown as BodyInit, contentType, 'inline');
+  }
+
   return withOssUploadRetries('uploadBuffer', async (client) => {
     const filename = key.split('/').pop() ?? 'file';
 
@@ -264,6 +376,11 @@ export async function uploadBuffer(buffer: Buffer, key: string, contentType: str
 
 // 从本地 file 上传
 export async function uploadFromFile(filePath: string, key: string, contentType: string = 'video/mp4'): Promise<string> {
+  if (useSupabaseStorage()) {
+    const buffer = await fs.promises.readFile(filePath);
+    return uploadToSupabaseStorage(key, buffer, contentType, contentType.startsWith('image/') ? 'inline' : 'attachment');
+  }
+
   return withOssUploadRetries('uploadFromFile', async (client) => {
     const filename = key.split('/').pop() ?? 'file';
 
