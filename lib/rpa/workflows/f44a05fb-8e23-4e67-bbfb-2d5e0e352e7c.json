@@ -79,8 +79,5 @@
         "delaySeconds": 5
       }
     }
-  ],
-  "vars": [
-    "inputImageUrl"
   ]
 }

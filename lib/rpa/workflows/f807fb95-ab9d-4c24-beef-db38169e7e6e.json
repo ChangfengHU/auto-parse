@@ -23,9 +23,5 @@
         "outputDetailVar": "workflowCallResults"
       }
     }
-  ],
-  "vars": [
-    "noteUrl",
-    "imageCount"
   ]
 }

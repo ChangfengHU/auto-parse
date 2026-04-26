@@ -24,10 +24,5 @@
         "userPromptTemplate": "任务目标：{{goal}}\n输出数量：{{count}}\n来源列表(JSON)：{{sources}}\n\n工作步骤要求：\n1) 调用 dailyhot.fetch_topics，baseUrl 固定使用 https://dailyhotapi-hazel.vercel.app，perSourceLimit 设为 20\n2) 仅基于返回 candidates 做语义筛选，优先满足任务目标关键词；若目标要求某主题（如学生/美国/日本），selected 必须与主题强相关\n3) 如果强相关候选不足，允许返回少于 count，并在 discarded/summary 说明原因\n4) 最后输出 {\"action\":\"final\",\"output\":...}\n\nfinal.output 结构必须为：{\"selected\":[{\"rank\":1,\"title\":\"\",\"source\":\"\",\"sourceName\":\"\",\"score\":0-100,\"reason\":\"\",\"expected\":{\"exposure\":0,\"plays\":0,\"fans\":0},\"url\":\"\"}],\"summary\":\"\",\"discarded\":[{\"title\":\"\",\"reason\":\"\"}]}\n并且 selected 必须按优先级排序。"
       }
     }
-  ],
-  "vars": [
-    "goal",
-    "count",
-    "sources"
   ]
 }

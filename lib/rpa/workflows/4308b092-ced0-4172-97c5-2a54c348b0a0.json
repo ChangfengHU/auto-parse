@@ -123,12 +123,5 @@
         "delaySeconds": 3
       }
     }
-  ],
-  "vars": [
-    "browserInstanceId",
-    "browserWsUrl",
-    "noteUrl",
-    "sourceImageUrl",
-    "sourceImageUrls"
   ]
 }

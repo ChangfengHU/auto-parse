@@ -187,19 +187,35 @@ async function detectTextOnlyResponse(page: Page): Promise<{ textOnly: boolean; 
 
       const scope = latest ?? document.body;
       if (!scope) return { textOnly: false };
+      const isChatGpt = location.hostname === 'chatgpt.com' || location.hostname.endsWith('.chatgpt.com');
 
       const hasGeneratedImage =
         scope.querySelector('generated-image img') !== null ||
+        (isChatGpt && scope.querySelector('article img') !== null) ||
+        (isChatGpt && scope.querySelector('main img') !== null) ||
+        (isChatGpt && scope.querySelector('img[alt*="Generated image" i]') !== null) ||
+        (isChatGpt && scope.querySelector('img[src*="/backend-api/estuary/content"]') !== null) ||
         scope.querySelector('img[src^="blob:"]') !== null ||
         scope.querySelector('img[src^="data:image"]') !== null;
       const hasVideo = scope.querySelector('video') !== null;
       const hasDownloadOrCopyAction =
+        scope.querySelector('a[download]') !== null ||
         scope.querySelector('[aria-label*="Download" i]') !== null ||
         scope.querySelector('[aria-label*="下载"]') !== null ||
         scope.querySelector('[aria-label*="Copy image" i]') !== null ||
         scope.querySelector('[aria-label*="复制图片"]') !== null;
 
-      if (hasGeneratedImage || hasVideo || hasDownloadOrCopyAction) {
+      const hasVisibleLargeImage =
+        isChatGpt &&
+        Array.from(scope.querySelectorAll('img')).some((img) => {
+          const el = img as HTMLImageElement;
+          const rect = el.getBoundingClientRect();
+          const w = el.naturalWidth || rect.width || 0;
+          const h = el.naturalHeight || rect.height || 0;
+          return w >= 256 && h >= 256 && rect.width >= 120 && rect.height >= 120;
+        });
+
+      if (hasGeneratedImage || hasVisibleLargeImage || hasVideo || hasDownloadOrCopyAction) {
         return { textOnly: false };
       }
 
@@ -291,18 +307,74 @@ async function readImageBufferFromPage(page: Page, src: string): Promise<{ buffe
  */
 async function pickBestImageSrc(page: Page, selector: string): Promise<string> {
   const src = await page.evaluate((sel) => {
-    const rank = (nodes: HTMLImageElement[]) =>
-      nodes
-        .map((img) => {
+    const imageMeta = (img: HTMLImageElement) => {
           const rect = img.getBoundingClientRect();
           const width = img.naturalWidth || rect.width || 0;
           const height = img.naturalHeight || rect.height || 0;
           const area = Math.max(0, width) * Math.max(0, height);
           const s = img.currentSrc || img.src || '';
-          return { s, area };
-        })
+      return { img, s, area, rect, width, height };
+    };
+    const rank = (nodes: HTMLImageElement[]) =>
+      nodes
+        .map(imageMeta)
         .filter((it) => !!it.s && it.area > 0)
         .sort((a, b) => b.area - a.area);
+
+    const isChatGpt = location.hostname === 'chatgpt.com' || location.hostname.endsWith('.chatgpt.com');
+    if (isChatGpt) {
+      const allImages = Array.from(document.querySelectorAll(sel)) as HTMLImageElement[];
+      const articles = Array.from(document.querySelectorAll('article, [data-testid^="conversation-turn-"]'));
+      const ranked = allImages
+        .map((img) => {
+          const meta = imageMeta(img);
+          const roleContainer = img.closest('[data-message-author-role]') as HTMLElement | null;
+          const role = roleContainer?.getAttribute('data-message-author-role') || '';
+          const article =
+            img.closest('article') ||
+            roleContainer ||
+            img.closest('[data-testid^="conversation-turn-"]');
+          const articleIndex = article ? articles.indexOf(article) : -1;
+          const src = meta.s;
+          const alt = img.getAttribute('alt') || '';
+          const inComposer =
+            Boolean(img.closest('form:has(#prompt-textarea), #prompt-textarea, [contenteditable="true"]')) ||
+            Boolean(img.closest('[data-testid*="composer" i]'));
+          const hasResponseActions = article
+            ? article.querySelector(
+                [
+                  'button[aria-label*="Copy" i]',
+                  'button[aria-label*="复制"]',
+                  'button[aria-label*="Good response" i]',
+                  'button[aria-label*="Bad response" i]',
+                  'button[aria-label*="Download" i]',
+                  'button[aria-label*="下载"]',
+                ].join(', ')
+              ) !== null
+            : false;
+
+          let score = meta.area;
+          if (role === 'assistant') score += 100_000_000;
+          if (role === 'user') score -= 100_000_000;
+          if (hasResponseActions) score += 10_000_000;
+          if (/generated image/i.test(alt)) score += 5_000_000;
+          if (src.includes('/backend-api/estuary/content')) score += 2_000_000;
+          if (articleIndex >= 0) score += articleIndex * 10_000;
+          if (inComposer) score -= 200_000_000;
+
+          return { ...meta, role, score };
+        })
+        .filter((it) => {
+          if (!it.s || it.area <= 0) return false;
+          if (it.rect.width < 80 || it.rect.height < 80) return false;
+          return it.score > -50_000_000;
+        })
+        .sort((a, b) => b.score - a.score);
+
+      const bestAssistant = ranked.find((it) => it.role === 'assistant');
+      if (bestAssistant?.s) return bestAssistant.s;
+      if (ranked[0]?.s) return ranked[0].s;
+    }
 
     const genImgs = Array.from(
       document.querySelectorAll(
@@ -321,6 +393,49 @@ async function pickBestImageSrc(page: Page, selector: string): Promise<string> {
     }
   }, selector);
   return src || '';
+}
+
+async function resolveBestChatGptImagePage(page: Page): Promise<Page> {
+  try {
+    if (!page.url().includes('chatgpt.com')) return page;
+    const pages = page.context().pages().filter((p) => {
+      try {
+        return p.url().includes('chatgpt.com');
+      } catch {
+        return false;
+      }
+    });
+    if (pages.length <= 1) return page;
+
+    let best: { page: Page; score: number; url: string } | null = null;
+    for (const candidate of pages) {
+      const score = await candidate.evaluate(() => {
+        const generated = document.querySelectorAll(
+          'img[alt*="Generated image" i], img[src*="/backend-api/estuary/content"]'
+        ).length;
+        const visibleLargeImages = Array.from(document.querySelectorAll('img')).filter((img) => {
+          const el = img as HTMLImageElement;
+          const rect = el.getBoundingClientRect();
+          const w = el.naturalWidth || rect.width || 0;
+          const h = el.naturalHeight || rect.height || 0;
+          return w >= 256 && h >= 256 && rect.width > 80 && rect.height > 80;
+        }).length;
+        const conversationBonus = location.pathname.startsWith('/c/') ? 10 : 0;
+        return conversationBonus + generated * 100 + visibleLargeImages;
+      }).catch(() => 0);
+      const currentBonus = candidate === page ? 1 : 0;
+      const total = score + currentBonus;
+      if (!best || total > best.score) best = { page: candidate, score: total, url: candidate.url() };
+    }
+
+    if (best && best.page !== page && best.score >= 10) {
+      await best.page.bringToFront().catch(() => undefined);
+      return best.page;
+    }
+  } catch {
+    // keep original page
+  }
+  return page;
 }
 
 /** 点击「复制图片」后读剪贴板（需页面已授予 clipboard-read） */
@@ -431,6 +546,7 @@ export async function executeExtractImageDownload(
   let tempDir = '';
 
   try {
+    page = await resolveBestChatGptImagePage(page);
     const selector = (params.downloadButtonSelector || [
       '[aria-label="Download image"]',
       '[aria-label*="Download"]',

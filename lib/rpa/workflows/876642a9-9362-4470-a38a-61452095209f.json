@@ -119,9 +119,5 @@
       "label": "发布成功截图",
       "params": {}
     }
-  ],
-  "vars": [
-    "videoUrl",
-    "title"
   ]
 }

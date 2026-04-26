@@ -1,7 +1,7 @@
 {
   "id": "e1903baa-7a6d-4c30-a8ee-14ae29b804f4",
   "name": "gemini流程管理-续话下载测试",
-  "description": null,
+  "description": "",
   "nodes": [
     {
       "type": "navigate",
@@ -86,10 +86,5 @@
       },
       "continueOnError": false
     }
-  ],
-  "vars": [
-    "browserInstanceId",
-    "browserWsUrl",
-    "noteUrl"
   ]
 }

@@ -134,8 +134,8 @@ export interface PressHotkeyParams {
 export interface PasteImageClipboardParams {
   imageUrl?: string
   imageUrls?: string[] | string
-  /** 执行模式：auto=先尝试粘贴，失败再上传；paste=仅粘贴；upload=仅上传（直接生成附件） */
-  mode?: 'auto' | 'paste' | 'upload'
+  /** 执行模式：auto=先尝试粘贴，失败再上传；paste=仅粘贴；drag_drop=直接拖拽文件；upload=仅上传（直接生成附件） */
+  mode?: 'auto' | 'paste' | 'drag_drop' | 'upload'
   /** 优先使用该选择器定位输入框；为空时自动定位可输入框 */
   targetSelector?: string
   /** 粘贴快捷键。auto=mac 用 Meta+V，其它用 Control+V；也可手动填如 Meta+V / Control+V / ControlOrMeta+V */

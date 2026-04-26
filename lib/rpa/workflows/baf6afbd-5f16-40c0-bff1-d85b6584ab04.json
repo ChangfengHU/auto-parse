@@ -41,8 +41,5 @@
         "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]"
       }
     }
-  ],
-  "vars": [
-    "credentialId"
   ]
 }

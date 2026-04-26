@@ -1,0 +1,289 @@
+{
+  "extVersion": "1.30.01",
+  "name": "Gemini 参考图上传测试",
+  "icon": "riImageAddLine",
+  "table": [],
+  "version": "1.30.01",
+  "drawflow": {
+    "nodes": [
+      {
+        "id": "trigger_manual",
+        "type": "BlockBasic",
+        "initialized": false,
+        "position": {
+          "x": 100,
+          "y": 260
+        },
+        "data": {
+          "activeInInput": false,
+          "contextMenuName": "",
+          "contextTypes": [],
+          "date": "",
+          "days": [],
+          "delay": 5,
+          "description": "手动运行",
+          "disableBlock": false,
+          "interval": 60,
+          "isUrlRegex": false,
+          "observeElement": {
+            "baseElOptions": {
+              "attributeFilter": [],
+              "attributes": false,
+              "characterData": false,
+              "childList": true,
+              "subtree": false
+            },
+            "baseSelector": "",
+            "matchPattern": "",
+            "selector": "",
+            "targetOptions": {
+              "attributeFilter": [],
+              "attributes": false,
+              "characterData": false,
+              "childList": true,
+              "subtree": false
+            }
+          },
+          "parameters": [],
+          "preferParamsInTab": false,
+          "shortcut": "",
+          "time": "00:00",
+          "type": "manual",
+          "url": ""
+        },
+        "label": "trigger"
+      },
+      {
+        "id": "open_gemini",
+        "type": "BlockBasic",
+        "initialized": false,
+        "position": {
+          "x": 430,
+          "y": 260
+        },
+        "data": {
+          "disableBlock": false,
+          "description": "打开 Gemini",
+          "url": "https://gemini.google.com/app",
+          "userAgent": "",
+          "active": true,
+          "tabZoom": 1,
+          "inGroup": false,
+          "waitTabLoaded": true,
+          "updatePrevTab": false,
+          "customUserAgent": false
+        },
+        "label": "new-tab"
+      },
+      {
+        "id": "wait_composer",
+        "type": "BlockElementExists",
+        "initialized": false,
+        "position": {
+          "x": 760,
+          "y": 210
+        },
+        "data": {
+          "disableBlock": false,
+          "description": "等待 Gemini 输入框",
+          "findBy": "cssSelector",
+          "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]",
+          "tryCount": 30,
+          "timeout": 1000,
+          "markEl": false,
+          "throwError": true
+        },
+        "label": "element-exists"
+      },
+      {
+        "id": "click_create_image",
+        "type": "BlockBasic",
+        "initialized": false,
+        "position": {
+          "x": 1080,
+          "y": 210
+        },
+        "data": {
+          "disableBlock": false,
+          "description": "点击制作图片 / Create image",
+          "findBy": "xpath",
+          "waitForSelector": true,
+          "waitSelectorTimeout": 10000,
+          "selector": "//*[self::button or @role=\"button\" or self::intent-card]//*[contains(normalize-space(.), \"制作图片\") or contains(normalize-space(.), \"Create image\")]/ancestor::*[self::button or @role=\"button\"][1]",
+          "markEl": false,
+          "multiple": false
+        },
+        "label": "event-click"
+      },
+      {
+        "id": "upload_reference_image",
+        "type": "BlockBasic",
+        "initialized": false,
+        "position": {
+          "x": 1720,
+          "y": 210
+        },
+        "data": {
+          "disableBlock": false,
+          "description": "上传参考图。强化版：对 Gemini 多个容器派发带 File 的 drop/paste，并主动检测附件是否出现。",
+          "timeout": 60000,
+          "context": "website",
+          "code": "(async () => {\n  const DATA_URI = \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAABrUlEQVR4nO3dMW7CQBQF0VnA/VckpsARcg4sBokFFLZgQ0pFgpXQgTiDP4GyU85JLY8BqCzFc7w9E9WMqdudmT8AAAAAAAAAAAAAAODnb9vt9o3H4z+Px+P7/X59fT2KIt8cx7Esy/Lz8/Pn5+edTqfW63W32+3VajWfz6fVapWZpmlms9mEw+G3bt3y0+l0Op1Op9PpdDqdTqfT6XQ6nU6n0+l0Op1Op9PpdDodDofD4XA4HA6Hw+FwOBwOh8PhcDgcDofD4XA4HA6Hw+FwOBwOh8PhcDgcDofD4XA4HA6Hw+FwOBwOh8PhcDgcDofD4XA4HI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOI7jOP4+Ho8fHx9brVZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZZlWZaZTCa9Xq9cLpfL5XK5XC6Xy+VyOVwuF8vlcrlcLpfL5XK5XC6Xy+VyOVwuF8vlcrlcLpfL5XK5XJ7n+Xw+nw8AAAAAAAAAAAAAAMBP3wE3iwv1wVJ6AAAAAABJRU5ErkJggg==\";\n  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));\n  const log = (...args) => console.log('[gemini-reference-upload]', ...args);\n  const attachmentSelector = [\n    '.attachment-preview-wrapper',\n    '.file-preview-container',\n    '.file-preview-chip',\n    'img[aria-label=\"Image preview\"]',\n    '[aria-label*=\"Remove file\" i]',\n    '[aria-label*=\"Remove image\" i]',\n    '[aria-label*=\"Remove\" i]',\n    '[data-testid*=\"attachment\" i]',\n    '[data-test-id*=\"attachment\" i]',\n    '[class*=\"attachment\" i]',\n    '[class*=\"file-preview\" i]',\n    'img[src^=\"blob:\"]'\n  ].join(', ');\n\n  const dataUriToFile = async (dataUri, name) => {\n    const res = await fetch(dataUri);\n    const blob = await res.blob();\n    return new File([blob], name, { type: blob.type || 'image/png', lastModified: Date.now() });\n  };\n\n  const file = await dataUriToFile(DATA_URI, 'automa-reference.png');\n  log('prepared file', file.name, file.type, file.size);\n\n  const makeDataTransfer = () => {\n    const dt = new DataTransfer();\n    dt.items.add(file);\n    return dt;\n  };\n\n  const visible = (el) => {\n    if (!el || !(el instanceof Element)) return false;\n    const rect = el.getBoundingClientRect();\n    const style = getComputedStyle(el);\n    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';\n  };\n\n  const waitForAttachment = async (timeout = 5000) => {\n    const start = Date.now();\n    while (Date.now() - start < timeout) {\n      if (document.querySelector(attachmentSelector)) return true;\n      await sleep(250);\n    }\n    return false;\n  };\n\n  const input = document.querySelector('input[type=\"file\"], input[accept*=\"image\" i]');\n  if (input) {\n    const dt = makeDataTransfer();\n    input.files = dt.files;\n    input.dispatchEvent(new Event('input', { bubbles: true }));\n    input.dispatchEvent(new Event('change', { bubbles: true }));\n    log('tried input[type=file]');\n    if (await waitForAttachment(5000)) {\n      automaNextBlock();\n      return;\n    }\n  }\n\n  const selectors = [\n    'input-container',\n    'input-area-v2',\n    'chat-window',\n    'rich-textarea .ql-editor[contenteditable=\"true\"]',\n    'div.ql-editor[contenteditable=\"true\"]',\n    '[contenteditable=\"true\"]',\n    'main',\n    'body'\n  ];\n  const targets = Array.from(new Set(selectors.flatMap((sel) => Array.from(document.querySelectorAll(sel))))).filter(visible);\n  if (targets.length === 0) throw new Error('No visible Gemini drop targets found');\n  log('drop targets', targets.map((el) => el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).split(/\\s+/).slice(0, 2).join('.') : '')).join(' | '));\n\n  for (const target of targets) {\n    try {\n      target.focus?.();\n      target.scrollIntoView?.({ block: 'center', inline: 'center' });\n      const dt = makeDataTransfer();\n      for (const type of ['pointerenter', 'mouseenter', 'dragenter', 'dragover', 'drop']) {\n        const ev = type.startsWith('drag') || type === 'drop'\n          ? new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer: dt })\n          : new MouseEvent(type, { bubbles: true, cancelable: true, composed: true });\n        target.dispatchEvent(ev);\n        document.dispatchEvent(ev);\n        await sleep(120);\n      }\n      log('tried drop on', target.tagName.toLowerCase());\n      if (await waitForAttachment(2500)) {\n        log('attachment detected after drop');\n        automaNextBlock();\n        return;\n      }\n    } catch (err) {\n      log('drop target failed', err && err.message ? err.message : err);\n    }\n  }\n\n  const editor = document.querySelector('rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"], [contenteditable=\"true\"]');\n  if (editor) {\n    editor.focus();\n    const dt = makeDataTransfer();\n    const paste = new ClipboardEvent('paste', { bubbles: true, cancelable: true, composed: true, clipboardData: dt });\n    editor.dispatchEvent(paste);\n    document.dispatchEvent(paste);\n    log('tried synthetic paste');\n    if (await waitForAttachment(5000)) {\n      automaNextBlock();\n      return;\n    }\n  }\n\n  throw new Error('Gemini did not accept synthetic file upload. Automa cannot access the native file chooser here; use the Playwright workflow for reliable upload.');\n})().catch((err) => {\n  console.error('[gemini-reference-upload] failed', err);\n  throw err;\n});",
+          "preloadScripts": [],
+          "everyNewTab": false,
+          "runBeforeLoad": false
+        },
+        "label": "javascript-code"
+      },
+      {
+        "id": "wait_attachment",
+        "type": "BlockElementExists",
+        "initialized": false,
+        "position": {
+          "x": 2040,
+          "y": 210
+        },
+        "data": {
+          "disableBlock": false,
+          "description": "校验附件出现",
+          "findBy": "cssSelector",
+          "selector": ".attachment-preview-wrapper, .file-preview-container, .file-preview-chip, img[aria-label=\"Image preview\"], [aria-label*=\"Remove file\" i], [aria-label*=\"Remove image\" i], [aria-label*=\"Remove\" i], [aria-label*=\"删除\"], [aria-label*=\"移除\"], [data-testid*=\"attachment\" i], [data-test-id*=\"attachment\" i], [class*=\"attachment\" i], [class*=\"file-preview\" i], img[src^=\"blob:\"]",
+          "tryCount": 60,
+          "timeout": 1000,
+          "markEl": true,
+          "throwError": true
+        },
+        "label": "element-exists"
+      },
+      {
+        "id": "click_upload_menu",
+        "type": "BlockBasic",
+        "initialized": false,
+        "position": {
+          "x": 1400,
+          "y": 210
+        },
+        "data": {
+          "disableBlock": false,
+          "description": "点击 Gemini 左下角 + 打开上传菜单",
+          "findBy": "cssSelector",
+          "waitForSelector": true,
+          "waitSelectorTimeout": 10000,
+          "selector": "[aria-label*=\"Open upload file menu\" i], .upload-card-button",
+          "markEl": false,
+          "multiple": false
+        },
+        "label": "event-click"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge_trigger_open",
+        "type": "custom",
+        "source": "trigger_manual",
+        "target": "open_gemini",
+        "sourceHandle": "trigger_manual-output-1",
+        "targetHandle": "open_gemini-input-1",
+        "updatable": true,
+        "selectable": true,
+        "data": {},
+        "label": "",
+        "markerEnd": "arrowclosed"
+      },
+      {
+        "id": "edge_open_wait_composer",
+        "type": "custom",
+        "source": "open_gemini",
+        "target": "wait_composer",
+        "sourceHandle": "open_gemini-output-1",
+        "targetHandle": "wait_composer-input-1",
+        "updatable": true,
+        "selectable": true,
+        "data": {},
+        "label": "",
+        "markerEnd": "arrowclosed"
+      },
+      {
+        "id": "edge_wait_click_create",
+        "type": "custom",
+        "source": "wait_composer",
+        "target": "click_create_image",
+        "sourceHandle": "wait_composer-output-1",
+        "targetHandle": "click_create_image-input-1",
+        "updatable": true,
+        "selectable": true,
+        "data": {},
+        "label": "",
+        "markerEnd": "arrowclosed"
+      },
+      {
+        "id": "edge_click_create_upload_menu",
+        "type": "custom",
+        "source": "click_create_image",
+        "target": "click_upload_menu",
+        "sourceHandle": "click_create_image-output-1",
+        "targetHandle": "click_upload_menu-input-1",
+        "updatable": true,
+        "selectable": true,
+        "data": {},
+        "label": "",
+        "markerEnd": "arrowclosed"
+      },
+      {
+        "id": "edge_upload_menu_upload_file",
+        "type": "custom",
+        "source": "click_upload_menu",
+        "target": "upload_reference_image",
+        "sourceHandle": "click_upload_menu-output-1",
+        "targetHandle": "upload_reference_image-input-1",
+        "updatable": true,
+        "selectable": true,
+        "data": {},
+        "label": "",
+        "markerEnd": "arrowclosed"
+      },
+      {
+        "id": "edge_upload_wait_attachment",
+        "type": "custom",
+        "source": "upload_reference_image",
+        "target": "wait_attachment",
+        "sourceHandle": "upload_reference_image-output-1",
+        "targetHandle": "wait_attachment-input-1",
+        "updatable": true,
+        "selectable": true,
+        "data": {},
+        "label": "",
+        "markerEnd": "arrowclosed"
+      }
+    ],
+    "position": [
+      -180,
+      20
+    ],
+    "zoom": 0.85,
+    "viewport": {
+      "x": -180,
+      "y": 20,
+      "zoom": 0.85
+    }
+  },
+  "settings": {
+    "aipowerToken": "",
+    "blockDelay": 500,
+    "debugMode": false,
+    "defaultColumnName": "column",
+    "execContext": "popup",
+    "executedBlockOnWeb": false,
+    "inputAutocomplete": true,
+    "insertDefaultColumn": false,
+    "notification": true,
+    "onError": "stop-workflow",
+    "publicId": "",
+    "restartTimes": 1,
+    "reuseLastState": false,
+    "saveLog": true
+  },
+  "globalData": "{\n\t\"referenceImage\": \"base64 embedded\"\n}",
+  "description": "Gemini 参考图上传测试。强化版：用 javascript-code 构造 File，对多个 Gemini 容器派发 drop/paste；若仍失败，说明 Gemini 拒绝 Automa 合成上传事件，需要 Playwright filechooser。",
+  "includedWorkflows": {}
+}

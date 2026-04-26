@@ -80,10 +80,5 @@
       },
       "continueOnError": false
     }
-  ],
-  "vars": [
-    "browserInstanceId",
-    "browserWsUrl",
-    "noteUrl"
   ]
 }

@@ -1,0 +1,129 @@
+{
+  "id": "cf01c4c6-99d0-4536-8f22-9e09c6cf7c66",
+  "name": "chatgpt生图-ads-上传参考图下载版",
+  "description": "参考 Gemini Ads 工作流改造的 ChatGPT 生图流程。支持可选参考图：sourceImageUrl（单张）/ sourceImageUrls（多张，JSON 数组或逗号分隔）；执行后提取生成图片并上传到本地 files API。",
+  "nodes": [
+    {
+      "type": "navigate",
+      "label": "导航 ChatGPT",
+      "params": {
+        "url": "https://chatgpt.com/",
+        "adsApiUrl": "http://127.0.0.1:50325",
+        "waitUntil": "domcontentloaded",
+        "useAdsPower": true,
+        "adsProfileId": "{{browserInstanceId}}",
+        "adsProxyServer": "",
+        "adsManualCdpUrl": "{{browserWsUrl}}",
+        "postClickEnabled": false,
+        "postClickElements": []
+      },
+      "waitAfter": {
+        "action": "appeared",
+        "enabled": true,
+        "timeout": 30000,
+        "selector": "#prompt-textarea, div#prompt-textarea[contenteditable=\"true\"], textarea[placeholder*=\"Message\" i], textarea[placeholder*=\"询问\"], textarea[placeholder*=\"发送\"]"
+      }
+    },
+    {
+      "type": "paste_image_clipboard",
+      "label": "上传参考图",
+      "params": {
+        "mode": "drag_drop",
+        "imageUrl": "{{sourceImageUrl}}",
+        "imageUrls": "",
+        "outputVar": "pastedImageUrls",
+        "pasteHotkey": "ControlOrMeta+V",
+        "targetSelector": "form:has(#prompt-textarea), #prompt-textarea, div#prompt-textarea[contenteditable=\"true\"]",
+        "uploadFallback": true,
+        "waitAfterPaste": 6000,
+        "waitAfterUpload": 1800,
+        "verifyAttachment": true,
+        "ensurePageFocused": true,
+        "fileInputSelector": "input[type=\"file\"][accept*=\"image\" i], input[type=\"file\"]",
+        "fallbackOnNoEffect": true,
+        "openUploaderSelector": "[data-testid=\"composer-plus-btn\"], button[aria-label*=\"Attach\" i], button[aria-label*=\"Upload\" i], button[aria-label*=\"Add photos\" i], button[aria-label*=\"Add files\" i], button[aria-label*=\"上传\"], button[aria-label*=\"附加\"], button[aria-label*=\"添加\"]",
+        "attachIndicatorSelector": "[data-testid*=\"attachment\"], [data-testid*=\"file\"], [aria-label*=\"Remove attachment\" i], [aria-label*=\"Remove file\" i], [aria-label*=\"Remove image\" i], [aria-label*=\"移除\"], [aria-label*=\"删除\"], img[alt*=\"Uploaded\" i], img[src^=\"blob:\"], form img, [data-testid*=\"composer\" i] img"
+      },
+      "waitAfter": {
+        "enabled": false,
+        "timeout": 1000
+      }
+    },
+    {
+      "type": "text_input",
+      "label": "输入提示词并提交",
+      "params": {
+        "delay": 15,
+        "value": "{{noteUrl}}",
+        "selector": "#prompt-textarea, div#prompt-textarea[contenteditable=\"true\"], textarea[placeholder*=\"Message\" i], textarea[placeholder*=\"询问\"], textarea[placeholder*=\"发送\"]",
+        "autoEnter": true,
+        "inputMode": "fill",
+        "autoEnterPollUntilStop": true,
+        "autoEnterPollUntilSelector": "button[data-testid=\"stop-button\"], button[aria-label*=\"Stop\" i], button[aria-label*=\"停止\"], button:has-text(\"Stop\"), button:has-text(\"停止\")",
+        "autoEnterPollIntervalMs": 3000,
+        "autoEnterPollMaxMs": 180000
+      },
+      "waitAfter": {
+        "enabled": true,
+        "timeout": 1500
+      },
+      "continueOnError": true
+    },
+    {
+      "type": "extract_image_download",
+      "label": "⬇️ 下载事件提取",
+      "params": {
+        "ossPath": "chatgpt-images/{{timestamp}}.png",
+        "outputVar": "imageUrl",
+        "maxRetries": 4,
+        "buttonIndex": -1,
+        "uploadToOSS": true,
+        "buttonTimeout": 90000,
+        "failFastAction": "fail_workflow",
+        "storageBackend": "local_api",
+        "waitAfterClick": 800,
+        "waitImageReady": true,
+        "waitImageReadyTimeout": 240000,
+        "waitImageReadyAction": "appeared",
+        "waitImageReadySelector": "img[alt*=\"Generated image\" i], img[src*=\"/backend-api/estuary/content\"], img[src^=\"blob:\"], img[src^=\"data:image\"], article img, [data-testid*=\"image\"] img",
+        "waitImageReadyAppearTimeout": 30000,
+        "downloadTimeout": 35000,
+        "allowDomFallback": true,
+        "preferDomExtraction": true,
+        "fallbackImageSelector": "img[alt*=\"Generated image\" i], article img[src*=\"/backend-api/estuary/content\"], main img[src*=\"/backend-api/estuary/content\"], article img[src^=\"blob:\"], article img[src^=\"data:image\"], main img[src^=\"blob:\"], main img[src^=\"data:image\"], [data-testid*=\"image\"] img, img[src^=\"blob:\"], img[src^=\"data:image\"]",
+        "copyImageButtonSelector": "button[aria-label*=\"Copy image\" i], button[aria-label*=\"复制图片\"], button:has-text(\"Copy image\"), button:has-text(\"复制图片\")",
+        "minFileSizeBytes": 65536,
+        "localFilesUploadUrl": "http://127.0.0.1:1002/v1beta/files:upload",
+        "menuTriggerSelector": "button[aria-label*=\"More\" i], button[aria-label*=\"更多\"], button[data-testid*=\"more\"]",
+        "menuItemSelector": "[role=\"menuitem\"]:has-text(\"Download\"), [role=\"menuitem\"]:has-text(\"下载\"), button:has-text(\"Download\"), button:has-text(\"下载\"), a[download]",
+        "failFastTextIncludes": [
+          "I can't help create",
+          "I can’t help create",
+          "I’m unable to generate",
+          "I am unable to generate",
+          "Something went wrong",
+          "There was an error",
+          "无法生成",
+          "出了点问题",
+          "发生错误"
+        ],
+        "failFastMergeDefaultPhrases": true,
+        "allowClipboardFallback": true,
+        "downloadButtonSelector": "button[aria-label*=\"Download\" i], a[aria-label*=\"Download\" i], button[aria-label*=\"下载\"], a[aria-label*=\"下载\"], button:has-text(\"Download\"), button:has-text(\"下载\"), a[download]",
+        "serializeClipboardAccess": true
+      },
+      "waitAfter": {
+        "enabled": false,
+        "timeout": 5000
+      },
+      "continueOnError": false
+    }
+  ],
+  "vars": [
+    "browserInstanceId",
+    "browserWsUrl",
+    "noteUrl",
+    "sourceImageUrl",
+    "sourceImageUrls"
+  ]
+}

@@ -454,7 +454,18 @@ export async function executePasteImageClipboard(
           log.push(`📋 [${i + 1}/${downloaded.length}] 已写入剪贴板：${img.mimeType}`);
           ctx.emit?.('log', `📋 已注入第 ${i + 1} 张图片到剪贴板`);
 
-          await target.click({ timeout: 15_000 });
+          const focusedByClick = await target.click({ timeout: 4_000 }).then(() => true).catch((e) => {
+            log.push(`⚠️ 输入框常规点击聚焦失败，尝试 DOM focus：${formatErrorWithCause(e)}`);
+            return false;
+          });
+          if (!focusedByClick) {
+            await target.evaluate((el) => {
+              if (el instanceof HTMLElement) {
+                el.scrollIntoView({ block: 'center', inline: 'center' });
+                el.focus();
+              }
+            });
+          }
 
           let pastedOk = false;
           let lastErr: unknown;
@@ -485,7 +496,7 @@ export async function executePasteImageClipboard(
     };
 
     try {
-      if (mode === 'upload') {
+      if (mode === 'upload' || mode === 'drag_drop') {
         throw new Error('__FORCE_UPLOAD__');
       }
       await tryClipboardPaste();
@@ -555,6 +566,7 @@ export async function executePasteImageClipboard(
       };
 
       // `mode=upload` 代表显式走上传入口，不应先尝试 drag&drop。
+      // `mode=drag_drop` 则只绕开剪贴板，优先走拖拽事件。
       if (mode !== 'upload') {
         try {
           const ok = await tryUploadViaDragDrop();
