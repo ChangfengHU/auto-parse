@@ -201,9 +201,10 @@ export async function executePasteImageClipboard(
             Accept: 'image/webp,image/apng,image/avif,image/*,*/*;q=0.8',
           },
           timeoutMs: 15_000,
+          bypassProxy: true,
         });
       } catch (error) {
-        pushLog(`⚠️ [${index + 1}/${imageUrls.length}] 代理下载失败，尝试直连：${formatErrorWithCause(error)}（已耗时 ${formatMs(Date.now() - stageStartedAt)}）`);
+        pushLog(`⚠️ [${index + 1}/${imageUrls.length}] 直连下载失败，尝试代理：${formatErrorWithCause(error)}（已耗时 ${formatMs(Date.now() - stageStartedAt)}）`);
         try {
           response = await proxyFetch(url, {
             headers: {
@@ -211,12 +212,11 @@ export async function executePasteImageClipboard(
               Accept: 'image/webp,image/apng,image/avif,image/*,*/*;q=0.8',
             },
             timeoutMs: 15_000,
-            bypassProxy: true,
           });
-        } catch (directError) {
+        } catch (proxyError) {
           throw new Error(
             `第 ${index + 1} 张下载失败：${url} · ` +
-              `proxy=${formatErrorWithCause(error)} · direct=${formatErrorWithCause(directError)}`
+              `direct=${formatErrorWithCause(error)} · proxy=${formatErrorWithCause(proxyError)}`
           );
         }
       }

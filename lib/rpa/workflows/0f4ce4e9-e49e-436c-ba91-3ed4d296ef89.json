@@ -1,13 +1,13 @@
 {
-  "id": "598d8a72-5030-45ac-8abf-acf4748564aa",
-  "name": "chactgpt-图片生成",
+  "id": "0f4ce4e9-e49e-436c-ba91-3ed4d296ef89",
+  "name": "chactgpt-图片生成 (副本)",
   "description": "基于非Ads基线流程，仅首节点切换Ads并支持浏览器实例参数\n\n支持可选参考图：sourceImageUrl（单张）/ sourceImageUrls（多张，JSON 数组或逗号分隔）。",
   "nodes": [
     {
       "type": "navigate",
       "label": "导航",
       "params": {
-        "url": "https://chatgpt.com/",
+        "url": "https://notebooklm.google.com/notebook/7b15ec31-87ae-4172-aa5f-c04f8abc0b5a",
         "adsApiUrl": "http://127.0.0.1:50325",
         "waitUntil": "domcontentloaded",
         "useAdsPower": true,
@@ -38,6 +38,30 @@
         "enabled": false,
         "timeout": 30000,
         "selector": "rich-textarea .ql-editor[contenteditable=\"true\"], div.ql-editor[contenteditable=\"true\"]"
+      }
+    },
+    {
+      "type": "text_input",
+      "label": "文本输入",
+      "params": {
+        "value": "{{noteUrl}}",
+        "selector": "#mat-input-1",
+        "autoEnter": false,
+        "inputMode": "fill",
+        "autoEnterPollMaxMs": 180000,
+        "autoEnterPollUntilStop": false,
+        "autoEnterPollIntervalMs": 3000,
+        "autoEnterPollUntilSelector": "button[aria-label*=\"Stop\" i], button[aria-label*=\"Stop response\" i], button[aria-label*=\"停止\"], button[aria-label*=\"停止回答\"]"
+      }
+    },
+    {
+      "type": "click",
+      "label": "点击",
+      "params": {
+        "text": "",
+        "elements": [],
+        "selector": "#mat-mdc-dialog-0 > div > div > add-sources-dialog > div > div.mat-mdc-dialog-content.mdc-dialog__content > div.search-container.ng-star-inserted > source-discovery-query-box > div > form > div.actions > div.actions-enter > button > mat-icon",
+        "useSelector": false
       }
     },
     {

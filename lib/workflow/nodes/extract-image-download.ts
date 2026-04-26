@@ -305,14 +305,14 @@ async function readImageBufferFromPage(page: Page, src: string): Promise<{ buffe
 /**
  * 优先取 model-response / generated-image 内的图（避免与输入框参考图预览混淆），再按 selector 全页兜底。
  */
-async function pickBestImageSrc(page: Page, selector: string): Promise<string> {
-  const src = await page.evaluate((sel) => {
+async function pickBestImageSrc(page: Page, selector: string): Promise<{ src: string; debug: string }> {
+  const picked = await page.evaluate((sel) => {
     const imageMeta = (img: HTMLImageElement) => {
-          const rect = img.getBoundingClientRect();
-          const width = img.naturalWidth || rect.width || 0;
-          const height = img.naturalHeight || rect.height || 0;
-          const area = Math.max(0, width) * Math.max(0, height);
-          const s = img.currentSrc || img.src || '';
+      const rect = img.getBoundingClientRect();
+      const width = img.naturalWidth || rect.width || 0;
+      const height = img.naturalHeight || rect.height || 0;
+      const area = Math.max(0, width) * Math.max(0, height);
+      const s = img.currentSrc || img.src || '';
       return { img, s, area, rect, width, height };
     };
     const rank = (nodes: HTMLImageElement[]) =>
@@ -329,11 +329,14 @@ async function pickBestImageSrc(page: Page, selector: string): Promise<string> {
         .map((img) => {
           const meta = imageMeta(img);
           const roleContainer = img.closest('[data-message-author-role]') as HTMLElement | null;
-          const role = roleContainer?.getAttribute('data-message-author-role') || '';
           const article =
             img.closest('article') ||
             roleContainer ||
             img.closest('[data-testid^="conversation-turn-"]');
+          const role =
+            roleContainer?.getAttribute('data-message-author-role') ||
+            (article?.querySelector('[data-message-author-role]') as HTMLElement | null)?.getAttribute('data-message-author-role') ||
+            '';
           const articleIndex = article ? articles.indexOf(article) : -1;
           const src = meta.s;
           const alt = img.getAttribute('alt') || '';
@@ -371,9 +374,22 @@ async function pickBestImageSrc(page: Page, selector: string): Promise<string> {
         })
         .sort((a, b) => b.score - a.score);
 
+      const summarize = (it: (typeof ranked)[number], pickedBy: string) => ({
+        src: it.s,
+        debug: [
+          `pickedBy=${pickedBy}`,
+          `role=${it.role || 'unknown'}`,
+          `area=${Math.round(it.area)}`,
+          `score=${Math.round(it.score)}`,
+          `visible=${Math.round(it.rect.width)}x${Math.round(it.rect.height)}`,
+        ].join(', '),
+      });
+
       const bestAssistant = ranked.find((it) => it.role === 'assistant');
-      if (bestAssistant?.s) return bestAssistant.s;
-      if (ranked[0]?.s) return ranked[0].s;
+      if (bestAssistant?.s) return summarize(bestAssistant, 'chatgpt-assistant');
+      const bestNonUser = ranked.find((it) => it.role !== 'user');
+      if (bestNonUser?.s) return summarize(bestNonUser, 'chatgpt-non-user');
+      return { src: '', debug: `pickedBy=chatgpt-none, candidates=${ranked.length}` };
     }
 
     const genImgs = Array.from(
@@ -382,60 +398,20 @@ async function pickBestImageSrc(page: Page, selector: string): Promise<string> {
       )
     ) as HTMLImageElement[];
     const bestGen = rank(genImgs);
-    if (bestGen[0]?.s) return bestGen[0].s;
+    if (bestGen[0]?.s) return { src: bestGen[0].s, debug: 'pickedBy=generated-image' };
 
     try {
       const nodes = Array.from(document.querySelectorAll(sel)) as HTMLImageElement[];
       const best = rank(nodes);
-      return best[0]?.s || '';
+      return { src: best[0]?.s || '', debug: best[0]?.s ? 'pickedBy=selector-area' : 'pickedBy=none' };
     } catch {
-      return '';
+      return { src: '', debug: 'pickedBy=selector-error' };
     }
   }, selector);
-  return src || '';
-}
-
-async function resolveBestChatGptImagePage(page: Page): Promise<Page> {
-  try {
-    if (!page.url().includes('chatgpt.com')) return page;
-    const pages = page.context().pages().filter((p) => {
-      try {
-        return p.url().includes('chatgpt.com');
-      } catch {
-        return false;
-      }
-    });
-    if (pages.length <= 1) return page;
-
-    let best: { page: Page; score: number; url: string } | null = null;
-    for (const candidate of pages) {
-      const score = await candidate.evaluate(() => {
-        const generated = document.querySelectorAll(
-          'img[alt*="Generated image" i], img[src*="/backend-api/estuary/content"]'
-        ).length;
-        const visibleLargeImages = Array.from(document.querySelectorAll('img')).filter((img) => {
-          const el = img as HTMLImageElement;
-          const rect = el.getBoundingClientRect();
-          const w = el.naturalWidth || rect.width || 0;
-          const h = el.naturalHeight || rect.height || 0;
-          return w >= 256 && h >= 256 && rect.width > 80 && rect.height > 80;
-        }).length;
-        const conversationBonus = location.pathname.startsWith('/c/') ? 10 : 0;
-        return conversationBonus + generated * 100 + visibleLargeImages;
-      }).catch(() => 0);
-      const currentBonus = candidate === page ? 1 : 0;
-      const total = score + currentBonus;
-      if (!best || total > best.score) best = { page: candidate, score: total, url: candidate.url() };
-    }
-
-    if (best && best.page !== page && best.score >= 10) {
-      await best.page.bringToFront().catch(() => undefined);
-      return best.page;
-    }
-  } catch {
-    // keep original page
-  }
-  return page;
+  return {
+    src: picked?.src || '',
+    debug: picked?.debug || 'pickedBy=unknown',
+  };
 }
 
 /** 点击「复制图片」后读剪贴板（需页面已授予 clipboard-read） */
@@ -546,7 +522,6 @@ export async function executeExtractImageDownload(
   let tempDir = '';
 
   try {
-    page = await resolveBestChatGptImagePage(page);
     const selector = (params.downloadButtonSelector || [
       '[aria-label="Download image"]',
       '[aria-label*="Download"]',
@@ -765,10 +740,10 @@ export async function executeExtractImageDownload(
           }
         }
         if (!imageBuffer) {
-        const src = await pickBestImageSrc(page, domFallbackSel);
-        if (src) {
-          log.push(`🖼️ 找到图片 src: ${src.slice(0, 100)}`);
-          const extracted = await readImageBufferFromPage(page, src);
+        const pickedImage = await pickBestImageSrc(page, domFallbackSel);
+        if (pickedImage.src) {
+          log.push(`🖼️ 找到图片 src: ${pickedImage.src.slice(0, 100)} (${pickedImage.debug})`);
+          const extracted = await readImageBufferFromPage(page, pickedImage.src);
           if (minSizeDom > 0 && extracted.buffer.length < minSizeDom) {
             log.push(`⚠️ DOM 优先提取过小 (${extracted.buffer.length} bytes < ${minSizeDom})，回退到下载流程`);
           } else {
@@ -1004,9 +979,10 @@ export async function executeExtractImageDownload(
             // 再尝试 DOM（pickBestImageSrc 已优先 generated-image 内大图，减轻误选参考图预览）
             if (allowDomFallback) {
               try {
-                const src = await pickBestImageSrc(page, fallbackImageSelector);
-                if (src) {
-                  const extracted = await readImageBufferFromPage(page, src);
+                const pickedImage = await pickBestImageSrc(page, fallbackImageSelector);
+                if (pickedImage.src) {
+                  log.push(`🖼️ DOM 兜底候选: ${pickedImage.src.slice(0, 100)} (${pickedImage.debug})`);
+                  const extracted = await readImageBufferFromPage(page, pickedImage.src);
                   if (minFileSizeBytes > 0 && extracted.buffer.length < minFileSizeBytes) {
                     log.push(`⚠️ DOM 兜底图片过小(${extracted.buffer.length} bytes)，低于阈值 ${minFileSizeBytes}`);
                   } else {
@@ -1116,9 +1092,10 @@ export async function executeExtractImageDownload(
           log.push(`↩️ 下载链路未拿到媒体，强制启用一次 DOM 兜底提取（即使 allowDomFallback=false）`);
         }
         log.push(`↩️ 下载事件失败，尝试 DOM 兜底提取: ${fallbackImageSelector}`);
-        const src = await pickBestImageSrc(page, fallbackImageSelector);
-        if (!src) throw new Error(`兜底提取失败：未找到图片 src (${fallbackImageSelector})`);
-        const extracted = await readImageBufferFromPage(page, src);
+        const pickedImage = await pickBestImageSrc(page, fallbackImageSelector);
+        if (!pickedImage.src) throw new Error(`兜底提取失败：未找到图片 src (${fallbackImageSelector})；${pickedImage.debug}`);
+        log.push(`🖼️ 最终 DOM 兜底候选: ${pickedImage.src.slice(0, 100)} (${pickedImage.debug})`);
+        const extracted = await readImageBufferFromPage(page, pickedImage.src);
         const ffReasonFinal = await detectFailFast(
           page,
           { textIncludes: failFastTextIncludes, selector: failFastSelector },
