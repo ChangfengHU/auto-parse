@@ -59,6 +59,18 @@ export async function executePasteImageClipboard(
 ): Promise<NodeResult> {
   const log: string[] = [];
   const tempFiles: string[] = [];
+  const startedAt = Date.now();
+  const pushLog = (message: string) => {
+    log.push(message);
+    ctx.emit?.('log', message);
+  };
+  const formatMs = (ms: number) => `${(ms / 1000).toFixed(2)}s`;
+  const logStage = (message: string, stageStartedAt?: number) => {
+    const suffix = stageStartedAt
+      ? `（本段 ${formatMs(Date.now() - stageStartedAt)}，累计 ${formatMs(Date.now() - startedAt)}）`
+      : `（累计 ${formatMs(Date.now() - startedAt)}）`;
+    pushLog(`${message}${suffix}`);
+  };
 
   try {
     const normalizeImageUrls = (value: unknown): string[] => {
@@ -152,7 +164,7 @@ export async function executePasteImageClipboard(
     const fileInputSelector = String(params.fileInputSelector || '').trim() || 'input[type="file"]';
 
     if (imageUrls.length === 0) {
-      log.push('⏭️ imageUrls 为空，自动跳过图片粘贴');
+      pushLog('⏭️ imageUrls 为空，自动跳过图片粘贴');
       const screenshot = await captureScreenshot(page);
       return {
         success: true,
@@ -179,6 +191,8 @@ export async function executePasteImageClipboard(
     };
 
     const downloadToTemp = async (url: string, index: number): Promise<DownloadedImage> => {
+      const stageStartedAt = Date.now();
+      pushLog(`⏱️ [上传参考图 ${index + 1}/${imageUrls.length}] 开始下载源图：${url}`);
       let response;
       try {
         response = await proxyFetch(url, {
@@ -189,7 +203,7 @@ export async function executePasteImageClipboard(
           timeoutMs: 15_000,
         });
       } catch (error) {
-        log.push(`⚠️ [${index + 1}/${imageUrls.length}] 代理下载失败，尝试直连：${formatErrorWithCause(error)}`);
+        pushLog(`⚠️ [${index + 1}/${imageUrls.length}] 代理下载失败，尝试直连：${formatErrorWithCause(error)}（已耗时 ${formatMs(Date.now() - stageStartedAt)}）`);
         try {
           response = await proxyFetch(url, {
             headers: {
@@ -228,12 +242,13 @@ export async function executePasteImageClipboard(
       await fs.writeFile(filePath, bytes);
       tempFiles.push(filePath);
 
-      log.push(`⬇️ [${index + 1}/${imageUrls.length}] 已下载图片：${(bytes.length / 1024).toFixed(1)} KB (${mimeType}) <- ${url}`);
+      logStage(`⬇️ [${index + 1}/${imageUrls.length}] 已下载图片：${(bytes.length / 1024).toFixed(1)} KB (${mimeType}) <- ${url}`, stageStartedAt);
       return { url, mimeType, bytes, base64, filePath };
     };
 
+    const resolveStartedAt = Date.now();
     const { target, selectorUsed, fallback } = await resolveTarget();
-    log.push(`🎯 定位输入框：${selectorUsed}${fallback ? '（自动定位）' : ''}`);
+    logStage(`🎯 定位输入框：${selectorUsed}${fallback ? '（自动定位）' : ''}`, resolveStartedAt);
 
     const targetHandle = await target.elementHandle();
     if (!targetHandle) throw new Error('无法获取输入框元素句柄');
@@ -286,7 +301,7 @@ export async function executePasteImageClipboard(
       const before = await getAttachmentSnapshot();
       if (before.count <= 0) return;
 
-      log.push(`🧹 检测到旧附件 ${before.count} 个，先清理后再上传新图`);
+      pushLog(`🧹 检测到旧附件 ${before.count} 个，先清理后再上传新图`);
 
       const removeSelectors = [
         '[aria-label*="Remove image" i]',
@@ -330,7 +345,7 @@ export async function executePasteImageClipboard(
 
         await page.waitForTimeout(220);
         const after = await getAttachmentSnapshot();
-        log.push(`🧹 清理附件 round=${round}: click=${clicked}, 剩余=${after.count}`);
+        logStage(`🧹 清理附件 round=${round}: click=${clicked}, 剩余=${after.count}`);
         if (after.count <= 0) break;
         if (!clicked) break;
       }
@@ -354,6 +369,7 @@ export async function executePasteImageClipboard(
 
       const start = Date.now();
       let last = before;
+      pushLog(`⏱️ 开始附件校验：${stage}，before=${before.count}，timeout=${formatMs(timeoutMs)}`);
       while (Date.now() - start < timeoutMs) {
         const after = await getAttachmentSnapshot();
         last = after;
@@ -363,7 +379,7 @@ export async function executePasteImageClipboard(
         const replacedOk = after.count >= before.count && after.signature && after.signature !== before.signature;
 
         if (countOk || replacedOk) {
-          log.push(`✅ 附件校验通过：before=${before.count} → after=${after.count}${replacedOk && !countOk ? '（替换模式）' : ''}`);
+          logStage(`✅ 附件校验通过：before=${before.count} → after=${after.count}${replacedOk && !countOk ? '（替换模式）' : ''}`, start);
           return;
         }
         await page.waitForTimeout(300);
@@ -382,7 +398,7 @@ export async function executePasteImageClipboard(
         if (ensurePageFocused) {
           await page.bringToFront().catch(() => {});
           await page.evaluate(() => window.focus()).catch(() => {});
-          log.push('🧲 已尝试 bringToFront + window.focus');
+          pushLog('🧲 已尝试 bringToFront + window.focus');
         }
 
         const origin = (() => {
@@ -451,11 +467,11 @@ export async function executePasteImageClipboard(
             { base64: img.base64, type: img.mimeType }
           );
 
-          log.push(`📋 [${i + 1}/${downloaded.length}] 已写入剪贴板：${img.mimeType}`);
+          pushLog(`📋 [${i + 1}/${downloaded.length}] 已写入剪贴板：${img.mimeType}`);
           ctx.emit?.('log', `📋 已注入第 ${i + 1} 张图片到剪贴板`);
 
           const focusedByClick = await target.click({ timeout: 4_000 }).then(() => true).catch((e) => {
-            log.push(`⚠️ 输入框常规点击聚焦失败，尝试 DOM focus：${formatErrorWithCause(e)}`);
+            pushLog(`⚠️ 输入框常规点击聚焦失败，尝试 DOM focus：${formatErrorWithCause(e)}`);
             return false;
           });
           if (!focusedByClick) {
@@ -470,21 +486,21 @@ export async function executePasteImageClipboard(
           let pastedOk = false;
           let lastErr: unknown;
           const candidates = pasteHotkeys.length ? pasteHotkeys : [resolvedPasteHotkey];
-          log.push(`⌨️ 粘贴候选快捷键：${candidates.join(' | ')}`);
+          pushLog(`⌨️ 粘贴候选快捷键：${candidates.join(' | ')}`);
 
           for (const hk of candidates) {
             try {
-              log.push(`⌨️ 粘贴快捷键：${hk}`);
+              pushLog(`⌨️ 粘贴快捷键：${hk}`);
               await page.keyboard.press(hk);
               await page.waitForTimeout(waitAfterPaste);
-              log.push(`✅ [${i + 1}/${downloaded.length}] 已执行粘贴（键盘事件已触发）`);
+              pushLog(`✅ [${i + 1}/${downloaded.length}] 已执行粘贴（键盘事件已触发）`);
 
               await verifyIncrease(beforeSnap, 1, `第 ${i + 1} 张粘贴`, Math.max(4000, waitAfterPaste * 4));
               pastedOk = true;
               break;
             } catch (e) {
               lastErr = e;
-              log.push(`⚠️ ${hk} 粘贴未生效，尝试下一个候选...`);
+              pushLog(`⚠️ ${hk} 粘贴未生效，尝试下一个候选...`);
             }
           }
 
@@ -504,7 +520,7 @@ export async function executePasteImageClipboard(
       const err = e instanceof Error ? e.message : String(e);
       const forcedUpload = err === '__FORCE_UPLOAD__';
       if (!forcedUpload) {
-        log.push(`⚠️ 剪贴板粘贴未生效：${err}`);
+        pushLog(`⚠️ 剪贴板粘贴未生效：${err}`);
       }
 
       if (!uploadFallbackEffective && !forcedUpload) {
@@ -512,11 +528,11 @@ export async function executePasteImageClipboard(
       }
 
       attachedVia = 'upload';
-      log.push(forcedUpload ? '⬆️ 直接上传：下载到本地后通过上传入口选择文件...' : '🪄 尝试降级：下载到本地后通过 file input 上传...');
+      pushLog(forcedUpload ? '⬆️ 直接上传：下载到本地后通过上传入口选择文件...' : '🪄 尝试降级：下载到本地后通过 file input 上传...');
 
       await clearExistingAttachments();
       let before = await getAttachmentSnapshot();
-      if (verifyAttachment) log.push(`🔎 附件计数（上传前）：${before.count}`);
+      if (verifyAttachment) pushLog(`🔎 附件计数（上传前）：${before.count}`);
 
       let uploadDone = false;
 
@@ -557,7 +573,7 @@ export async function executePasteImageClipboard(
             { base64: img.base64, type: img.mimeType, name: fileName }
           );
 
-          log.push(`🧲 [${i + 1}/${downloaded.length}] 已尝试 drag&drop 上传：${img.mimeType}`);
+          logStage(`🧲 [${i + 1}/${downloaded.length}] 已尝试 drag&drop 上传：${img.mimeType}`);
           await page.waitForTimeout(waitAfterUpload);
           await verifyIncrease(before, 1, `第 ${i + 1} 张 drag&drop 上传`, Math.max(6000, waitAfterUpload * 4));
           before = await getAttachmentSnapshot();
@@ -640,6 +656,38 @@ export async function executePasteImageClipboard(
         const tryUploadViaFileChooser = async (): Promise<boolean> => {
           const clickSources = openUploaderSelector ? [openUploaderSelector, ...uploadButtonCandidates] : uploadButtonCandidates;
 
+          const tryDirectSetInputFiles = async (): Promise<boolean> => {
+            const directStartedAt = Date.now();
+            const sel = fileInputSelector || 'input[type="file"], input[type="file"][accept*="image" i]';
+            const input = page.locator(sel).first();
+            const attached = await input.waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
+            if (!attached) {
+              logStage(`ℹ️ 直接 file input 未就绪，继续走上传入口：${sel}`, directStartedAt);
+              return false;
+            }
+
+            pushLog(`⚡ 检测到 file input，优先直接 setInputFiles：${sel}`);
+            for (let i = 0; i < downloaded.length; i++) {
+              const fileStartedAt = Date.now();
+              const filePath = downloaded[i].filePath;
+              await input.setInputFiles(filePath);
+              logStage(`📎 [${i + 1}/${downloaded.length}] 已直接 setInputFiles：${path.basename(filePath)}`, fileStartedAt);
+              await page.waitForTimeout(waitAfterUpload);
+              await verifyIncrease(before, 1, `第 ${i + 1} 张直接文件上传`, Math.max(6000, waitAfterUpload * 4));
+              before = await getAttachmentSnapshot();
+            }
+            logStage(`✅ 直接 file input 上传完成`, directStartedAt);
+            return true;
+          };
+
+          if (fileInputSelector) {
+            const directOk = await tryDirectSetInputFiles().catch((e) => {
+              pushLog(`⚠️ 直接 file input 上传失败，继续走上传入口：${formatErrorWithCause(e)}`);
+              return false;
+            });
+            if (directOk) return true;
+          }
+
           // Google/Gemini 常见：入口按钮先打开菜单，再点“从电脑上传/选择文件”才会触发 filechooser
           const menuItemCandidates = [
             '[role="menuitem"]:has-text("Upload files")',
@@ -671,21 +719,27 @@ export async function executePasteImageClipboard(
             if (entries.length === 0) return null;
 
             for (const entry of entries) {
-              log.push(`🔘 尝试上传入口：${entry.label}`);
+              const clickStartedAt = Date.now();
+              pushLog(`🔘 尝试上传入口：${entry.label}`);
               const chooserPromise = page.waitForEvent('filechooser', { timeout: 1800 }).catch(() => null);
               const clicked = await entry.locator.click({ timeout: 1800 }).then(() => true).catch(() => false);
               const chooser = await chooserPromise;
-              if (clicked && chooser) return chooser;
+              if (clicked && chooser) {
+                logStage(`✅ 上传入口触发 filechooser：${entry.label}`, clickStartedAt);
+                return chooser;
+              }
               if (!clicked) continue;
+              logStage(`ℹ️ 上传入口已点击但未直接触发 filechooser：${entry.label}`, clickStartedAt);
 
               for (const menuSel of menuItemCandidates) {
                 const menuItems = await rankedVisibleLocators(menuSel, 4);
                 for (const item of menuItems) {
+                  const menuStartedAt = Date.now();
                   const chooserPromise2 = page.waitForEvent('filechooser', { timeout: 1600 }).catch(() => null);
                   const clicked2 = await item.locator.click({ timeout: 1600 }).then(() => true).catch(() => false);
                   const chooser2 = await chooserPromise2;
                   if (clicked2 && chooser2) {
-                    log.push(`📂 上传菜单项触发 filechooser：${item.label}`);
+                    logStage(`📂 上传菜单项触发 filechooser：${item.label}`, menuStartedAt);
                     return chooser2;
                   }
                 }
@@ -703,8 +757,9 @@ export async function executePasteImageClipboard(
               const chooser = await clickToFileChooser(sel);
               if (!chooser) continue;
 
+              const setStartedAt = Date.now();
               await chooser.setFiles(filePath);
-              log.push(`📎 [${i + 1}/${downloaded.length}] filechooser 已选择文件：${path.basename(filePath)}（入口=${sel}）`);
+              logStage(`📎 [${i + 1}/${downloaded.length}] filechooser 已选择文件：${path.basename(filePath)}（入口=${sel}）`, setStartedAt);
               chosen = true;
               break;
             }
@@ -739,7 +794,7 @@ export async function executePasteImageClipboard(
               if (!clicked) continue;
               const appeared = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
               if (appeared) {
-                log.push(`🧩 自动打开上传器成功：${btn.label}`);
+                logStage(`🧩 自动打开上传器成功：${btn.label}`);
                 return true;
               }
             }
@@ -763,8 +818,9 @@ export async function executePasteImageClipboard(
 
           for (let i = 0; i < downloaded.length; i++) {
             const filePath = downloaded[i].filePath;
+            const setStartedAt = Date.now();
             await input.setInputFiles(filePath);
-            log.push(`📎 [${i + 1}/${downloaded.length}] 已 setInputFiles：${path.basename(filePath)}（${fileInputSelector}）`);
+            logStage(`📎 [${i + 1}/${downloaded.length}] 已 setInputFiles：${path.basename(filePath)}（${fileInputSelector}）`, setStartedAt);
 
             await page.waitForTimeout(waitAfterUpload);
             await verifyIncrease(before, 1, `第 ${i + 1} 张文件上传`, Math.max(6000, waitAfterUpload * 4));
@@ -781,6 +837,7 @@ export async function executePasteImageClipboard(
     }
 
     const screenshot = await captureScreenshot(page);
+    logStage(`✅ 上传参考图节点完成：attachedVia=${attachedVia}, detail=${attachedViaDetail}`);
     return {
       success: true,
       log,
