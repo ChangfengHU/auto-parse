@@ -107,6 +107,36 @@ function extractXsecToken(url: string): string {
   return tokenMatch ? decodeURIComponent(tokenMatch[1]) : '';
 }
 
+function trimTrailingUrlPunctuation(url: string): string {
+  return url.trim().replace(/[.,!?;:，。！？；：、)\]）】》]+$/u, '');
+}
+
+function isXhsHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === 'xhslink.com' || host.endsWith('.xhslink.com') ||
+    host === 'xiaohongshu.com' || host.endsWith('.xiaohongshu.com');
+}
+
+/** 从完整分享文案中提取小红书 URL，兼容短链和 PC 详情页直链 */
+export function extractXhsUrl(input: string): string {
+  const text = input.trim();
+  const urlMatches = text.matchAll(/https?:\/\/[^\s"'<>]+/gi);
+
+  for (const match of urlMatches) {
+    const candidate = trimTrailingUrlPunctuation(match[0]);
+    try {
+      if (isXhsHost(new URL(candidate).hostname)) return candidate;
+    } catch {
+      // 继续尝试后续 URL
+    }
+  }
+
+  const bareMatch = text.match(/(?:^|[\s"'<>])((?:www\.)?(?:xiaohongshu\.com|xhslink\.com)\/[^\s"'<>]+)/i);
+  if (bareMatch?.[1]) return `https://${trimTrailingUrlPunctuation(bareMatch[1])}`;
+
+  throw new Error('未找到有效的小红书链接');
+}
+
 // ── request.py 移植：fetchHtml ─────────────────────────────────────────────────
 
 /**
@@ -114,7 +144,7 @@ function extractXsecToken(url: string): string {
  * 这个格式不需要 Cookie 也能访问，/explore/ 则会被 403
  */
 export async function resolveUrl(url: string): Promise<string> {
-  if (!url.startsWith('http')) url = `https://${url}`;
+  url = extractXhsUrl(url);
 
   // 短链先跟随重定向拿到真实 URL
   if (url.includes('xhslink.com')) {

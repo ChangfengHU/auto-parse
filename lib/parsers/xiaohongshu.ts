@@ -15,14 +15,38 @@ export interface XhsParseResult {
   title?: string;
 }
 
+function trimTrailingUrlPunctuation(url: string): string {
+  return url.trim().replace(/[.,!?;:，。！？；：、)\]）】》]+$/u, '');
+}
+
+function isXhsHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === 'xhslink.com' || host.endsWith('.xhslink.com') ||
+    host === 'xiaohongshu.com' || host.endsWith('.xiaohongshu.com');
+}
+
+function extractXhsUrl(input: string): string {
+  for (const match of input.trim().matchAll(/https?:\/\/[^\s"'<>]+/gi)) {
+    const candidate = trimTrailingUrlPunctuation(match[0]);
+    try {
+      if (isXhsHost(new URL(candidate).hostname)) return candidate;
+    } catch {
+      // 继续尝试后续 URL
+    }
+  }
+
+  const bareMatch = input.trim().match(/(?:^|[\s"'<>])((?:www\.)?(?:xiaohongshu\.com|xhslink\.com)\/[^\s"'<>]+)/i);
+  if (bareMatch?.[1]) return `https://${trimTrailingUrlPunctuation(bareMatch[1])}`;
+
+  throw new Error('未找到有效的小红书链接');
+}
+
 export async function parseXiaohongshu(input: string): Promise<XhsParseResult> {
   // 支持多种链接格式
   // https://www.xiaohongshu.com/explore/{id}
   // https://www.xiaohongshu.com/discovery/item/{id}
   // http://xhslink.com/xxx  (短链)
-  const urlMatch = input.match(/https?:\/\/[^\s]+(?:xiaohongshu\.com|xhslink\.com)[^\s]*/);
-  if (!urlMatch) throw new Error('未找到有效的小红书链接');
-  let url = urlMatch[0];
+  let url = extractXhsUrl(input);
 
   // 短链先跟随重定向
   if (url.includes('xhslink.com')) {
