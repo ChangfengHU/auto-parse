@@ -187,11 +187,5 @@
       }
     }
   ],
-  "vars": [
-    "browserInstanceId",
-    "browserWsUrl",
-    "noteUrl",
-    "sourceImageUrl",
-    "sourceImageUrls"
-  ]
+  "vars": []
 }

@@ -58,10 +58,10 @@
         "selector": "#prompt-textarea, div#prompt-textarea[contenteditable=\"true\"], textarea[placeholder*=\"Message\" i], textarea[placeholder*=\"询问\"], textarea[placeholder*=\"发送\"]",
         "autoEnter": true,
         "inputMode": "fill",
+        "autoEnterPollMaxMs": 180000,
         "autoEnterPollUntilStop": true,
-        "autoEnterPollUntilSelector": "button[data-testid=\"stop-button\"], button[aria-label*=\"Stop\" i], button[aria-label*=\"停止\"], button:has-text(\"Stop\"), button:has-text(\"停止\")",
         "autoEnterPollIntervalMs": 3000,
-        "autoEnterPollMaxMs": 180000
+        "autoEnterPollUntilSelector": "button[data-testid=\"stop-button\"], button[aria-label*=\"Stop\" i], button[aria-label*=\"停止\"], button:has-text(\"Stop\"), button:has-text(\"停止\")"
       },
       "waitAfter": {
         "enabled": true,
@@ -83,19 +83,13 @@
         "storageBackend": "local_api",
         "waitAfterClick": 800,
         "waitImageReady": true,
-        "waitImageReadyTimeout": 240000,
-        "waitImageReadyAction": "appeared",
-        "waitImageReadySelector": "img[alt*=\"Generated image\" i], img[src*=\"/backend-api/estuary/content\"], img[src^=\"blob:\"], img[src^=\"data:image\"], article img, [data-testid*=\"image\"] img",
-        "waitImageReadyAppearTimeout": 30000,
         "downloadTimeout": 35000,
         "allowDomFallback": true,
-        "preferDomExtraction": true,
-        "fallbackImageSelector": "img[alt*=\"Generated image\" i], article img[src*=\"/backend-api/estuary/content\"], main img[src*=\"/backend-api/estuary/content\"], article img[src^=\"blob:\"], article img[src^=\"data:image\"], main img[src^=\"blob:\"], main img[src^=\"data:image\"], [data-testid*=\"image\"] img, img[src^=\"blob:\"], img[src^=\"data:image\"]",
-        "copyImageButtonSelector": "button[aria-label*=\"Copy image\" i], button[aria-label*=\"复制图片\"], button:has-text(\"Copy image\"), button:has-text(\"复制图片\")",
+        "menuItemSelector": "[role=\"menuitem\"]:has-text(\"Download\"), [role=\"menuitem\"]:has-text(\"下载\"), button:has-text(\"Download\"), button:has-text(\"下载\"), a[download]",
         "minFileSizeBytes": 65536,
         "localFilesUploadUrl": "http://127.0.0.1:1002/v1beta/files:upload",
         "menuTriggerSelector": "button[aria-label*=\"More\" i], button[aria-label*=\"更多\"], button[data-testid*=\"more\"]",
-        "menuItemSelector": "[role=\"menuitem\"]:has-text(\"Download\"), [role=\"menuitem\"]:has-text(\"下载\"), button:has-text(\"Download\"), button:has-text(\"下载\"), a[download]",
+        "preferDomExtraction": true,
         "failFastTextIncludes": [
           "I can't help create",
           "I can’t help create",
@@ -107,10 +101,16 @@
           "出了点问题",
           "发生错误"
         ],
-        "failFastMergeDefaultPhrases": true,
+        "waitImageReadyAction": "appeared",
+        "fallbackImageSelector": "img[alt*=\"Generated image\" i], article img[src*=\"/backend-api/estuary/content\"], main img[src*=\"/backend-api/estuary/content\"], article img[src^=\"blob:\"], article img[src^=\"data:image\"], main img[src^=\"blob:\"], main img[src^=\"data:image\"], [data-testid*=\"image\"] img, img[src^=\"blob:\"], img[src^=\"data:image\"]",
+        "waitImageReadyTimeout": 240000,
         "allowClipboardFallback": true,
         "downloadButtonSelector": "button[aria-label*=\"Download\" i], a[aria-label*=\"Download\" i], button[aria-label*=\"下载\"], a[aria-label*=\"下载\"], button:has-text(\"Download\"), button:has-text(\"下载\"), a[download]",
-        "serializeClipboardAccess": true
+        "waitImageReadySelector": "img[alt*=\"Generated image\" i], img[src*=\"/backend-api/estuary/content\"], img[src^=\"blob:\"], img[src^=\"data:image\"], article img, [data-testid*=\"image\"] img",
+        "copyImageButtonSelector": "button[aria-label*=\"Copy image\" i], button[aria-label*=\"复制图片\"], button:has-text(\"Copy image\"), button:has-text(\"复制图片\")",
+        "serializeClipboardAccess": true,
+        "failFastMergeDefaultPhrases": true,
+        "waitImageReadyAppearTimeout": 30000
       },
       "waitAfter": {
         "enabled": false,

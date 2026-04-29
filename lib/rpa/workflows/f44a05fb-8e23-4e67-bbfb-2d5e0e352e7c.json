@@ -79,5 +79,6 @@
         "delaySeconds": 5
       }
     }
-  ]
+  ],
+  "vars": []
 }

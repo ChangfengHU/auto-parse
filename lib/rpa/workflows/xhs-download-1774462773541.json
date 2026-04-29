@@ -33,5 +33,6 @@
         "uploadToOSS": true
       }
     }
-  ]
+  ],
+  "vars": []
 }

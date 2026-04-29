@@ -91,5 +91,6 @@
       },
       "continueOnError": false
     }
-  ]
+  ],
+  "vars": []
 }

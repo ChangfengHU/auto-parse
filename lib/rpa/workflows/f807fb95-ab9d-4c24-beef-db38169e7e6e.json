@@ -23,5 +23,6 @@
         "outputDetailVar": "workflowCallResults"
       }
     }
-  ]
+  ],
+  "vars": []
 }

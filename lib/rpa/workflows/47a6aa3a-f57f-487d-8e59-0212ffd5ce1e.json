@@ -74,5 +74,6 @@
       },
       "continueOnError": false
     }
-  ]
+  ],
+  "vars": []
 }

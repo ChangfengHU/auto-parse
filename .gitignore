@@ -66,7 +66,12 @@ __pycache__/
 .runtime/
 temp/
 .claude/
+.playwright-mcp/
 viewer_*.html
 batch_viewer_*.html
 model_sheet_viewer_*.html
 blueprint_viewer_*.html
+
+# local experiments
+test-upload.js
+lib/analysis/xhs-downloader-bridge.ts
