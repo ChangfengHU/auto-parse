@@ -5,6 +5,7 @@ const CLIENT_ID_KEYS = {
   douyin: 'douyinClientId',
   xhs: 'xhsClientId',
   gemini: 'geminiClientId',
+  notebooklm: 'notebooklmClientId',
 };
 
 function normalizeServerBase(input) {
@@ -30,6 +31,7 @@ async function ensurePlatformClientIds() {
   if (!store[CLIENT_ID_KEYS.douyin]) updates[CLIENT_ID_KEYS.douyin] = 'dy_' + crypto.randomUUID().replace(/-/g, '');
   if (!store[CLIENT_ID_KEYS.xhs]) updates[CLIENT_ID_KEYS.xhs] = 'xhs_' + crypto.randomUUID().replace(/-/g, '');
   if (!store[CLIENT_ID_KEYS.gemini]) updates[CLIENT_ID_KEYS.gemini] = 'gm_' + crypto.randomUUID().replace(/-/g, '');
+  if (!store[CLIENT_ID_KEYS.notebooklm]) updates[CLIENT_ID_KEYS.notebooklm] = 'nl_' + crypto.randomUUID().replace(/-/g, '').slice(0,12);
   if (Object.keys(updates).length > 0) {
     await chrome.storage.local.set(updates);
     console.log('[发布平台] 平台凭证已补齐:', updates);
@@ -153,6 +155,91 @@ async function syncToSupabase(cookieStr, platform = 'douyin') {
   }
 }
 
+// ── NotebookLM: 上传 storage_state.json 到 skills.vyibc.com ──
+const UPLOAD_API   = 'https://upload.vyibc.com/admin/upload';
+const SKILLS_CDN   = 'https://skills.vyibc.com/files';
+
+const NL_GOOGLE_COOKIE_NAMES = [
+  'SID', 'SSID', 'HSID', 'OSID', 'APISID', 'SAPISID',
+  '__Secure-1PSID', '__Secure-3PSID',
+  '__Secure-1PAPISID', '__Secure-3PAPISID',
+  '__Secure-1PSIDCC', '__Secure-3PSIDCC',
+  '__Secure-1PSIDTS', '__Secure-3PSIDTS',
+  '__Host-1PLSID', '__Host-3PLSID', '__Host-GAPS',
+  'ACCOUNT_CHOOSER', 'SIDCC', 'NID', 'AEC', 'COMPASS',
+  '__Secure-OSID', 'CONSENT', '1P_JAR', 'S', 'OTZ', 'SMSV',
+];
+
+const NL_DOMAINS = [
+  'https://notebooklm.google.com',
+  'https://accounts.google.com',
+  'https://myaccount.google.com',
+];
+
+async function getNotebookLMStorageState() {
+  const cookies = [];
+  const seen = new Set();
+  const SAME_SITE_MAP = { 'no_restriction': 'None', 'lax': 'Lax', 'strict': 'Strict', 'unspecified': 'None' };
+
+  for (const domainUrl of NL_DOMAINS) {
+    for (const name of NL_GOOGLE_COOKIE_NAMES) {
+      await new Promise(resolve => {
+        chrome.cookies.get({ url: domainUrl, name }, cookie => {
+          if (cookie && cookie.value) {
+            const key = `${cookie.domain}|${cookie.name}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              cookies.push({
+                name: cookie.name,
+                value: cookie.value,
+                domain: cookie.domain,
+                path: cookie.path,
+                expires: cookie.expirationDate ? Math.floor(cookie.expirationDate) : -1,
+                httpOnly: cookie.httpOnly,
+                secure: cookie.secure,
+                sameSite: SAME_SITE_MAP[cookie.sameSite] || 'None',
+              });
+            }
+          }
+          resolve();
+        });
+      });
+    }
+  }
+  // 也读所有 .google.com cookies
+  await new Promise(resolve => {
+    chrome.cookies.getAll({ domain: '.google.com' }, allCookies => {
+      for (const cookie of (allCookies || [])) {
+        const key = `${cookie.domain}|${cookie.name}`;
+        if (!seen.has(key) && cookie.value) {
+          seen.add(key);
+          const SAME_SITE_MAP2 = { 'no_restriction': 'None', 'lax': 'Lax', 'strict': 'Strict', 'unspecified': 'None' };
+          cookies.push({
+            name: cookie.name, value: cookie.value,
+            domain: cookie.domain, path: cookie.path,
+            expires: cookie.expirationDate ? Math.floor(cookie.expirationDate) : -1,
+            httpOnly: cookie.httpOnly, secure: cookie.secure,
+            sameSite: SAME_SITE_MAP2[cookie.sameSite] || 'None',
+          });
+        }
+      }
+      resolve();
+    });
+  });
+  return { cookies, origins: [] };
+}
+
+async function uploadNotebookLMAuth(storageState, clientId) {
+  const blob = new Blob([JSON.stringify(storageState, null, 2)], { type: 'application/json' });
+  const filename = `notebooklm-auth-${clientId}.json`;
+  const formData = new FormData();
+  formData.append('file', blob, filename);
+  const res = await fetch(UPLOAD_API, { method: 'POST', body: formData });
+  if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
+  const data = await res.json();
+  return `${SKILLS_CDN}/${filename}`;
+}
+
 // ── 2. 同步 Cookie 到解析平台 ────────────────────────────
 async function syncToParseServer(cookieStr, platform = 'douyin') {
   try {
@@ -239,6 +326,30 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'SYNC_TO_SUPABASE') {
     const { cookieStr, platform = 'douyin' } = msg;
     syncToSupabase(cookieStr, platform).then(ok => sendResponse({ ok }));
+    return true;
+  }
+
+  if (msg.type === 'SYNC_NOTEBOOKLM') {
+    (async () => {
+      try {
+        await ensurePlatformClientIds();
+        const store = await chrome.storage.local.get(CLIENT_ID_KEYS.notebooklm);
+        const clientId = store[CLIENT_ID_KEYS.notebooklm];
+        const storageState = await getNotebookLMStorageState();
+        const hasAuth = storageState.cookies.some(c =>
+          ['SID', '__Secure-1PSID', '__Secure-3PSID'].includes(c.name) && c.value
+        );
+        if (!hasAuth) {
+          sendResponse({ ok: false, error: '未检测到 Google 登录凭证，请先登录 notebooklm.google.com' });
+          return;
+        }
+        const cdnUrl = await uploadNotebookLMAuth(storageState, clientId);
+        await chrome.storage.local.set({ notebooklmLastSync: Date.now(), notebooklmCdnUrl: cdnUrl });
+        sendResponse({ ok: true, clientId, cdnUrl, cookieCount: storageState.cookies.length });
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+    })();
     return true;
   }
 

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "vyibc-auto-parse",
-  "version": "1.1.0",
-  "description": "一键同步抖音登录状态到 parse.vyibc.com，保持无水印解析能力",
+  "version": "1.2.0",
+  "description": "一键同步抖音/小红书/Gemini/NotebookLM 登录状态，保持平台能力",
   "permissions": [
     "cookies",
     "storage",
@@ -15,6 +15,9 @@
     "https://gemini.google.com/*",
     "https://parse.vyibc.com/*",
     "https://supabase.vyibc.com/*",
+    "https://upload.vyibc.com/*",
+    "https://skills.vyibc.com/*",
+    "https://notebooklm.google.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],

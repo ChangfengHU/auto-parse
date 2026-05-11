@@ -2,7 +2,7 @@ const DEFAULT_SERVER = 'https://parse.vyibc.com';
 const PARSE_SERVER_KEY = 'parseServerBase';
 
 // ── 全局状态 ───────────────────────────────────────────────
-let currentPlatform = 'douyin'; // 'douyin' | 'xhs' | 'gemini'
+let currentPlatform = 'douyin'; // 'douyin' | 'xhs' | 'gemini' | 'notebooklm'
 const CLIENT_ID_KEYS = {
   douyin: 'douyinClientId',
   xhs: 'xhsClientId',
@@ -29,6 +29,7 @@ const GEMINI_COOKIE_KEYS = [
 function getPlatformName(platform) {
   if (platform === 'xhs') return '小红书';
   if (platform === 'gemini') return 'Gemini';
+  if (platform === 'notebooklm') return 'NotebookLM';
   return '抖音';
 }
 
@@ -571,6 +572,38 @@ async function configureParseServer() {
   await checkServerStatus();
 }
 
+// ── NotebookLM 一键同步 ───────────────────────────────────
+async function syncNotebookLM() {
+  const btn = document.getElementById('nlSyncBtn');
+  const result = document.getElementById('nlResult');
+  const clientIdEl = document.getElementById('nlClientId');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 正在提取...'; }
+  if (result) { result.style.display = 'none'; }
+
+  chrome.runtime.sendMessage({ type: 'SYNC_NOTEBOOKLM' }, res => {
+    if (btn) { btn.disabled = false; btn.textContent = '🔑 提取并同步 NotebookLM 凭证'; }
+    if (res?.ok) {
+      if (result) {
+        result.style.display = 'block';
+        result.style.color = '#4ade80';
+        result.textContent = `✅ 同步成功！${res.cookieCount} 个 cookie，发给新机器：`;
+      }
+      if (clientIdEl) {
+        clientIdEl.style.display = 'block';
+        clientIdEl.textContent = res.clientId;
+        clientIdEl.onclick = () => { navigator.clipboard.writeText(res.clientId); showToast('✅ 已复制 Client ID'); };
+      }
+      showToast(`✅ NotebookLM 凭证同步成功 (${res.cookieCount} cookies)`);
+    } else {
+      if (result) {
+        result.style.display = 'block';
+        result.style.color = '#f87171';
+        result.textContent = `❌ ${res?.error || '同步失败，请先登录 notebooklm.google.com'}`;
+      }
+    }
+  });
+}
+
 // ── 切换平台 ──────────────────────────────────────────────
 function switchPlatform(platform) {
   currentPlatform = platform;
@@ -604,6 +637,53 @@ function switchPlatform(platform) {
   if (keepAliveRow) {
     keepAliveRow.style.display = platform === 'douyin' ? 'flex' : 'none';
   }
+
+  // NotebookLM 专用：显示一键同步按钮，隐藏普通 cookie 文本框
+  const cookieSection = document.querySelector('.cookie-section');
+  const actionSection = document.querySelector('.action-section');
+  let nlSection = document.getElementById('nlSection');
+
+  if (platform === 'notebooklm') {
+    if (cookieSection) cookieSection.style.display = 'none';
+    if (!nlSection) {
+      nlSection = document.createElement('div');
+      nlSection.id = 'nlSection';
+      nlSection.style.cssText = 'background:#1a1a1a;border:1px solid #2a2a2a;border-radius:10px;padding:12px;';
+      nlSection.innerHTML = `
+        <div style="font-size:11px;color:#6b7280;margin-bottom:8px;">NotebookLM 认证同步</div>
+        <div style="font-size:12px;color:#9ca3af;margin-bottom:10px;">
+          请先在浏览器中登录 <a href="https://notebooklm.google.com" target="_blank" style="color:#a78bfa;">notebooklm.google.com</a>，<br>
+          然后点击下方按钮一键提取并同步登录凭证。
+        </div>
+        <button id="nlSyncBtn" style="width:100%;padding:10px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+          🔑 提取并同步 NotebookLM 凭证
+        </button>
+        <div id="nlResult" style="margin-top:8px;font-size:11px;color:#6b7280;display:none;"></div>
+        <div id="nlClientId" style="margin-top:8px;background:#111;border:1px solid #2a2a2a;border-radius:6px;padding:8px;font-family:monospace;font-size:11px;color:#a78bfa;display:none;word-break:break-all;cursor:pointer;" title="点击复制"></div>
+      `;
+      if (actionSection) actionSection.parentNode.insertBefore(nlSection, actionSection);
+      document.getElementById('nlSyncBtn').addEventListener('click', syncNotebookLM);
+    }
+    nlSection.style.display = 'block';
+
+    // 加载已有 client ID
+    chrome.storage.local.get(['notebooklmClientId', 'notebooklmLastSync', 'notebooklmCdnUrl'], r => {
+      if (r.notebooklmClientId) {
+        const el = document.getElementById('nlClientId');
+        if (el) {
+          el.style.display = 'block';
+          el.textContent = `客户端 ID: ${r.notebooklmClientId}`;
+          if (r.notebooklmLastSync) {
+            el.textContent += `\n上次同步: ${new Date(r.notebooklmLastSync).toLocaleString()}`;
+          }
+          el.onclick = () => { navigator.clipboard.writeText(r.notebooklmClientId); showToast('✅ 已复制 Client ID'); };
+        }
+      }
+    });
+  } else {
+    if (cookieSection) cookieSection.style.display = 'block';
+    if (nlSection) nlSection.style.display = 'none';
+  }
   
   // 刷新状态
   Promise.all([checkLoginStatus(), checkServerStatus()]);
@@ -626,6 +706,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('tabDouyin').addEventListener('click', () => switchPlatform('douyin'));
   document.getElementById('tabXhs').addEventListener('click', () => switchPlatform('xhs'));
   document.getElementById('tabGemini').addEventListener('click', () => switchPlatform('gemini'));
+  document.getElementById('tabNotebooklm').addEventListener('click', () => switchPlatform('notebooklm'));
 
   // 恢复本地缓存的同步时间
   chrome.storage.local.get(['lastPublishSync'], result => {
