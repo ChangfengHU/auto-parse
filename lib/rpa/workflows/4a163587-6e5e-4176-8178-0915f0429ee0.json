@@ -1,6 +1,6 @@
 {
   "id": "4a163587-6e5e-4176-8178-0915f0429ee0",
-  "name": "gemini流程管理-ads-下载提取版",
+  "name": "gemini流程管理-ads-下载提取版111",
   "description": "基于非Ads基线流程，仅首节点切换Ads并支持浏览器实例参数\n\n支持可选参考图：sourceImageUrl（单张）/ sourceImageUrls（多张，JSON 数组或逗号分隔）。",
   "nodes": [
     {

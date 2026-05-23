@@ -1,6 +1,6 @@
 {
   "id": "05e29533-6410-4e47-bafd-8ab592d81c16",
-  "name": "gemini流程管理-下载提取版",
+  "name": "gemini流程管理-下载提取版1111",
   "description": "Restored non-ads baseline from current ads workflow",
   "nodes": [
     {
@@ -69,6 +69,7 @@
         "buttonIndex": -1,
         "uploadToOSS": true,
         "buttonTimeout": 60000,
+        "storageBackend": "r2",
         "waitAfterClick": 500,
         "downloadTimeout": 25000,
         "allowDomFallback": false,
@@ -80,5 +81,6 @@
       },
       "continueOnError": false
     }
-  ]
+  ],
+  "vars": []
 }
