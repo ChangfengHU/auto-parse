@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { parseDouyinWithPlaywright } from './douyin-playwright';
+import { hasDouyinAuth, parseDouyinWithPlaywright } from './douyin-playwright';
 
 const UA_MOBILE =
   'Mozilla/5.0 (Linux; Android 11; Pixel 5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
@@ -12,7 +12,11 @@ export interface ParseResult {
   watermark: boolean;
 }
 
-export async function parseDouyin(input: string): Promise<ParseResult> {
+export interface ParseDouyinOptions {
+  cookieStr?: string;
+}
+
+export async function parseDouyin(input: string, options: ParseDouyinOptions = {}): Promise<ParseResult> {
   // 从分享文本中提取短链
   const urlMatch = input.match(/https?:\/\/v\.douyin\.com\/[A-Za-z0-9_\-]+\/?/);
   if (!urlMatch) throw new Error('未找到有效的抖音分享链接');
@@ -31,10 +35,12 @@ export async function parseDouyin(input: string): Promise<ParseResult> {
   const videoIdMatch = iesdouyinUrl.match(/\/video\/(\d+)/);
   const videoId = videoIdMatch?.[1] ?? '';
 
+  const cookieStr = options.cookieStr?.trim() || undefined;
+
   // 优先：用 Playwright 打开页面，注入 Cookie，拦截真实视频地址（无水印）
-  if (videoId && process.env.DOUYIN_COOKIE) {
+  if (videoId && hasDouyinAuth(cookieStr)) {
     try {
-      const { videoUrl, title, watermark } = await parseDouyinWithPlaywright(videoId);
+      const { videoUrl, title, watermark } = await parseDouyinWithPlaywright(videoId, cookieStr);
       return { platform: 'douyin', videoId, videoUrl, title, watermark };
     } catch (e) {
       console.warn('[douyin] Playwright 失败，降级走 playwm:', e instanceof Error ? e.message : e);

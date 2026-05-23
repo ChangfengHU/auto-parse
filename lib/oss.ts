@@ -5,6 +5,21 @@ import { Readable } from 'stream';
 import path from 'path';
 import { promisify } from 'util';
 import { getRuntimeBackendConfigSync } from './runtime/backend-config';
+import type { ParseR2Config, ParseUploadProvider } from './parse/types';
+import { uploadFileToR2, uploadVideoFromUrlToR2 } from './upload/r2';
+
+export type UploadTargetOptions = {
+  provider?: ParseUploadProvider;
+  r2?: Partial<ParseR2Config>;
+  /** 下载抖音 CDN 时携带 Cookie */
+  downloadCookie?: string;
+};
+
+function resolveUploadProvider(options?: UploadTargetOptions): ParseUploadProvider {
+  if (options?.provider) return options.provider;
+  if (useSupabaseStorage()) return 'supabase';
+  return 'oss';
+}
 
 const writeFile = promisify(fs.writeFile);
 const unlink = promisify(fs.unlink);
@@ -128,8 +143,19 @@ async function withOssUploadRetries<T>(label: string, fn: (client: OssClient) =>
 }
 
 // 从 URL 流式上传（支持大文件，避免内存占用）
-export async function uploadVideoFromUrl(videoUrl: string, key: string): Promise<string> {
-  if (useSupabaseStorage()) {
+export async function uploadVideoFromUrl(
+  videoUrl: string,
+  key: string,
+  target?: UploadTargetOptions
+): Promise<string> {
+  const provider = resolveUploadProvider(target);
+  const fileName = key.split('/').pop() ?? 'video.mp4';
+
+  if (provider === 'r2') {
+    return uploadVideoFromUrlToR2(videoUrl, fileName, target?.r2, target?.downloadCookie);
+  }
+
+  if (provider === 'supabase') {
     const isXhs = videoUrl.includes('xhscdn.com') || videoUrl.includes('xiaohongshu.com');
     const response = await axios.get(videoUrl, {
       responseType: 'arraybuffer',
@@ -375,8 +401,20 @@ export async function uploadBuffer(buffer: Buffer, key: string, contentType: str
 }
 
 // 从本地 file 上传
-export async function uploadFromFile(filePath: string, key: string, contentType: string = 'video/mp4'): Promise<string> {
-  if (useSupabaseStorage()) {
+export async function uploadFromFile(
+  filePath: string,
+  key: string,
+  contentType: string = 'video/mp4',
+  target?: UploadTargetOptions
+): Promise<string> {
+  const provider = resolveUploadProvider(target);
+  const fileName = key.split('/').pop() ?? 'file';
+
+  if (provider === 'r2') {
+    return uploadFileToR2(filePath, fileName, contentType, target?.r2);
+  }
+
+  if (provider === 'supabase') {
     const buffer = await fs.promises.readFile(filePath);
     return uploadToSupabaseStorage(key, buffer, contentType, contentType.startsWith('image/') ? 'inline' : 'attachment');
   }

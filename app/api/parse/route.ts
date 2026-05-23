@@ -1,15 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseDouyin, parseDouyinFast } from '@/lib/parsers/douyin';
 import { fetchXhsPost } from '@/lib/analysis/xhs-fetch';
-import { uploadVideoFromUrl, uploadFromFile } from '@/lib/oss';
+import { uploadVideoFromUrl, uploadFromFile, type UploadTargetOptions } from '@/lib/oss';
 import { addMaterial } from '@/lib/materials';
+import { resolveDouyinCookieForParse, getPlatformDouyinCookie, hasValidDouyinCookie } from '@/lib/parse/resolve-auth';
+import type { ParseExportConfig, ParseRequestOptions } from '@/lib/parse/types';
+import { DEFAULT_PARSE_EXPORT_CONFIG } from '@/lib/parse/types';
 
 export const maxDuration = 600;
 
+function mergeExportConfig(partial?: ParseRequestOptions['export']): ParseExportConfig {
+  return {
+    provider: partial?.provider ?? DEFAULT_PARSE_EXPORT_CONFIG.provider,
+    r2: {
+      ...DEFAULT_PARSE_EXPORT_CONFIG.r2,
+      ...(partial?.r2 ?? {}),
+    },
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { url, watermark = false } = body;
+    const body = (await req.json()) as { url?: string; watermark?: boolean } & ParseRequestOptions;
+    const { url, watermark = false, export: exportOpt, auth: authOpt } = body;
 
     if (!url || typeof url !== 'string') {
       return NextResponse.json({ error: '请提供分享链接' }, { status: 400 });
@@ -26,6 +39,12 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    const exportConfig = mergeExportConfig(exportOpt);
+    const uploadTarget: UploadTargetOptions = {
+      provider: exportConfig.provider,
+      r2: exportConfig.r2,
+    };
 
     if (isXhs) {
       const post = await fetchXhsPost(url);
@@ -45,6 +64,7 @@ export async function POST(req: NextRequest) {
           noteData: post,
           savePending: true,
           watermark: false,
+          uploadProvider: exportConfig.provider,
         });
       }
 
@@ -80,15 +100,16 @@ export async function POST(req: NextRequest) {
         noteData: post,
         savePending: true,
         watermark: false,
+        uploadProvider: exportConfig.provider,
       });
     }
 
-    // 抖音支持两种模式：
-    //   watermark=false → Playwright 无水印（慢，约 25s）
-    //   watermark=true  → playwm 有水印（快，约 3s）
+    const { cookieStr, source: authSource } = await resolveDouyinCookieForParse(authOpt);
+    uploadTarget.downloadCookie = cookieStr ?? undefined;
+
     let parsed = watermark
       ? await parseDouyinFast(url)
-      : await parseDouyin(url);
+      : await parseDouyin(url, { cookieStr: cookieStr ?? undefined });
 
     const ossKey = `${parsed.platform}/${parsed.videoId}.mp4`;
     let ossUrl = '';
@@ -97,14 +118,14 @@ export async function POST(req: NextRequest) {
       try {
         const localFile = (parsed as { localFile?: string }).localFile;
         ossUrl = localFile
-          ? await uploadFromFile(localFile, ossKey)
-          : await uploadVideoFromUrl(parsed.videoUrl, ossKey);
+          ? await uploadFromFile(localFile, ossKey, 'video/mp4', uploadTarget)
+          : await uploadVideoFromUrl(parsed.videoUrl, ossKey, uploadTarget);
         break;
       } catch (e) {
         if (attempt === 3) throw e;
         parsed = watermark
           ? await parseDouyinFast(url)
-          : await parseDouyin(url);
+          : await parseDouyin(url, { cookieStr: cookieStr ?? undefined });
       }
     }
 
@@ -116,9 +137,11 @@ export async function POST(req: NextRequest) {
       videoUrl: parsed.videoUrl,
       ossUrl,
       watermark: (parsed as { watermark?: boolean }).watermark ?? watermark,
+      uploadProvider: exportConfig.provider,
+      authSource,
+      hasLogin: hasValidDouyinCookie(cookieStr ?? getPlatformDouyinCookie()),
     };
 
-    // 解析成功后自动写入素材库
     addMaterial({
       platform: result.platform,
       title: result.title,

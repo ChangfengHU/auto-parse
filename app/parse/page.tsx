@@ -1,6 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import type { ParseAuthConfig, ParseExportConfig } from '@/lib/parse/types';
+import {
+  ParseExportConfigModal,
+  loadParseAuthConfig,
+  loadParseExportConfig,
+  providerLabel,
+  saveParseConfigs,
+} from '@/components/parse-export-config';
 
 interface XhsAuthor {
   id: string;
@@ -64,6 +72,9 @@ interface Result {
   ossPending?: boolean;
   savePending?: boolean;
   watermark?: boolean;
+  uploadProvider?: string;
+  authSource?: string;
+  hasLogin?: boolean;
   noteData?: XhsNoteData;
 }
 
@@ -132,8 +143,27 @@ export default function ParsePage() {
   const [contentSaveProgress, setContentSaveProgress] = useState<ContentSaveProgress | null>(null);
   const [saveMessage, setSaveMessage] = useState('');
   const [savedContentId, setSavedContentId] = useState('');
+  const [exportConfig, setExportConfig] = useState<ParsedExportConfig>(() => loadParseExportConfig());
+  const [authConfig, setAuthConfig] = useState<ParsedAuthConfig>(() => loadParseAuthConfig());
+  const [configOpen, setConfigOpen] = useState(false);
+  const [platformLoggedIn, setPlatformLoggedIn] = useState<boolean | null>(null);
+  const [loginUpdatedAt, setLoginUpdatedAt] = useState<string | null>(null);
+
+  type ParsedExportConfig = ParseExportConfig;
+  type ParsedAuthConfig = ParseAuthConfig;
+
+  const refreshLoginStatus = useCallback(() => {
+    fetch('/api/login')
+      .then((r) => r.json())
+      .then((d: { loggedIn?: boolean; updatedAt?: string | null }) => {
+        setPlatformLoggedIn(!!d.loggedIn);
+        setLoginUpdatedAt(d.updatedAt ?? null);
+      })
+      .catch(() => setPlatformLoggedIn(null));
+  }, []);
 
   useEffect(() => { setDetectedPlatform(detectPlatform(input)); }, [input]);
+  useEffect(() => { refreshLoginStatus(); }, [refreshLoginStatus]);
 
   async function handleParse() {
     if (!input.trim() || loading) return;
@@ -148,7 +178,12 @@ export default function ParsePage() {
       const res = await fetch(apiEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: input }),
+        body: JSON.stringify({
+          url: input,
+          watermark: false,
+          export: exportConfig,
+          auth: authConfig,
+        }),
       });
       const data = await res.json();
       clearTimeout(t1); clearTimeout(t2); clearTimeout(t3);
@@ -473,12 +508,77 @@ export default function ParsePage() {
     );
   };
 
+  function handleSaveConfig(nextExport: ParseExportConfig, nextAuth: ParseAuthConfig) {
+    saveParseConfigs(nextExport, nextAuth);
+    setExportConfig(nextExport);
+    setAuthConfig(nextAuth);
+    setConfigOpen(false);
+  }
+
+  const showDouyinLogin = detectedPlatform === 'douyin' || detectedPlatform === null;
+  const effectiveLoginReady = authConfig.mode === 'custom'
+    ? authConfig.type === 'credential'
+      ? !!authConfig.clientId.trim()
+      : !!authConfig.cookieStr.trim()
+    : platformLoggedIn === true;
+
   return (
     <div className="max-w-2xl mx-auto px-4 py-10">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">视频解析</h1>
-        <p className="mt-1 text-muted-foreground text-sm">支持抖音、TikTok、小红书，自动去水印并上传至 OSS</p>
+      <div className="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">视频解析</h1>
+          <p className="mt-1 text-muted-foreground text-sm">支持抖音、TikTok、小红书，自动去水印并上传至云端</p>
+        </div>
+        <button
+          onClick={() => setConfigOpen(true)}
+          className="flex-shrink-0 px-3 py-2 rounded-lg border border-border bg-card hover:bg-muted text-xs font-medium text-foreground transition-colors"
+        >
+          导出配置
+          <span className="ml-1.5 text-muted-foreground">· {providerLabel(exportConfig.provider)}</span>
+        </button>
       </div>
+
+      {showDouyinLogin && (
+        <div className={`mb-5 rounded-xl border p-3 text-xs ${
+          effectiveLoginReady
+            ? 'bg-green-500/5 border-green-500/20 text-green-700'
+            : 'bg-yellow-500/5 border-yellow-500/20 text-yellow-700'
+        }`}>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className={`inline-block w-2 h-2 rounded-full ${effectiveLoginReady ? 'bg-green-500' : 'bg-yellow-500'}`} />
+              <span className="font-semibold">
+                {authConfig.mode === 'custom'
+                  ? authConfig.type === 'credential'
+                    ? `指定登录：插件凭证 ${authConfig.clientId.trim() || '（未填写）'}`
+                    : '指定登录：手动 Cookie'
+                  : platformLoggedIn
+                    ? '平台已登录（可用于无水印解析）'
+                    : platformLoggedIn === false
+                      ? '平台未登录（可能只能解析有水印版本）'
+                      : '正在检测登录状态...'}
+              </span>
+            </div>
+            <button onClick={refreshLoginStatus} className="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
+              刷新
+            </button>
+          </div>
+          {authConfig.mode === 'platform' && loginUpdatedAt && (
+            <p className="mt-1.5 text-muted-foreground">最近更新：{loginUpdatedAt}</p>
+          )}
+          {!effectiveLoginReady && authConfig.mode === 'platform' && (
+            <p className="mt-1.5">可在右上角「导出配置」中切换为指定登录，或到 <a href="/publish" className="underline font-medium">发布页</a> 扫码登录。</p>
+          )}
+        </div>
+      )}
+
+      <ParseExportConfigModal
+        open={configOpen}
+        onClose={() => setConfigOpen(false)}
+        exportConfig={exportConfig}
+        authConfig={authConfig}
+        onSave={handleSaveConfig}
+      />
 
       {/* Platform Tabs */}
       <div className="flex gap-2 mb-5 flex-wrap">
@@ -548,7 +648,8 @@ export default function ParsePage() {
                 ? 'bg-amber-500/10 text-amber-500'
                 : 'bg-green-500/10 text-green-500'
             }`}>
-              {result.ossPending ? 'OSS 后台保存中' : '素材库收录'}
+              {result.watermark === false ? '无水印' : result.watermark ? '有水印' : '已解析'}
+              {result.uploadProvider ? ` · ${providerLabel(result.uploadProvider as ParseExportConfig['provider'])}` : ''}
             </span>
           </div>
           {result.title && (
@@ -586,11 +687,11 @@ export default function ParsePage() {
             <p className="text-xs text-muted-foreground font-medium mb-1.5">
               {result.ossPending
                 ? result.mediaType === 'image'
-                  ? `预览图片地址（共 ${result.imageCount ?? result.images?.length ?? 1} 张，OSS 后台保存中）`
-                  : '预览视频地址（OSS 后台保存中）'
+                  ? `预览图片地址（共 ${result.imageCount ?? result.images?.length ?? 1} 张，后台保存中）`
+                  : '预览视频地址（后台保存中）'
                 : result.mediaType === 'image'
-                  ? `OSS 图片地址（共 ${result.imageCount ?? result.images?.length ?? 1} 张）`
-                  : 'OSS 永久地址'}
+                  ? `${providerLabel((result.uploadProvider as ParseExportConfig['provider']) ?? exportConfig.provider)} 图片地址（共 ${result.imageCount ?? result.images?.length ?? 1} 张）`
+                  : `${providerLabel((result.uploadProvider as ParseExportConfig['provider']) ?? exportConfig.provider)} 永久地址`}
             </p>
             <div className="flex items-center gap-2 bg-muted rounded-lg p-2.5">
               <span className="text-xs text-blue-500 flex-1 truncate font-mono">{result.ossUrl}</span>

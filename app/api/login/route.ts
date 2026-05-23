@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { getPlatformDouyinCookie, hasValidDouyinCookie } from '@/lib/parse/resolve-auth';
 
 const COOKIE_FILE = path.join(process.cwd(), '.douyin-cookie.json');
 const LOCK_FILE   = path.join(os.tmpdir(), 'douyin-publish.lock');
@@ -28,22 +29,28 @@ function isPublishLocked(): boolean {
 
 // GET /api/login → 快速返回 Cookie 文件状态（不开浏览器）
 export async function GET() {
-  if (!fs.existsSync(COOKIE_FILE)) {
-    return NextResponse.json({ loggedIn: false, reason: 'no_cookie_file' });
+  const platformCookie = getPlatformDouyinCookie();
+  const loggedIn = hasValidDouyinCookie(platformCookie);
+
+  if (!loggedIn && !fs.existsSync(COOKIE_FILE)) {
+    return NextResponse.json({ loggedIn: false, reason: 'no_cookie_file', hasCookieString: false });
   }
+
   try {
-    const stat = fs.statSync(COOKIE_FILE);
-    const data = JSON.parse(fs.readFileSync(COOKIE_FILE, 'utf-8'));
-    const hasCookies = Array.isArray(data?.cookies) && data.cookies.length > 0;
-    const ageHours = Math.round((Date.now() - stat.mtimeMs) / 3_600_000);
+    const stat = fs.existsSync(COOKIE_FILE) ? fs.statSync(COOKIE_FILE) : null;
+    const ageHours = stat ? Math.round((Date.now() - stat.mtimeMs) / 3_600_000) : null;
     return NextResponse.json({
-      loggedIn: hasCookies,
+      loggedIn,
+      hasCookieString: loggedIn,
       cookieAgeHours: ageHours,
-      updatedAt: new Date(stat.mtimeMs).toLocaleString('zh-CN'),
-      updatedAtMs: stat.mtimeMs,  // 毫秒时间戳，用于精确比较
+      updatedAt: stat ? new Date(stat.mtimeMs).toLocaleString('zh-CN') : null,
+      updatedAtMs: stat?.mtimeMs ?? null,
+      source: loggedIn
+        ? (process.env.DOUYIN_COOKIE && platformCookie === process.env.DOUYIN_COOKIE ? 'env' : 'file')
+        : 'none',
     });
   } catch {
-    return NextResponse.json({ loggedIn: false, reason: 'parse_error' });
+    return NextResponse.json({ loggedIn: false, reason: 'parse_error', hasCookieString: loggedIn });
   }
 }
 
