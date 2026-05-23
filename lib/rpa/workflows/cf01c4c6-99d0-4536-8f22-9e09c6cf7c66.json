@@ -118,5 +118,12 @@
       },
       "continueOnError": false
     }
+  ],
+  "vars": [
+    "browserInstanceId",
+    "browserWsUrl",
+    "noteUrl",
+    "sourceImageUrl",
+    "sourceImageUrls"
   ]
 }

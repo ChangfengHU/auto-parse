@@ -123,5 +123,6 @@
         "delaySeconds": 3
       }
     }
-  ]
+  ],
+  "vars": []
 }
