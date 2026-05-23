@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-const SUPABASE_URL = process.env.SUPABASE_URL || '';
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  '';
+import { assertSupabaseRestConfig, parseSupabaseError } from '@/lib/supabase/rest-config';
 
 // Cookie 超过 14 天视为可能已过期
 const EXPIRE_DAYS = 14;
@@ -50,6 +47,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    const { url: SUPABASE_URL, key: SUPABASE_SERVICE_KEY } = assertSupabaseRestConfig();
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/douyin_sessions?client_id=eq.${encodeURIComponent(clientId)}&select=*&limit=1`,
       {
@@ -61,7 +59,7 @@ export async function GET(req: NextRequest) {
     );
 
     if (!res.ok) {
-      return NextResponse.json({ error: `Supabase 请求失败: ${res.status}` }, { status: 500 });
+      return NextResponse.json({ error: await parseSupabaseError(res) }, { status: 500 });
     }
 
     const rows = await res.json() as Array<{
