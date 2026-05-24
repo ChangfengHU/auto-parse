@@ -49,3 +49,24 @@ export const DEFAULT_PARSE_AUTH_CONFIG: ParseAuthConfig = {
 
 export const PARSE_EXPORT_CONFIG_KEY = 'doouyin-parse-export-config';
 export const PARSE_AUTH_CONFIG_KEY = 'doouyin-parse-auth-config';
+export const PARSE_PLUGIN_CLIENT_ID_KEY = 'doouyin-plugin-client-id';
+
+/** 解析请求实际使用的 auth：优先用户指定，其次有效插件凭证，最后平台登录 */
+export function buildEffectiveParseAuth(
+  authConfig: ParseAuthConfig,
+  pluginClientId: string,
+  pluginLoginValid: boolean
+): Partial<ParseAuthConfig> {
+  if (authConfig.mode === 'custom') {
+    if (authConfig.type === 'credential' && authConfig.clientId.trim()) {
+      return { mode: 'custom', type: 'credential', clientId: authConfig.clientId.trim() };
+    }
+    if (authConfig.type === 'cookie' && authConfig.cookieStr.trim()) {
+      return { mode: 'custom', type: 'cookie', cookieStr: authConfig.cookieStr.trim() };
+    }
+  }
+  if (pluginLoginValid && pluginClientId.trim()) {
+    return { mode: 'custom', type: 'credential', clientId: pluginClientId.trim() };
+  }
+  return { mode: 'platform' };
+}

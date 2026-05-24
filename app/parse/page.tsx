@@ -3,6 +3,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ParseAuthConfig, ParseExportConfig } from '@/lib/parse/types';
 import {
+  buildEffectiveParseAuth,
+  PARSE_PLUGIN_CLIENT_ID_KEY,
+} from '@/lib/parse/types';
+import {
   ParseExportConfigModal,
   loadParseAuthConfig,
   loadParseExportConfig,
@@ -148,19 +152,93 @@ export default function ParsePage() {
   const [configOpen, setConfigOpen] = useState(false);
   const [platformLoggedIn, setPlatformLoggedIn] = useState<boolean | null>(null);
   const [loginUpdatedAt, setLoginUpdatedAt] = useState<string | null>(null);
+  const [pluginClientId, setPluginClientId] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    const fromAuth = loadParseAuthConfig().clientId.trim();
+    return fromAuth || localStorage.getItem(PARSE_PLUGIN_CLIENT_ID_KEY) || '';
+  });
+  const [pluginLoginValid, setPluginLoginValid] = useState<boolean | null>(null);
+  const [pluginLoginMsg, setPluginLoginMsg] = useState('');
 
   type ParsedExportConfig = ParseExportConfig;
   type ParsedAuthConfig = ParseAuthConfig;
 
-  const refreshLoginStatus = useCallback(() => {
-    fetch('/api/login')
-      .then((r) => r.json())
-      .then((d: { loggedIn?: boolean; updatedAt?: string | null }) => {
-        setPlatformLoggedIn(!!d.loggedIn);
-        setLoginUpdatedAt(d.updatedAt ?? null);
-      })
-      .catch(() => setPlatformLoggedIn(null));
+  const validatePluginCredential = useCallback(async (clientId: string) => {
+    const id = clientId.trim();
+    if (!id) {
+      setPluginLoginValid(false);
+      setPluginLoginMsg('');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/login/supabase?clientId=${encodeURIComponent(id)}`);
+      const d = await res.json() as {
+        found?: boolean;
+        expired?: boolean;
+        cookieStr?: string | null;
+        message?: string;
+        error?: string;
+      };
+      if (d.error) {
+        setPluginLoginValid(false);
+        setPluginLoginMsg(d.error);
+        return;
+      }
+      const ok = !!d.found && !d.expired && !!d.cookieStr;
+      setPluginLoginValid(ok);
+      setPluginLoginMsg(d.message ?? (ok ? '插件凭证有效' : '插件凭证无效或未同步'));
+      if (ok) {
+        localStorage.setItem(PARSE_PLUGIN_CLIENT_ID_KEY, id);
+      }
+    } catch {
+      setPluginLoginValid(false);
+      setPluginLoginMsg('验证插件凭证失败');
+    }
   }, []);
+
+  const refreshLoginStatus = useCallback(async () => {
+    try {
+      const platformRes = await fetch('/api/login');
+      const d = await platformRes.json() as { loggedIn?: boolean; updatedAt?: string | null };
+      setPlatformLoggedIn(!!d.loggedIn);
+      setLoginUpdatedAt(d.updatedAt ?? null);
+    } catch {
+      setPlatformLoggedIn(null);
+    }
+
+    const storedId =
+      authConfig.clientId.trim() ||
+      (typeof window !== 'undefined' ? localStorage.getItem(PARSE_PLUGIN_CLIENT_ID_KEY) ?? '' : '') ||
+      pluginClientId;
+    if (storedId) {
+      setPluginClientId(storedId);
+      await validatePluginCredential(storedId);
+    } else {
+      setPluginLoginValid(false);
+      setPluginLoginMsg('');
+    }
+  }, [authConfig.clientId, pluginClientId, validatePluginCredential]);
+
+  // 与发布页相同：向 Chrome 插件请求 clientId
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type !== 'DOUYIN_CLIENT_ID') return;
+      const id = event.data.clientId as string | null;
+      if (!id) return;
+      window.removeEventListener('message', handler);
+      setPluginClientId(id);
+      localStorage.setItem(PARSE_PLUGIN_CLIENT_ID_KEY, id);
+      void validatePluginCredential(id);
+      setAuthConfig((prev) => (prev.clientId.trim() ? prev : { ...prev, clientId: id }));
+    };
+    window.addEventListener('message', handler);
+    window.postMessage({ type: 'DOUYIN_GET_CLIENT_ID' }, '*');
+    const timer = setTimeout(() => window.removeEventListener('message', handler), 2000);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('message', handler);
+    };
+  }, [validatePluginCredential]);
 
   useEffect(() => { setDetectedPlatform(detectPlatform(input)); }, [input]);
   useEffect(() => { refreshLoginStatus(); }, [refreshLoginStatus]);
@@ -182,7 +260,7 @@ export default function ParsePage() {
           url: input,
           watermark: false,
           export: exportConfig,
-          auth: authConfig,
+          auth: buildEffectiveParseAuth(authConfig, pluginClientId, pluginLoginValid === true),
         }),
       });
       const data = await res.json();
@@ -516,11 +594,30 @@ export default function ParsePage() {
   }
 
   const showDouyinLogin = detectedPlatform === 'douyin' || detectedPlatform === null;
-  const effectiveLoginReady = authConfig.mode === 'custom'
-    ? authConfig.type === 'credential'
-      ? !!authConfig.clientId.trim()
-      : !!authConfig.cookieStr.trim()
-    : platformLoggedIn === true;
+  const effectiveLoginReady =
+    platformLoggedIn === true ||
+    pluginLoginValid === true ||
+    (authConfig.mode === 'custom' &&
+      (authConfig.type === 'credential'
+        ? !!authConfig.clientId.trim()
+        : !!authConfig.cookieStr.trim()));
+
+  const loginStatusLabel = (() => {
+    if (authConfig.mode === 'custom') {
+      if (authConfig.type === 'credential') {
+        return `指定登录：插件凭证 ${authConfig.clientId.trim() || '（未填写）'}`;
+      }
+      return '指定登录：手动 Cookie';
+    }
+    if (pluginLoginValid && pluginClientId) {
+      return `插件凭证已登录（${pluginClientId}）`;
+    }
+    if (platformLoggedIn) return '平台已登录（可用于无水印解析）';
+    if (platformLoggedIn === false && pluginLoginValid === false) {
+      return '未登录（可能只能解析有水印版本）';
+    }
+    return '正在检测登录状态...';
+  })();
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-10">
@@ -547,27 +644,20 @@ export default function ParsePage() {
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2">
               <span className={`inline-block w-2 h-2 rounded-full ${effectiveLoginReady ? 'bg-green-500' : 'bg-yellow-500'}`} />
-              <span className="font-semibold">
-                {authConfig.mode === 'custom'
-                  ? authConfig.type === 'credential'
-                    ? `指定登录：插件凭证 ${authConfig.clientId.trim() || '（未填写）'}`
-                    : '指定登录：手动 Cookie'
-                  : platformLoggedIn
-                    ? '平台已登录（可用于无水印解析）'
-                    : platformLoggedIn === false
-                      ? '平台未登录（可能只能解析有水印版本）'
-                      : '正在检测登录状态...'}
-              </span>
+              <span className="font-semibold">{loginStatusLabel}</span>
             </div>
-            <button onClick={refreshLoginStatus} className="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
+            <button onClick={() => void refreshLoginStatus()} className="text-muted-foreground hover:text-foreground underline-offset-2 hover:underline">
               刷新
             </button>
           </div>
-          {authConfig.mode === 'platform' && loginUpdatedAt && (
-            <p className="mt-1.5 text-muted-foreground">最近更新：{loginUpdatedAt}</p>
+          {pluginLoginMsg && pluginLoginValid !== null && (
+            <p className="mt-1.5 text-muted-foreground">{pluginLoginValid ? '✓ ' : '⚠ '}{pluginLoginMsg}</p>
           )}
-          {!effectiveLoginReady && authConfig.mode === 'platform' && (
-            <p className="mt-1.5">可在右上角「导出配置」中切换为指定登录，或到 <a href="/publish" className="underline font-medium">发布页</a> 扫码登录。</p>
+          {authConfig.mode === 'platform' && platformLoggedIn && loginUpdatedAt && (
+            <p className="mt-1.5 text-muted-foreground">平台 Cookie 最近更新：{loginUpdatedAt}</p>
+          )}
+          {!effectiveLoginReady && (
+            <p className="mt-1.5">可在发布页用插件同步凭证，或在右上角「导出配置」中指定 Cookie / 凭证。</p>
           )}
         </div>
       )}
