@@ -774,25 +774,18 @@ export async function executePasteImageClipboard(
           return true;
         };
 
-        // 优先走 filechooser：很多页面不会暴露/常驻 input[type=file]
-        const chooserOk = await tryUploadViaFileChooser();
-        if (chooserOk) {
-          attachedViaDetail = 'filechooser';
-          uploadDone = true;
-        }
-
         const tryRevealFileInput = async (): Promise<boolean> => {
           const sel = fileInputSelector || 'input[type="file"], input[type="file"][accept*="image" i]';
-          const ok = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
+          const ok = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 2000 }).then(() => true).catch(() => false);
           if (ok) return true;
 
           const clickSources = openUploaderSelector ? [openUploaderSelector, ...uploadButtonCandidates] : uploadButtonCandidates;
           for (const cand of clickSources) {
             const buttons = await rankedVisibleLocators(cand);
             for (const btn of buttons) {
-              const clicked = await btn.locator.click({ timeout: 800 }).then(() => true).catch(() => false);
+              const clicked = await btn.locator.click({ timeout: 1500 }).then(() => true).catch(() => false);
               if (!clicked) continue;
-              const appeared = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 1200 }).then(() => true).catch(() => false);
+              const appeared = await page.locator(sel).first().waitFor({ state: 'attached', timeout: 2000 }).then(() => true).catch(() => false);
               if (appeared) {
                 logStage(`🧩 自动打开上传器成功：${btn.label}`);
                 return true;
@@ -803,13 +796,31 @@ export async function executePasteImageClipboard(
           return false;
         };
 
-        if (!uploadDone) {
+        // 最多重试 3 次，应对 Gemini 页面未就绪的竞态问题
+        const maxUploadAttempts = 3;
+        for (let attempt = 1; attempt <= maxUploadAttempts && !uploadDone; attempt++) {
+          if (attempt > 1) {
+            pushLog(`🔄 上传入口未就绪，等待后重试（${attempt}/${maxUploadAttempts}）...`);
+            await page.waitForTimeout(2500 * (attempt - 1));
+          }
+
+          // 优先走 filechooser：很多页面不会暴露/常驻 input[type=file]
+          const chooserOk = await tryUploadViaFileChooser();
+          if (chooserOk) {
+            attachedViaDetail = 'filechooser';
+            uploadDone = true;
+            break;
+          }
+
           const revealed = await tryRevealFileInput();
           if (!revealed) {
-            throw new Error(
-              `未找到 file input（selector=${fileInputSelector || 'input[type=file]'}）。` +
-                `请配置 openUploaderSelector（先点开上传入口）或 fileInputSelector（定位真实 input）。`
-            );
+            if (attempt >= maxUploadAttempts) {
+              throw new Error(
+                `未找到 file input（selector=${fileInputSelector || 'input[type=file]'}）。` +
+                  `请配置 openUploaderSelector（先点开上传入口）或 fileInputSelector（定位真实 input）。`
+              );
+            }
+            continue;
           }
 
           const inputSel = fileInputSelector || 'input[type="file"], input[type="file"][accept*="image" i]';
