@@ -7,7 +7,7 @@ description: |
 ---
 
 ```bash
-bash <(curl -fsSL https://skills.vyibc.com/install-vyibc-ai-batch-creator.sh)
+bash <(curl -fsSL https://skill.vyibc.com/install-vyibc-ai-batch-creator.sh)
 ```
 
 ## 功能特点

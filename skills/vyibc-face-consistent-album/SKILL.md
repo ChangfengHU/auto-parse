@@ -7,7 +7,7 @@ description: |
 ---
 
 ```bash
-bash <(curl -fsSL https://skills.vyibc.com/install-vyibc-face-consistent-album.sh)
+bash <(curl -fsSL https://skill.vyibc.com/install-vyibc-face-consistent-album.sh)
 ```
 
 ## 核心美学体系

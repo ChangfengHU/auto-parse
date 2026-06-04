@@ -105,7 +105,7 @@ bash <(curl -fsSL https://skills.vyibc.com/files/install-vyibc-doc-to-online-pag
 **安装：**
 
 ```bash
-bash <(curl -fsSL https://skills.vyibc.com/install-vyibc-gemini-web-image.sh)
+bash <(curl -fsSL https://skill.vyibc.com/install-vyibc-gemini-web-image.sh)
 ```
 
 **触发：** 说“用 Gemini 生成图片”“页面自动化生图”“按这个提示词出图”
@@ -125,7 +125,7 @@ bash <(curl -fsSL https://skills.vyibc.com/install-vyibc-gemini-web-image.sh)
 **安装：**
 
 ```bash
-bash <(curl -fsSL https://skills.vyibc.com/files/install-vyibc-face-consistent-album.sh)
+bash <(curl -fsSL https://skill.vyibc.com/install-vyibc-face-consistent-album.sh)
 ```
 
 **触发：** 说“用 [URL] 创作大片”“风格要魅惑/纯真”“全感官影像制作”
@@ -144,7 +144,7 @@ bash <(curl -fsSL https://skills.vyibc.com/files/install-vyibc-face-consistent-a
 **安装：**
 
 ```bash
-bash <(curl -fsSL https://skills.vyibc.com/files/install-vyibc-ai-batch-creator.sh)
+bash <(curl -fsSL https://skill.vyibc.com/install-vyibc-ai-batch-creator.sh)
 ```
 
 **触发：** 说“批量出图”、“批量生成”、“生成 50 张风景图”

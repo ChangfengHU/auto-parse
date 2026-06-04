@@ -412,17 +412,17 @@ async function runBatchTask(taskId: string) {
             workflow,
             vars,
           });
-          updateRun(taskId, index, { taskId: child.id, attempts: attempt, status: 'running' });
-          trace(taskId, 'child_task_created', { index, attempt, childTaskId: child.id, browserInstanceId: run.browserInstanceId });
+          updateRun(taskId, index, { taskId: child.taskId, attempts: attempt, status: 'running' });
+          trace(taskId, 'child_task_created', { index, attempt, childTaskId: child.taskId, browserInstanceId: run.browserInstanceId });
 
           while (true) {
             const latest = taskStore().get(taskId);
             if (!latest) return;
             if (latest.cancelRequested) {
-              stopWorkflowTask(child.id, 'batch_cancelled');
+              stopWorkflowTask(child.taskId, 'batch_cancelled');
             }
 
-            const childTask = getWorkflowTask(child.id);
+            const childTask = getWorkflowTask(child.taskId);
             if (!childTask) {
               await new Promise((resolve) => setTimeout(resolve, 1200));
               continue;
@@ -433,7 +433,7 @@ async function runBatchTask(taskId: string) {
             }
 
             if (childTask.status === 'done') {
-              const artifacts = collectWorkflowTaskArtifacts(child.id);
+              const artifacts = collectWorkflowTaskArtifacts(child.taskId);
               const candidate = collectMediaCandidates(artifacts ?? undefined);
               const mediaUrls = filterReferenceMediaUrls(
                 candidate.mediaUrls,
@@ -463,7 +463,7 @@ async function runBatchTask(taskId: string) {
               finalPrimaryMediaType = undefined;
               finalError = undefined;
             } else {
-              const artifacts = collectWorkflowTaskArtifacts(child.id);
+              const artifacts = collectWorkflowTaskArtifacts(child.taskId);
               const candidate = collectMediaCandidates(artifacts ?? undefined);
               const filteredMediaUrls = filterReferenceMediaUrls(
                 candidate.mediaUrls,
