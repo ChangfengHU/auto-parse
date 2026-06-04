@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import DropdownMenu from '@/components/DropdownMenu';
@@ -22,6 +22,12 @@ const NODE_COLORS: Record<string, string> = {
   agent_react: 'bg-teal-500',
 };
 
+type UnknownRecord = Record<string, unknown>;
+
+function asRecord(value: unknown): UnknownRecord {
+  return value !== null && typeof value === 'object' ? value as UnknownRecord : {};
+}
+
 export default function WorkflowsPage() {
   const router = useRouter();
   const [workflows, setWorkflows] = useState<Array<{
@@ -42,18 +48,7 @@ export default function WorkflowsPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [jumpPageInput, setJumpPageInput] = useState('1');
   const [pageSize, setPageSize] = useState(10);
-  const [localQueryEnabled, setLocalQueryEnabled] = useState(false);
-  const LOCAL_QUERY_STORAGE_KEY = 'workflows-local-query-enabled';
-
-  useEffect(() => {
-    try {
-      setLocalQueryEnabled(localStorage.getItem(LOCAL_QUERY_STORAGE_KEY) === '1');
-    } catch {
-      setLocalQueryEnabled(false);
-    }
-  }, []);
-
-  async function load(opts?: { q?: string; page?: number }) {
+  const load = useCallback(async (opts?: { q?: string; page?: number }) => {
     const page = Math.max(1, opts?.page ?? currentPage);
     const q = opts?.q ?? query;
     setLoading(true);
@@ -62,22 +57,22 @@ export default function WorkflowsPage() {
       const params = new URLSearchParams({ limit: String(pageSize) });
       params.set('page', String(page));
       if (q.trim()) params.set('q', q.trim());
-      if (localQueryEnabled) params.set('local', '1');
       const res = await fetch(`/api/workflows?${params.toString()}`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
 
-      const normalizeListItem = (wf: any) => ({
-        id: String(wf?.id || ''),
-        name: String(wf?.name || ''),
-        description: String(wf?.description || ''),
-        nodeCount: Array.isArray(wf?.nodes) ? wf.nodes.length : Number(wf?.nodeCount || 0),
-        nodePreview: Array.isArray(wf?.nodePreview)
-          ? wf.nodePreview
-          : (Array.isArray(wf?.nodes)
-            ? wf.nodes.slice(0, 10).map((n: any) => ({ type: String(n?.type || ''), label: n?.label }))
-            : []),
-      });
+      const normalizeListItem = (value: unknown) => {
+        const wf = asRecord(value);
+        return {
+          id: String(wf.id || ''),
+          name: String(wf.name || ''),
+          description: String(wf.description || ''),
+          nodeCount: Array.isArray(wf.nodes) ? wf.nodes.length : Number(wf.nodeCount || 0),
+          nodePreview: Array.isArray(wf.nodePreview)
+            ? wf.nodePreview.map((node) => { const n = asRecord(node); return { type: String(n.type || ''), label: typeof n.label === 'string' ? n.label : undefined }; })
+            : (Array.isArray(wf.nodes) ? wf.nodes.slice(0, 10).map((node) => { const n = asRecord(node); return { type: String(n.type || ''), label: typeof n.label === 'string' ? n.label : undefined }; }) : []),
+        };
+      };
 
       // 兼容旧接口：无分页时返回 WorkflowDef[]
       if (Array.isArray(data)) {
@@ -110,9 +105,9 @@ export default function WorkflowsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [currentPage, pageSize, query]);
 
-  useEffect(() => { void load({ q: query, page: currentPage }); }, [query, currentPage, localQueryEnabled, pageSize]);
+  useEffect(() => { void load({ q: query, page: currentPage }); }, [query, currentPage, pageSize, load]);
 
   function handleSearchSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -132,18 +127,6 @@ export default function WorkflowsPage() {
     const target = Math.max(1, Math.min(totalPages, page));
     if (target === currentPage) return;
     setCurrentPage(target);
-  }
-
-  function toggleLocalQuery() {
-    const next = !localQueryEnabled;
-    setLocalQueryEnabled(next);
-    try {
-      localStorage.setItem(LOCAL_QUERY_STORAGE_KEY, next ? '1' : '0');
-    } catch {
-      // ignore persistence failure
-    }
-    setCurrentPage(1);
-    setJumpPageInput('1');
   }
 
   async function handleCopy(id: string, e: React.MouseEvent) {
@@ -212,16 +195,6 @@ export default function WorkflowsPage() {
           <h1 className="text-lg font-semibold truncate">工作流管理</h1>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={toggleLocalQuery}
-            className={`px-3 py-1.5 text-sm rounded-lg transition-colors border ${
-              localQueryEnabled
-                ? 'bg-primary/10 text-primary border-primary/30'
-                : 'bg-muted hover:bg-muted/80 border-border'
-            }`}
-          >
-            本地查询：{localQueryEnabled ? '开' : '关'}
-          </button>
           <Link href="/publish" className="px-3 py-1.5 bg-muted hover:bg-muted/80 text-sm rounded-lg transition-colors">返回发布</Link>
         </div>
       </header>

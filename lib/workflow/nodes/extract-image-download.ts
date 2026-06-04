@@ -7,6 +7,7 @@ import type { ExtractImageDownloadParams, NodeResult, WorkflowContext } from '..
 import { captureScreenshot } from '../utils';
 import { withSystemClipboardLock } from '../clipboard-lock';
 import { uploadBuffer } from '../../oss';
+import type { ParseR2Config, ParseUploadProvider } from '../../parse/types';
 import { normalizeFailFastAction, normalizeFailFastTextIncludes } from './fail-fast-text';
 import { parseWorkflowStepErrorMessage } from '../step-error-meta';
 
@@ -79,6 +80,76 @@ function isSupportedMediaMimeType(mimeType: string): boolean {
   return mimeType.startsWith('image/') || mimeType.startsWith('video/');
 }
 
+async function downloadWithCdp(
+  page: Page,
+  click: () => Promise<void>,
+  downloadDir: string,
+  timeoutMs: number
+): Promise<{ path: string; fileName: string }> {
+  const session = await page.context().newCDPSession(page);
+  let guid = '';
+  let suggestedFilename = '';
+  try {
+    await session.send('Browser.setDownloadBehavior', {
+      behavior: 'allowAndName',
+      downloadPath: downloadDir,
+      eventsEnabled: true,
+    });
+    const completed = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`CDP 下载超时 ${timeoutMs}ms`)), timeoutMs);
+      session.on('Browser.downloadWillBegin', (event) => {
+        guid = String(event.guid || '');
+        suggestedFilename = String(event.suggestedFilename || '');
+      });
+      session.on('Browser.downloadProgress', (event) => {
+        if (guid && event.guid !== guid) return;
+        if (event.state === 'completed') {
+          clearTimeout(timer);
+          resolve();
+        } else if (event.state === 'canceled') {
+          clearTimeout(timer);
+          reject(new Error('CDP 下载被浏览器取消'));
+        }
+      });
+    });
+    await click();
+    await completed;
+    if (!guid) throw new Error('CDP 下载完成但未收到 guid');
+    return {
+      path: path.join(downloadDir, guid),
+      fileName: suggestedFilename || `image-${Date.now()}.png`,
+    };
+  } finally {
+    await session.detach().catch(() => {});
+  }
+}
+
+async function captureDownloadResponse(
+  page: Page,
+  click: () => Promise<void>,
+  timeoutMs: number,
+  minimumSize: number
+): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
+  const responsePromise = page.waitForResponse(
+    (response) => {
+      const mimeType = response.headers()['content-type']?.split(';')[0]?.trim().toLowerCase() || '';
+      const contentLength = Number(response.headers()['content-length'] || 0);
+      const looksLikeOriginal = response.url().includes('/rd-gg/') || contentLength >= minimumSize;
+      return response.ok() && isSupportedMediaMimeType(mimeType) && looksLikeOriginal;
+    },
+    { timeout: timeoutMs }
+  );
+  await click();
+  const response = await responsePromise;
+  const mimeType = response.headers()['content-type']?.split(';')[0]?.trim().toLowerCase() || '';
+  const extension = sniffMediaType(Buffer.alloc(0), `media.${mimeType.split('/')[1] || 'bin'}`).extension;
+  return {
+    buffer: await response.body(),
+    fileName: `download-response-${Date.now()}${extension}`,
+    mimeType,
+  };
+}
+
 function sha256(buf: Buffer): string {
   return crypto.createHash('sha256').update(buf).digest('hex');
 }
@@ -92,7 +163,7 @@ async function uploadBufferToLocalFilesApi(
   timeoutMs: number
 ): Promise<string> {
   const form = new FormData();
-  const blob = new Blob([buffer], { type: contentType });
+  const blob = new Blob([new Uint8Array(buffer)], { type: contentType });
   form.append('file', blob, fileName);
   form.append('storage_backend', 'local');
 
@@ -542,8 +613,10 @@ export async function executeExtractImageDownload(
     const fallbackImageSelector = (params.fallbackImageSelector || 'img[src^="blob:"], img[src^="data:image"], img').trim();
     const copyImageButtonSelector = String(params.copyImageButtonSelector ?? '').trim();
     const uploadToOSS = params.uploadToOSS ?? true;
+    const uploadProvider = params.uploadProvider || (ctx.vars?.uploadProvider as ParseUploadProvider | undefined);
     const useLocalApi = params.storageBackend === 'local_api';
-    const useOss = !useLocalApi && uploadToOSS;
+    const useR2 = !useLocalApi && uploadProvider === 'r2';
+    const useOss = !useLocalApi && !useR2 && uploadToOSS;
     const outputVar = params.outputVar || 'imageUrl';
     const buttonIndex = params.buttonIndex ?? -1;
     const waitForNew = params.waitForNew ?? false;
@@ -685,7 +758,7 @@ export async function executeExtractImageDownload(
     }
 
     pushLog(
-      `📥 生图阶段结束 → 后续：${params.preferDomExtraction ? 'DOM 优先提取 → ' : ''}查找下载入口 / 浏览器下载事件 → 本地校验 → OSS`
+      `📥 生图阶段结束 → 后续：${params.preferDomExtraction ? 'DOM 优先提取 → ' : ''}查找下载入口 / 浏览器下载事件 → 本地校验 → ${useLocalApi ? '本地 API' : useR2 ? 'R2' : useOss ? 'OSS' : '本地文件'}`
     );
 
     // 业务硬约束：该节点用于产出视觉媒体；若页面仅文本回复且无可提取视觉元素，立即失败，避免无效重试。
@@ -889,48 +962,55 @@ export async function executeExtractImageDownload(
 
           try {
             log.push(`⬇️ 开始下载 (尝试 ${attempt}/${maxRetries})`);
-            pushLog(`⏳ 触发点击后等待浏览器 Download 事件（超时 ${Math.round(downloadTimeout / 1000)}s）…`);
-            const downloadPromise = page.waitForEvent('download', { timeout: downloadTimeout });
-            if (mode === 'direct') {
-              pushLog(`🖱️ 点击直连下载按钮（第 ${idx + 1} 个）…`);
-              await loc.nth(idx).click({ timeout: buttonTimeout });
-            } else {
-              const triggerLoc = triggerLocBase;
-              const triggerCount = await triggerLoc.count();
-              if (triggerCount <= 0) throw new Error('菜单触发按钮不存在');
-              const triggerIndex = pickIndex(triggerCount, buttonIndex);
-              pushLog(`🖱️ 打开「更多」菜单（第 ${triggerIndex + 1} 个触发器）…`);
-              await triggerLoc.nth(triggerIndex).click({ timeout: buttonTimeout });
-
-              const itemLoc = itemLocBase;
-              const menuDeadline = Date.now() + 10_000;
-              let itemCount = 0;
-              while (Date.now() < menuDeadline) {
-                const reason = await detectFailFast(
-                  page,
-                  { textIncludes: failFastTextIncludes, selector: failFastSelector },
-                  300
-                );
-                if (reason) {
-                  log.push(`🛑 失败快判：${reason}`);
-                  throw new FailFastError(reason);
+            const clickDownload = async () => {
+              if (mode === 'direct') {
+                pushLog(`🖱️ 点击直连下载按钮（第 ${idx + 1} 个）…`);
+                await loc.nth(idx).click({ timeout: buttonTimeout });
+              } else {
+                const triggerLoc = triggerLocBase;
+                const triggerCount = await triggerLoc.count();
+                if (triggerCount <= 0) throw new Error('菜单触发按钮不存在');
+                const triggerIndex = pickIndex(triggerCount, buttonIndex);
+                pushLog(`🖱️ 打开「更多」菜单（第 ${triggerIndex + 1} 个触发器）…`);
+                await triggerLoc.nth(triggerIndex).click({ timeout: buttonTimeout });
+                const itemLoc = itemLocBase;
+                const menuDeadline = Date.now() + 10_000;
+                let itemCount = 0;
+                while (Date.now() < menuDeadline) {
+                  const reason = await detectFailFast(page, { textIncludes: failFastTextIncludes, selector: failFastSelector }, 300);
+                  if (reason) { log.push(`🛑 失败快判：${reason}`); throw new FailFastError(reason); }
+                  itemCount = await itemLoc.count().catch(() => 0);
+                  if (itemCount > 0) break;
+                  await page.waitForTimeout(300);
                 }
-                itemCount = await itemLoc.count().catch(() => 0);
-                if (itemCount > 0) break;
-                await page.waitForTimeout(300);
+                if (itemCount <= 0) throw new Error('菜单中未找到下载项');
+                const itemIndex = pickIndex(itemCount, buttonIndex);
+                pushLog(`🖱️ 点击菜单内下载项（第 ${itemIndex + 1} 个）…`);
+                await itemLoc.nth(itemIndex).click({ timeout: 10_000 });
               }
-              if (itemCount <= 0) throw new Error('菜单中未找到下载项');
-
-              const itemIndex = pickIndex(itemCount, buttonIndex);
-              pushLog(`🖱️ 点击菜单内下载项（第 ${itemIndex + 1} 个）…`);
-              await itemLoc.nth(itemIndex).click({ timeout: 10_000 });
+              if (waitAfterClick > 0) await page.waitForTimeout(waitAfterClick);
+            };
+            try {
+              pushLog(`⏳ 捕获下载按钮触发的原图网络响应（超时 ${Math.round(downloadTimeout / 1000)}s）…`);
+              const captured = await captureDownloadResponse(page, clickDownload, downloadTimeout, minFileSizeBytes);
+              if (captured.buffer.length <= 0) throw new Error('原图网络响应为空');
+              if (minFileSizeBytes > 0 && captured.buffer.length < minFileSizeBytes) {
+                throw new Error(`原图网络响应过小(${captured.buffer.length} bytes)，低于阈值 ${minFileSizeBytes}`);
+              }
+              imageBuffer = captured.buffer;
+              fileName = captured.fileName;
+              contentType = captured.mimeType;
+              extractionMethod = 'download';
+              pushLog(`✅ 已捕获原图网络响应: ${fileName}（${(imageBuffer.length / 1024).toFixed(1)} KB）`);
+              return true;
+            } catch (networkErr) {
+              log.push(`⚠️ 原图网络响应捕获失败，回退 CDP 下载: ${networkErr instanceof Error ? networkErr.message : String(networkErr)}`);
             }
-            if (waitAfterClick > 0) await page.waitForTimeout(waitAfterClick);
-            const download = await downloadPromise;
-            pushLog(`📨 已收到 Download 事件，正在写入临时文件…`);
-            fileName = download.suggestedFilename() || `image-${Date.now()}.png`;
-            finalPath = path.join(tempDir, `${Date.now()}-${attempt}-${fileName}`);
-            await download.saveAs(finalPath);
+
+            pushLog(`⏳ 使用 CDP 原生下载通道（超时 ${Math.round(downloadTimeout / 1000)}s）…`);
+            const cdpDownload = await downloadWithCdp(page, clickDownload, tempDir, downloadTimeout);
+            fileName = cdpDownload.fileName;
+            finalPath = cdpDownload.path;
             const stat = await fs.stat(finalPath);
             if (stat.size <= 0) throw new Error('下载文件为空');
             if (minFileSizeBytes > 0 && stat.size < minFileSizeBytes) {
@@ -1089,7 +1169,7 @@ export async function executeExtractImageDownload(
       }
       if (!imageBuffer) {
         if (!allowDomFallback) {
-          log.push(`↩️ 下载链路未拿到媒体，强制启用一次 DOM 兜底提取（即使 allowDomFallback=false）`);
+          throw new Error('下载链路未拿到媒体，且 allowDomFallback=false，已禁止使用页面预览图兜底');
         }
         log.push(`↩️ 下载事件失败，尝试 DOM 兜底提取: ${fallbackImageSelector}`);
         const pickedImage = await pickBestImageSrc(page, fallbackImageSelector);
@@ -1156,11 +1236,16 @@ export async function executeExtractImageDownload(
         timeoutMs
       );
       pushLog(`✅ 本地存储 URL: ${mediaUrl}`);
+    } else if (useR2) {
+      pushLog(`☁️ R2 上传中（约 ${(imageBuffer.length / 1024).toFixed(1)} KB）→ bucket 对象键: ${ossPath}`);
+      mediaUrl = await uploadBuffer(imageBuffer, ossPath, contentType, {
+        provider: 'r2',
+        r2: params.r2Config || (ctx.vars?.r2Config as Partial<ParseR2Config> | undefined),
+      });
+      pushLog(`✅ R2 上传成功，公网 URL: ${mediaUrl}`);
     } else if (useOss) {
-      pushLog(
-        `☁️ OSS 上传中（约 ${(imageBuffer.length / 1024).toFixed(1)} KB）→ bucket 对象键: ${ossPath}`
-      );
-      mediaUrl = await uploadBuffer(imageBuffer, ossPath, contentType);
+      pushLog(`☁️ OSS 上传中（约 ${(imageBuffer.length / 1024).toFixed(1)} KB）→ bucket 对象键: ${ossPath}`);
+      mediaUrl = await uploadBuffer(imageBuffer, ossPath, contentType, { provider: uploadProvider });
       pushLog(`✅ OSS 上传成功，公网 URL: ${mediaUrl}`);
     } else if (!finalPath) {
       finalPath = path.join(tempDir, fileName || `image-${Date.now()}.bin`);
@@ -1178,7 +1263,7 @@ export async function executeExtractImageDownload(
     }
     const refHint = String(ctx.vars.sourceImageUrl ?? ctx.vars.sourceImageUrls ?? '').trim();
     pushLog(
-      `🧩 本节点产出：${useLocalApi ? '本地 API' : useOss ? 'OSS' : '本地路径'} → ${outputVar}=${mediaUrl}` +
+      `🧩 本节点产出：${useLocalApi ? '本地 API' : useR2 ? 'R2' : useOss ? 'OSS' : '本地路径'} → ${outputVar}=${mediaUrl}` +
         (refHint ? `；输入参考图仍在任务变量 sourceImageUrl（勿与 generatedImageUrl 混淆）` : '')
     );
 
@@ -1201,7 +1286,7 @@ export async function executeExtractImageDownload(
         fileSize: imageBuffer.length,
         mimeType: contentType,
         extractionMethod,
-        storageBackend: useLocalApi ? 'local_api' : useOss ? 'oss' : 'none',
+        storageBackend: useLocalApi ? 'local_api' : useR2 ? 'r2' : useOss ? 'oss' : 'none',
       },
     };
   } catch (e) {

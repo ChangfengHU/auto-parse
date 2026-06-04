@@ -6,7 +6,7 @@ import path from 'path';
 import { promisify } from 'util';
 import { getRuntimeBackendConfigSync } from './runtime/backend-config';
 import type { ParseR2Config, ParseUploadProvider } from './parse/types';
-import { uploadFileToR2, uploadVideoFromUrlToR2 } from './upload/r2';
+import { uploadBufferToR2, uploadFileToR2, uploadVideoFromUrlToR2 } from './upload/r2';
 
 export type UploadTargetOptions = {
   provider?: ParseUploadProvider;
@@ -379,8 +379,20 @@ export async function uploadFromUrl(url: string, key: string, contentType?: stri
 }
 
 // 从 Buffer 上传
-export async function uploadBuffer(buffer: Buffer, key: string, contentType: string = 'image/jpeg'): Promise<string> {
-  if (useSupabaseStorage()) {
+export async function uploadBuffer(
+  buffer: Buffer,
+  key: string,
+  contentType: string = 'image/jpeg',
+  target?: UploadTargetOptions
+): Promise<string> {
+  const provider = resolveUploadProvider(target);
+  const fileName = key.split('/').pop() ?? 'file';
+
+  if (provider === 'r2') {
+    return uploadBufferToR2(buffer, fileName, contentType, target?.r2);
+  }
+
+  if (provider === 'supabase' || (provider === 'oss' && useSupabaseStorage())) {
     return uploadToSupabaseStorage(key, buffer as unknown as BodyInit, contentType, 'inline');
   }
 

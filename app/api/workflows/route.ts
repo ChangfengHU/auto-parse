@@ -4,16 +4,16 @@
  */
 import { NextResponse } from 'next/server';
 import { listWorkflows, listWorkflowsPage, createWorkflow } from '@/lib/workflow/workflow-db';
-import { douyinPublishWorkflow } from '@/lib/workflow/workflows/douyin-publish';
+import type { WorkflowRow } from '@/lib/workflow/workflow-db';
 
-function toWorkflowListItem(row: any) {
+function toWorkflowListItem(row: WorkflowRow) {
   const nodes = Array.isArray(row?.nodes) ? row.nodes : [];
   return {
     id: String(row?.id || ''),
     name: String(row?.name || ''),
     description: String(row?.description || ''),
     nodeCount: nodes.length,
-    nodePreview: nodes.slice(0, 10).map((n: any) => ({
+    nodePreview: nodes.slice(0, 10).map((n) => ({
       type: String(n?.type || ''),
       label: typeof n?.label === 'string' ? n.label : undefined,
     })),
@@ -27,26 +27,19 @@ export async function GET(req: Request) {
     const cursor = url.searchParams.get('cursor') || undefined;
     const pageRaw = url.searchParams.get('page');
     const q = url.searchParams.get('q') || undefined;
-    const localOnly = url.searchParams.get('local') === '1';
     const shouldPage = Boolean(limitRaw || cursor || q || pageRaw);
 
     if (shouldPage) {
       const limit = Number(limitRaw || 50);
       const page = Number(pageRaw || 1);
-      const result = await listWorkflowsPage({ limit, cursor, page, q, localOnly });
+      const result = await listWorkflowsPage({ limit, cursor, page, q });
       return NextResponse.json({
         ...result,
         items: Array.isArray(result.items) ? result.items.map(toWorkflowListItem) : [],
       });
     }
 
-    const rows = await listWorkflows({ localOnly });
-    // 若表为空，自动写入内置抖音工作流
-    if (rows.length === 0) {
-      const seeded = await createWorkflow(douyinPublishWorkflow).catch(() => null);
-      return NextResponse.json(seeded ? [seeded] : []);
-    }
-    return NextResponse.json(rows);
+    return NextResponse.json(await listWorkflows());
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
   }

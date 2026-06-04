@@ -1,3 +1,4 @@
+import type { ParseR2Config, ParseUploadProvider } from '../parse/types';
 // ─────────────────────────────────────────────────────────────────────────────
 //  Workflow Engine – Type Definitions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -284,6 +285,8 @@ export interface ExtractImageDownloadParams {
   waitAfterClick?: number;
   minFileSizeBytes?: number;
   uploadToOSS?: boolean;
+  uploadProvider?: ParseUploadProvider;
+  r2Config?: Partial<ParseR2Config>;
   ossPath?: string;
   outputVar?: string;
 
