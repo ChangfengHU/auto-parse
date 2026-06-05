@@ -597,20 +597,24 @@ export async function executePasteImageClipboard(
 
       if (!uploadDone) {
         const uploadButtonCandidates = [
-          // Gemini 当前上传入口
+          // Gemini 最新版上传入口（2026 改版后）
+          '[aria-label="Upload & tools"]',
+          '[aria-label="Add files"]',
+          '[aria-label*="Upload & tools" i]',
+          '[aria-label*="Add files" i]',
+          // Gemini 旧版上传入口
           '[aria-label*="Open upload file menu" i]',
           '.upload-card-button',
-          // Gemini 常见入口
+          // 通用文本匹配
           'button:has-text("Upload")',
           'button:has-text("上传")',
           'button:has-text("Add image")',
           'button:has-text("添加图片")',
+          'button:has-text("添加文件")',
           'button:has-text("Insert")',
           'button:has-text("插入")',
-          // aria-label
+          // aria-label 模糊匹配（放最后，避免误命中）
           '[aria-label*="upload" i]',
-          '[aria-label*="image" i]',
-          '[aria-label*="photo" i]',
           '[aria-label*="图片" i]',
           '[aria-label*="照片" i]',
         ];
