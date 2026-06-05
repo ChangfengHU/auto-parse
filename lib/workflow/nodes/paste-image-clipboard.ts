@@ -596,6 +596,10 @@ export async function executePasteImageClipboard(
       }
 
       if (!uploadDone) {
+        // 先点击输入框使其获得焦点，否则 Gemini 旧版（如 k1bdaoa7）的上传按钮为 disabled 状态
+        await target.click({ timeout: 3000 }).catch(() => {});
+        await page.waitForTimeout(400);
+
         const uploadButtonCandidates = [
           // Gemini 新版英文界面（k1b908rw）
           '[aria-label="Upload & tools"]',
