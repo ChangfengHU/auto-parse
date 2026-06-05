@@ -597,12 +597,14 @@ export async function executePasteImageClipboard(
 
       if (!uploadDone) {
         const uploadButtonCandidates = [
-          // Gemini 最新版上传入口（2026 改版后）
+          // Gemini 新版英文界面（k1b908rw）
           '[aria-label="Upload & tools"]',
           '[aria-label="Add files"]',
-          '[aria-label*="Upload & tools" i]',
-          '[aria-label*="Add files" i]',
+          // Gemini 旧版中文界面（k1bdaoa7）
+          '[aria-label="添加文件"]',
+          '[aria-label*="添加文件" i]',
           // Gemini 旧版上传入口
+          '[aria-label*="Upload & tools" i]',
           '[aria-label*="Open upload file menu" i]',
           '.upload-card-button',
           // 通用文本匹配
