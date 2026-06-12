@@ -209,7 +209,7 @@ const { getGeminiAdsDispatcherQueueLockDir, getGeminiAdsDispatcherTaskCacheDir }
 const TASK_CACHE_DIR = getGeminiAdsDispatcherTaskCacheDir();
 const DEFAULT_DISPATCHER_TIMEOUT_MS = Number(process.env.GEMINI_ADS_DISPATCHER_TIMEOUT_MS || 45 * 60 * 1000);
 const DEFAULT_INSTANCE_COOLDOWN_MS = Number(process.env.GEMINI_ADS_DISPATCHER_INSTANCE_COOLDOWN_MS || 45_000);
-const DEFAULT_MAX_IDLE_CYCLES = Number(process.env.GEMINI_ADS_DISPATCHER_MAX_IDLE_CYCLES || 18);
+const DEFAULT_MAX_IDLE_CYCLES = Number(process.env.GEMINI_ADS_DISPATCHER_MAX_IDLE_CYCLES || 300);
 const DEFAULT_FAILURE_COOLDOWN_THRESHOLD = Number(process.env.GEMINI_ADS_DISPATCHER_FAILURE_COOLDOWN_THRESHOLD || 2);
 
 const DEFAULT_OPTIMIZE_PROMPT_ON_RETRY = String(process.env.GEMINI_ADS_DISPATCHER_OPTIMIZE_PROMPT_ON_RETRY || '').toLowerCase() === 'true';
@@ -1633,6 +1633,25 @@ async function releaseInstance(taskId: string, instanceId: string, leaseId?: str
   );
 }
 
+// 对 inactive 实例调用 browser/start 尝试自动唤起，fire-and-forget
+async function tryWakeInactiveInstances(taskId: string) {
+  const task = taskStore().get(taskId);
+  if (!task) return;
+  const adsApiBase = (process.env.ADS_API_URL || 'http://127.0.0.1:50325').trim();
+  const inactiveIds = task.instances
+    .filter((inst) => inst.state === 'inactive')
+    .map((inst) => inst.instanceId);
+  for (const instanceId of inactiveIds) {
+    fetch(`${adsApiBase}/api/v1/browser/start?user_id=${instanceId}`, {
+      signal: AbortSignal.timeout(8000),
+    }).then((r) => {
+      trace(taskId, 'watchdog_wake_instance', { instanceId, status: r.status, ok: r.ok });
+    }).catch((err) => {
+      trace(taskId, 'watchdog_wake_instance_failed', { instanceId, error: String(err) });
+    });
+  }
+}
+
 async function assignNextItem(taskId: string, instanceId: string) {
   const current = taskStore().get(taskId);
   if (!current || current.cancelRequested || current.suspendRequested) return false;
@@ -2464,6 +2483,7 @@ async function runDispatcherTask(taskId: string) {
     }
 
     await refreshNonRunningInstances(taskId);
+    void tryWakeInactiveInstances(taskId);
 
     const latest = taskStore().get(taskId);
     if (!latest) return;
@@ -3032,6 +3052,14 @@ export async function resumeGeminiAdsDispatcherTask(taskId: string, options?: { 
   const task = await getGeminiAdsDispatcherTask(taskId);
   if (!task) return undefined;
   if (isTerminal(task.status)) return task;
+
+  // queued 状态说明任务可能因进程重启从队列中丢失，直接 re-enqueue 即可
+  if (task.status === 'queued') {
+    trace(taskId, 'task_requeued', { mode: options?.mode || 'back' });
+    await enqueueTask(taskId, { mode: options?.mode === 'front' ? 'front' : 'back' });
+    return task;
+  }
+
   if (task.status !== 'paused') return task;
 
   const now = nowIso();

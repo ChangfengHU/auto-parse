@@ -57,9 +57,26 @@ description: |
 
 ### 第二步：调用脚本派发
 
+脚本路径基于 skill 自身目录，用 `__file__` 定位，**不依赖当前工作目录**：
+
 ```bash
-python3 skills/vyibc-style-images/scripts/call_dispatcher.py /tmp/style_prompts.json "https://example.com/reference.png"
+# SKILL_DIR 是 skill 安装目录，如 ~/.cursor/skills/vyibc-style-images
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+python3 "$SKILL_DIR/scripts/call_dispatcher.py" /tmp/style_prompts.json "https://example.com/reference.png"
 ```
+
+或者直接用绝对路径（agent 应根据 skill 实际安装位置替换）：
+
+```bash
+# Cursor
+python3 ~/.cursor/skills/vyibc-style-images/scripts/call_dispatcher.py /tmp/style_prompts.json "参考图URL"
+# Claude
+python3 ~/.claude/skills/vyibc-style-images/scripts/call_dispatcher.py /tmp/style_prompts.json "参考图URL"
+# Codex
+python3 ~/.codex/skills/vyibc-style-images/scripts/call_dispatcher.py /tmp/style_prompts.json "参考图URL"
+```
+
+agent 应优先尝试当前工具的 skills 目录，找不到时依次尝试其他路径。
 
 脚本会自动轮询，完成后：
 1. 以 `[图片N](url)` 格式输出每张图片链接（图片托管在 `https://skill.vyibc.com/douyin/` 即 R2 CDN）
