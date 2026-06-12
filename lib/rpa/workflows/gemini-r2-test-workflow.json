@@ -1,0 +1,53 @@
+{
+  "id": "gemini-r2-test-workflow",
+  "name": "Gemini-R2测试流程",
+  "description": "测试 Gemini 生图并高清提取至 R2",
+  "nodes": [
+    {
+      "type": "navigate",
+      "label": "打开 Gemini",
+      "params": {
+        "url": "https://gemini.google.com/",
+        "useAdsPower": true,
+        "adsProfileId": "{{browserInstanceId}}"
+      },
+      "waitAfter": {
+        "action": "appeared",
+        "enabled": true,
+        "timeout": 60000,
+        "selector": "rich-textarea .ql-editor[contenteditable=\"true\"]"
+      }
+    },
+    {
+      "type": "text_input",
+      "label": "输入提示词",
+      "params": {
+        "value": "{{noteUrl}}",
+        "selector": "rich-textarea .ql-editor[contenteditable=\"true\"]"
+      }
+    },
+    {
+      "type": "click",
+      "label": "发送请求",
+      "params": {
+        "selector": "button[aria-label=\"Send message\"], button[aria-label*=\"发送\"]"
+      },
+      "waitAfter": {
+        "enabled": true,
+        "timeout": 240000,
+        "selector": "[aria-label=\"Copy image\"], button[aria-label*=\"复制图片\"]",
+        "delaySeconds": 5
+      }
+    },
+    {
+      "type": "extract_image_clipboard",
+      "label": "提取并上传 R2",
+      "params": {
+        "ossPath": "test-r2/{{timestamp}}.png",
+        "outputVar": "imageUrl",
+        "uploadToOSS": true,
+        "uploadProvider": "r2"
+      }
+    }
+  ]
+}

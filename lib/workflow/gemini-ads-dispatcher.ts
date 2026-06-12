@@ -7,6 +7,7 @@ import {
   getDispatchableInstanceStatus,
   listDispatchableInstanceStatuses,
   releaseInstanceLease,
+  resolvePoolInstanceIds,
   type InstanceStatus,
 } from '@/lib/ads-instance-pool';
 import {
@@ -14,7 +15,6 @@ import {
   forceStopWorkflowTask,
   getWorkflowTask,
   startWorkflowTask,
-  stopWorkflowTask,
 } from '@/lib/workflow/workflow-task-cli';
 import {
   appendTaskTrace,
@@ -33,6 +33,7 @@ type DispatcherFailureCategory =
   | 'policy_blocked'
   | 'timeout'
   | 'child_create_failed'
+  | 'upload'
   | 'no_media'
   | 'network'
   | 'unknown';
@@ -199,6 +200,7 @@ declare global {
     | undefined;
   var __geminiAdsDispatcherQueueKicking: boolean | undefined;
   var __geminiAdsDispatcherQueueKickPending: boolean | undefined;
+  var __geminiAdsDispatcherActiveRuns: Set<string> | undefined;
 }
 
 const DEFAULT_INSTANCE_IDS = ['k1b908rw', 'k1bdaoa7', 'k1ba8vac'];
@@ -214,6 +216,14 @@ const DEFAULT_OPTIMIZE_PROMPT_ON_RETRY = String(process.env.GEMINI_ADS_DISPATCHE
 const DEFAULT_PROMPT_OPTIMIZATION_MODEL = String(process.env.GEMINI_ADS_DISPATCHER_PROMPT_OPTIMIZATION_MODEL || 'gemini-2.5-flash').trim() || 'gemini-2.5-flash';
 const DEFAULT_PROMPT_OPTIMIZATION_TIMEOUT_MS = Number(process.env.GEMINI_ADS_DISPATCHER_PROMPT_OPTIMIZATION_TIMEOUT_MS || 8000);
 const DEFAULT_MAX_PROMPT_OPTIMIZATIONS_PER_ITEM = Number(process.env.GEMINI_ADS_DISPATCHER_MAX_PROMPT_OPTIMIZATIONS_PER_ITEM || 1);
+const CHATGPT_IMAGE_WORKFLOW_IDS = new Set([
+  'cf01c4c6-99d0-4536-8f22-9e09c6cf7c66',
+]);
+const DEFAULT_CHATGPT_ADS_INSTANCE_ID = String(
+  process.env.CHATGPT_ADS_INSTANCE_ID ||
+    process.env.ADS_CHATGPT_INSTANCE_ID ||
+    'k1d8g5bo'
+).trim();
 
 const TRACE_NAMESPACE = 'gemini-ads-dispatcher';
 
@@ -222,6 +232,13 @@ function taskStore() {
     global.__geminiAdsDispatcherTasks = new Map();
   }
   return global.__geminiAdsDispatcherTasks;
+}
+
+function activeRunStore() {
+  if (!global.__geminiAdsDispatcherActiveRuns) {
+    global.__geminiAdsDispatcherActiveRuns = new Set();
+  }
+  return global.__geminiAdsDispatcherActiveRuns;
 }
 
 function cacheFile(taskId: string) {
@@ -339,6 +356,121 @@ function persistQueueState(next: DispatcherQueueState) {
   }
 }
 
+function hasActiveDispatcherRun(taskId: string) {
+  return activeRunStore().has(taskId);
+}
+
+function recoverStaleRunningTask(task: GeminiAdsDispatcherTask): GeminiAdsDispatcherTask {
+  if (task.status !== 'running') return task;
+  if (hasActiveDispatcherRun(task.id)) return task;
+
+  const endedAt = nowIso();
+  const reason = '调度器运行循环丢失（进程重启或 dev server 中断），运行中的子任务不可恢复';
+  const dispatcherStartedAt = parseTs(task.startedAt);
+  const dispatcherTimedOut =
+    Number.isFinite(dispatcherStartedAt) &&
+    Date.now() - dispatcherStartedAt > task.settings.dispatcherTimeoutMs;
+  const runningAttemptTimedOut = (item: GeminiAdsDispatcherItem) => {
+    const startedAt = parseTs(item.attemptHistory?.[item.attemptHistory.length - 1]?.startedAt || item.startedAt);
+    const timeoutMs = adaptiveChildTimeoutMs(task.settings.childTaskTimeoutMs, item.attempts || 1);
+    return Number.isFinite(startedAt) && Date.now() - startedAt > timeoutMs;
+  };
+  const hasTimedOutRunningItem = task.items.some((item) => item.status === 'running' && runningAttemptTimedOut(item));
+
+  if (!dispatcherTimedOut && !hasTimedOutRunningItem) {
+    return task;
+  }
+
+  const items = task.items.map((item) => {
+    if (item.status === 'success' || item.status === 'failed' || item.status === 'cancelled') {
+      return item;
+    }
+
+    if (dispatcherTimedOut) {
+      const error = `调度总超时后恢复：${reason}`;
+      const failureCategory = parseFailureCategory(error);
+      return {
+        ...item,
+        status: 'failed' as const,
+        error: item.error || error,
+        failureCategory: item.failureCategory || failureCategory,
+        endedAt: item.endedAt || endedAt,
+        attemptHistory: item.status === 'running'
+          ? patchLatestAttemptHistory(item, {
+              endedAt,
+              durationMs: toDurationMs(item.attemptHistory?.[item.attemptHistory.length - 1]?.startedAt, endedAt),
+              outcome: 'failed',
+              error,
+              failureCategory,
+            })
+          : item.attemptHistory,
+      };
+    }
+
+    if (item.status !== 'running') return item;
+
+    const childTimedOut = runningAttemptTimedOut(item);
+    const childError = childTimedOut
+      ? `子任务超时后恢复：${reason}`
+      : reason;
+    const failureCategory = parseFailureCategory(childError);
+    const exhausted = (item.attempts || 0) >= task.settings.maxAttemptsPerPrompt;
+    return {
+      ...item,
+      status: exhausted ? 'failed' as const : 'pending' as const,
+      browserInstanceId: exhausted ? item.browserInstanceId : undefined,
+      workflowTaskId: exhausted ? item.workflowTaskId : undefined,
+      error: childError,
+      failureCategory,
+      endedAt: exhausted ? (item.endedAt || endedAt) : undefined,
+      attemptHistory: patchLatestAttemptHistory(item, {
+        endedAt,
+        durationMs: toDurationMs(item.attemptHistory?.[item.attemptHistory.length - 1]?.startedAt, endedAt),
+        outcome: exhausted ? 'failed' : (childTimedOut ? 'timeout' : 'create_failed'),
+        error: childError,
+        failureCategory,
+      }),
+    };
+  });
+
+  const summary = computeSummary(items);
+  const nextStatus: DispatcherStatus =
+    summary.pending > 0 || summary.running > 0
+      ? 'queued'
+      : summary.success === summary.total
+        ? 'success'
+        : 'failed';
+  const next: GeminiAdsDispatcherTask = {
+    ...task,
+    status: nextStatus,
+    error: nextStatus === 'failed' && summary.success !== summary.total ? (task.error || reason) : task.error,
+    endedAt: nextStatus === 'queued' ? undefined : (task.endedAt || endedAt),
+    cacheUntil: nextStatus === 'queued' ? task.cacheUntil : new Date(Date.now() + TASK_CACHE_TTL_MS).toISOString(),
+    lastActivityAt: endedAt,
+    items,
+    summary,
+    instances: task.instances.map((instance) => ({
+      ...instance,
+      state: instance.state === 'inactive' ? 'inactive' : 'idle',
+      currentItemId: undefined,
+      currentPrompt: undefined,
+      workflowTaskId: undefined,
+      leaseId: undefined,
+      startedAt: undefined,
+      detail: instance.state === 'running' ? reason : instance.detail,
+    })),
+  };
+  taskStore().set(task.id, next);
+  persistTask(next);
+  trace(task.id, 'stale_running_task_recovered', {
+    reason,
+    dispatcherTimedOut,
+    status: next.status,
+    summary: next.summary,
+  });
+  return next;
+}
+
 function normalizeQueueState(state: DispatcherQueueState) {
   const normalized: DispatcherQueueState = {
     ...state,
@@ -356,7 +488,17 @@ function normalizeQueueState(state: DispatcherQueueState) {
 
   if (normalized.runningTaskId) {
     const runningTask = getGeminiAdsDispatcherTaskSync(normalized.runningTaskId);
-    if (!runningTask || isTerminal(runningTask.status)) {
+    const recoveredTask =
+      runningTask && runningTask.status === 'running' && !hasActiveDispatcherRun(runningTask.id)
+        ? recoverStaleRunningTask(runningTask)
+        : runningTask;
+    if (!recoveredTask || isTerminal(recoveredTask.status)) {
+      normalized.runningTaskId = undefined;
+    } else if (recoveredTask.status === 'queued') {
+      normalized.entries = [
+        { taskId: recoveredTask.id, enqueuedAt: nowIso() },
+        ...normalized.entries.filter((entry) => entry.taskId !== recoveredTask.id),
+      ];
       normalized.runningTaskId = undefined;
     }
   }
@@ -391,6 +533,10 @@ async function withQueueLock<T>(fn: () => Promise<T>, timeoutMs = 2500): Promise
 export function getGeminiAdsDispatcherQueueInfo(taskId: string): GeminiAdsDispatcherQueueInfo {
   const maxSize = queueMaxSize();
   const state = normalizeQueueState(loadQueueState());
+  persistQueueState(state);
+  if (!state.runningTaskId && state.entries.length > 0) {
+    void kickQueue();
+  }
   const size = queueSize(state);
 
   if (state.runningTaskId === taskId) {
@@ -650,6 +796,7 @@ async function startQueuedTask(taskId: string) {
 
   trace(taskId, 'queue_task_started', { queue: getGeminiAdsDispatcherQueueInfo(taskId) });
 
+  activeRunStore().add(taskId);
   runDispatcherTask(taskId)
     .catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
@@ -670,6 +817,7 @@ async function startQueuedTask(taskId: string) {
       });
     })
     .finally(() => {
+      activeRunStore().delete(taskId);
       void onQueueTaskFinished(taskId);
     });
 }
@@ -889,7 +1037,26 @@ function parseFailureCategory(message?: string): DispatcherFailureCategory {
   if (text.includes('fail_fast:')) return 'fast_fail';
   if (text.includes('超时') || text.includes('timeout')) return 'timeout';
   if (text.includes('子任务创建失败') || text.includes('create_failed')) return 'child_create_failed';
-  if (text.includes('任务未返回媒体') || text.includes('未返回媒体')) return 'no_media';
+  if (
+    text.includes('上传参考图') ||
+    text.includes('附件校验') ||
+    text.includes('未检测到附件出现') ||
+    text.includes('verifyattachment') ||
+    text.includes('attachindicatorselector') ||
+    text.includes('file input') ||
+    text.includes('filechooser') ||
+    text.includes('setinputfiles')
+  ) return 'upload';
+  if (
+    text.includes('任务未返回媒体') ||
+    text.includes('未返回媒体') ||
+    text.includes('pickedby=chatgpt-none') ||
+    text.includes('candidates=0') ||
+    text.includes('未找到图片 src') ||
+    text.includes('no image candidates') ||
+    text.includes('text-only') ||
+    text.includes('仅文本')
+  ) return 'no_media';
   if (
     text.includes('policy') ||
     text.includes('safety') ||
@@ -929,6 +1096,7 @@ function shouldForceRewrite(
   failureReason?: string
 ): boolean {
   if (settings.optimizePromptOnRetry) return false;
+  if (category === 'no_media') return true;
   if (category !== 'fast_fail') return false;
   return isDownloadExtractFastFailReason(failureReason);
 }
@@ -937,9 +1105,11 @@ function adaptiveChildTimeoutMs(baseMs: number, attempts: number): number {
   // 允许业务通过 childTaskTimeoutMs 控制首轮超时，避免被固定 5 分钟上限误杀。
   const normalizedBase = Math.max(60_000, Math.min(baseMs, 30 * 60_000));
   if (attempts <= 1) return normalizedBase;
-  if (attempts === 2) return Math.max(180_000, Math.floor(normalizedBase * 0.8));
-  if (attempts === 3) return Math.max(150_000, Math.floor(normalizedBase * 0.65));
-  return Math.max(120_000, Math.floor(normalizedBase * 0.5));
+  // 下限不得低于子工作流单轮的固有耗时（waitImageReady 最长 180s + 导航/上传/下载 ~120s），
+  // 否则后期重试必然超时，制造无意义的失败循环。
+  if (attempts === 2) return Math.max(360_000, Math.floor(normalizedBase * 0.8));
+  if (attempts === 3) return Math.max(330_000, Math.floor(normalizedBase * 0.65));
+  return Math.max(300_000, Math.floor(normalizedBase * 0.5));
 }
 
 function appendAttemptHistoryEntry(
@@ -1033,6 +1203,7 @@ async function optimizePromptViaGemini(input: {
 function fallbackOptimizePrompt(prompt: string, failureHint?: string) {
   const base = String(prompt || '').trim();
   if (!base) return base;
+  const hint = String(failureHint || '');
 
   const normalized = base
     .replace(/```[\s\S]*?```/g, ' ')
@@ -1048,25 +1219,40 @@ function fallbackOptimizePrompt(prompt: string, failureHint?: string) {
     .slice(0, 900)
     .trim();
 
-  // 发生 fast-fail / policy 类问题时，收敛到更安全、稳定的静态图表达，避免重试继续触发风控。
+  const noMediaTriggered = /pickedby=chatgpt-none|candidates=0|未找到图片 src|no image|no_media|未返回媒体|仅文本|text-only/i.test(hint);
+
+  // 发生 fast-fail / policy / no-media 类问题时，收敛到更安全、稳定的静态图表达，避免重试继续触发风控或文本回复。
   const safetyTriggered = /fail_fast|policy|safety|hard|encountered an error|not create images of people|depict a real person/i.test(
-    String(failureHint || '')
-  );
-  const softened = safetyTriggered
+    hint
+  ) || noMediaTriggered;
+  const softened = safetyTriggered || noMediaTriggered
     ? concise
         .replace(/feminine curves highlighted/gi, 'fashion silhouette emphasis')
         .replace(/slightly parted lips/gi, 'natural expression')
         .replace(/allure|魅惑/gi, 'editorial style')
+        .replace(/reclining[^,.，。]*/gi, 'seated editorial pose')
+        .replace(/silk bedding/gi, 'luxury studio set')
+        .replace(/bed(room)?/gi, 'studio lounge')
+        .replace(/damp-look hair/gi, 'polished hair styling')
+        .replace(/robe/gi, 'structured fashion jacket')
+        .replace(/strap styling/gi, 'elegant neckline styling')
+        .replace(/smirk/gi, 'confident expression')
+        .replace(/alluring/gi, 'elegant')
     : concise;
 
-  const safetySuffix = safetyTriggered
-    ? 'Use an adult, fully clothed, non-sexual fashion portrait. Keep it tasteful and policy-safe.'
+  const createDirective = noMediaTriggered
+    ? 'Create exactly one finished still image now. Do not answer with text. Do not explain. The output must be an image.'
+    : '';
+
+  const safetySuffix = safetyTriggered || noMediaTriggered
+    ? 'Use an adult, fully clothed, non-sexual fashion editorial portrait. Keep it tasteful, commercial, and policy-safe.'
     : '';
 
   return [
+    createDirective,
     softened,
     safetySuffix,
-    'Single still image only (image only), no video, no animation, no GIF. Output PNG.',
+    'Single still image only. Image output only. No video, no animation, no GIF, no text card, no collage. Output one PNG-like image.',
   ]
     .filter(Boolean)
     .join('\n\n')
@@ -1157,6 +1343,26 @@ async function computeRetryPromptForFailure(input: {
   failureCategory: DispatcherFailureCategory;
   forceRewrite?: boolean;
 }) {
+  if (
+    input.failureCategory === 'upload' ||
+    input.failureCategory === 'timeout' ||
+    input.failureCategory === 'network' ||
+    input.failureCategory === 'child_create_failed'
+  ) {
+    trace(input.taskId, 'prompt_optimization_skipped', {
+      itemId: input.item.id,
+      reason: 'non_prompt_failure',
+      category: input.failureCategory,
+    });
+    return {
+      prompt: input.item.prompt,
+      history: normalizePromptHistory(input.item),
+      optimizedCount: input.item.promptOptimizedCount ?? Math.max(0, normalizePromptHistory(input.item).length - 1),
+      rewriteApplied: false,
+      rewriteForced: false,
+    };
+  }
+
   const forceRewrite = typeof input.forceRewrite === 'boolean'
     ? input.forceRewrite
     : shouldForceRewrite(input.failureCategory, input.task.settings, input.failureReason);
@@ -1760,16 +1966,57 @@ async function reconcileRunningInstances(taskId: string) {
     }
 
     if (fresh.cancelRequested) {
-      stopWorkflowTask(workflowTaskId, 'dispatcher_cancel_requested');
+      await forceStopWorkflowTask(workflowTaskId, 'dispatcher_cancel_requested').catch(() => {});
     }
 
     const child = getWorkflowTask(workflowTaskId);
-    if (!child) continue;
+    if (!child) {
+      // 子任务记录丢失（热重载 / 进程异常）— 按失败处理，释放实例
+      const lostItem = fresh.items.find((entry) => entry.id === currentItemId);
+      const exhausted = (lostItem?.attempts || 0) >= fresh.settings.maxAttemptsPerPrompt;
+      const lostError = '子任务记录丢失（task store miss）';
+      const failureCategory = parseFailureCategory(lostError);
+      const endedAt = nowIso();
+      updateTaskState(taskId, (task) => {
+        const items = task.items.map((entry) =>
+          entry.id !== currentItemId
+            ? entry
+            : {
+                ...entry,
+                status: exhausted ? 'failed' as const : 'pending' as const,
+                error: lostError,
+                failureCategory,
+                endedAt: exhausted ? endedAt : undefined,
+                attemptHistory: patchLatestAttemptHistory(entry, {
+                  endedAt,
+                  durationMs: toDurationMs(entry.attemptHistory?.[entry.attemptHistory.length - 1]?.startedAt, endedAt),
+                  outcome: exhausted ? 'failed' : 'create_failed',
+                  error: lostError,
+                  failureCategory,
+                }),
+              }
+        );
+        return { ...task, items, summary: computeSummary(items) };
+      });
+      trace(taskId, 'child_task_store_miss', {
+        instanceId: instance.instanceId,
+        itemId: currentItemId,
+        workflowTaskId,
+        exhausted,
+      });
+      updateInstanceResult(taskId, instance.instanceId, { outcome: 'failed', itemId: currentItemId, error: lostError });
+      await releaseInstance(taskId, instance.instanceId, instance.leaseId);
+      completedCount += 1;
+      incrementCompletionMetrics(taskId);
+      continue;
+    }
     if (!isWorkflowTaskTerminal(child.status)) {
       const item = fresh.items.find((entry) => entry.id === currentItemId);
       const timeoutMs = adaptiveChildTimeoutMs(fresh.settings.childTaskTimeoutMs, item?.attempts || 1);
       if (instance.startedAt && Date.now() - Date.parse(instance.startedAt) > timeoutMs) {
-        stopWorkflowTask(workflowTaskId, 'dispatcher_child_timeout');
+        // 必须强停（关闭子任务页面运行时）：仅置 stopped 标志的话，子任务会在节点内重试循环里
+        // 继续驱动浏览器十几分钟，与下一次分配到同一实例的子任务互相践踏。
+        await forceStopWorkflowTask(workflowTaskId, 'dispatcher_child_timeout').catch(() => {});
         const exhausted = (item?.attempts || 0) >= fresh.settings.maxAttemptsPerPrompt;
         const timeoutMessage = `子任务超时（>${Math.floor(timeoutMs / 1000)}s）`;
         const failureCategory = parseFailureCategory(timeoutMessage);
@@ -2096,7 +2343,7 @@ async function finalizeTaskWithFailure(taskId: string, reason: string) {
 
   for (const instance of current.instances.filter((item) => item.workflowTaskId)) {
     if (instance.workflowTaskId) {
-      stopWorkflowTask(instance.workflowTaskId, 'dispatcher_finalize_failure');
+      await forceStopWorkflowTask(instance.workflowTaskId, 'dispatcher_finalize_failure').catch(() => {});
     }
   }
 
@@ -2169,6 +2416,53 @@ async function runDispatcherTask(taskId: string) {
       touchActivity(taskId);
     }
 
+    // 僵尸 item 检测：item 状态为 running 但无对应 running 实例，说明实例已释放但 item 状态未能同步更新
+    {
+      const snap = taskStore().get(taskId);
+      if (snap) {
+        const activeItemIds = new Set(
+          snap.instances
+            .filter((inst) => inst.state === 'running' && inst.currentItemId)
+            .map((inst) => inst.currentItemId!)
+        );
+        const zombies = snap.items.filter((item) => item.status === 'running' && !activeItemIds.has(item.id));
+        if (zombies.length > 0) {
+          const endedAt = nowIso();
+          updateTaskState(taskId, (task) => {
+            const items = task.items.map((item) => {
+              if (item.status !== 'running' || activeItemIds.has(item.id)) return item;
+              const exhausted = item.attempts >= task.settings.maxAttemptsPerPrompt;
+              const zombieError = item.error || '子任务僵死：实例已释放但 item 状态未能更新';
+              const failureCategory = parseFailureCategory(zombieError);
+              return {
+                ...item,
+                status: exhausted ? 'failed' as const : 'pending' as const,
+                error: zombieError,
+                failureCategory,
+                endedAt: exhausted ? endedAt : undefined,
+                browserInstanceId: exhausted ? item.browserInstanceId : undefined,
+                workflowTaskId: exhausted ? item.workflowTaskId : undefined,
+                attemptHistory: patchLatestAttemptHistory(item, {
+                  endedAt,
+                  durationMs: toDurationMs(item.attemptHistory?.[item.attemptHistory.length - 1]?.startedAt, endedAt),
+                  outcome: exhausted ? 'failed' : 'create_failed',
+                  error: zombieError,
+                  failureCategory,
+                }),
+              };
+            });
+            return { ...task, items, summary: computeSummary(items) };
+          });
+          trace(taskId, 'zombie_items_recovered', {
+            count: zombies.length,
+            ids: zombies.map((z) => z.id),
+            prompts: zombies.map((z) => z.prompt),
+          });
+          touchActivity(taskId);
+        }
+      }
+    }
+
     await refreshNonRunningInstances(taskId);
 
     const latest = taskStore().get(taskId);
@@ -2177,7 +2471,7 @@ async function runDispatcherTask(taskId: string) {
     if (latest.suspendRequested) {
       const active = latest.instances.filter((item) => item.state === 'running' && item.workflowTaskId);
       for (const instance of active) {
-        if (instance.workflowTaskId) stopWorkflowTask(instance.workflowTaskId, 'dispatcher_suspended');
+        if (instance.workflowTaskId) await forceStopWorkflowTask(instance.workflowTaskId, 'dispatcher_suspended').catch(() => {});
       }
       if (active.length === 0) break;
       await sleep(latest.settings.pollIntervalMs);
@@ -2420,8 +2714,15 @@ export async function createGeminiAdsDispatcherTask(input: {
     throw new Error('prompts 不能为空');
   }
 
-  const rawInstanceIds = input.instanceIds || DEFAULT_INSTANCE_IDS;
-  const uniqueInstanceIds = Array.from(new Set(rawInstanceIds.map((item) => String(item || '').trim()).filter(Boolean)));
+  const rawInstanceIds = resolvePoolInstanceIds(input.instanceIds);
+  const dedupedInstanceIds = Array.from(new Set(rawInstanceIds.map((item) => String(item || '').trim()).filter(Boolean)));
+  const isChatGptImageWorkflow = Boolean(input.workflowId && CHATGPT_IMAGE_WORKFLOW_IDS.has(input.workflowId));
+  const chatGptSingleInstanceId = DEFAULT_CHATGPT_ADS_INSTANCE_ID ||
+    dedupedInstanceIds.find((item) => item) ||
+    '';
+  const uniqueInstanceIds = isChatGptImageWorkflow
+    ? [chatGptSingleInstanceId].filter(Boolean)
+    : dedupedInstanceIds;
   if (uniqueInstanceIds.length === 0) {
     throw new Error('instanceIds 不能为空');
   }
@@ -2467,8 +2768,13 @@ export async function createGeminiAdsDispatcherTask(input: {
     instanceStatuses,
     force: Boolean(input.force),
   });
-  if (uniqueInstanceIds.length < rawInstanceIds.length) {
-    warnings.unshift(`实例池已去重，原始 ${rawInstanceIds.length} 个实例保留为 ${uniqueInstanceIds.length} 个`);
+  if (dedupedInstanceIds.length < rawInstanceIds.length) {
+    warnings.unshift(`实例池已去重，原始 ${rawInstanceIds.length} 个实例保留为 ${dedupedInstanceIds.length} 个`);
+  }
+  if (isChatGptImageWorkflow && dedupedInstanceIds.length !== uniqueInstanceIds.length) {
+    warnings.unshift(
+      `ChatGPT 生图工作流强制单实例调度：使用 ${uniqueInstanceIds[0]}，忽略 ${dedupedInstanceIds.length} 个候选实例中的其他实例`
+    );
   }
 
   const preflight: DispatcherPreflight = {
@@ -2608,7 +2914,7 @@ function getGeminiAdsDispatcherTaskSync(taskId: string): GeminiAdsDispatcherTask
       removePersistedTask(taskId);
       return undefined;
     }
-    return mem;
+    return recoverStaleRunningTask(mem);
   }
   const persisted = loadPersistedTask(taskId);
   if (!persisted) return undefined;
@@ -2617,7 +2923,7 @@ function getGeminiAdsDispatcherTaskSync(taskId: string): GeminiAdsDispatcherTask
     return undefined;
   }
   taskStore().set(taskId, persisted);
-  return persisted;
+  return recoverStaleRunningTask(persisted);
 }
 
 /**
@@ -2642,7 +2948,7 @@ export async function getGeminiAdsDispatcherTask(taskId: string): Promise<Gemini
     taskStore().set(taskId, task);
     // 恢复现场提示
     console.log(`[Dispatcher] Task ${taskId} resurrected from Supabase.`);
-    return task;
+    return recoverStaleRunningTask(task);
   }
 
   return undefined;

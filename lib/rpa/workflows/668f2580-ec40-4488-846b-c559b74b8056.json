@@ -117,5 +117,8 @@
       "params": {}
     }
   ],
-  "vars": []
+  "vars": [
+    "videoUrl",
+    "title"
+  ]
 }

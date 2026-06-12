@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateDouyinSession } from '@/lib/parse/douyin-session';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -12,38 +13,6 @@ const CORS_HEADERS = {
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
-}
-
-/**
- * 用存储的 cookie 调用抖音 creator API 验证 session
- * - status_code 0 → 已登录
- * - status_code 8 → 未登录（session 失效）
- * - 其他/超时   → 保守处理，不阻断
- */
-async function validateSession(cookieStr: string): Promise<{ loggedIn: boolean; account: string | null }> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(
-      'https://creator.douyin.com/web/api/media/aweme/post/?count=1&cursor=0',
-      {
-        headers: {
-          Cookie: cookieStr,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          Referer: 'https://creator.douyin.com/',
-        },
-        signal: controller.signal,
-      }
-    );
-    clearTimeout(timer);
-    if (!res.ok) return { loggedIn: true, account: null }; // 5xx 保守处理
-    const data = await res.json() as { status_code?: number };
-    if (data?.status_code === 8) return { loggedIn: false, account: null };
-    if (data?.status_code === 0) return { loggedIn: true,  account: null };
-    return { loggedIn: true, account: null };
-  } catch {
-    return { loggedIn: true, account: null }; // 超时保守处理
-  }
 }
 
 /**
@@ -114,7 +83,7 @@ export async function GET(req: NextRequest) {
     }
 
     // 3. 实时验证 session
-    const { loggedIn } = await validateSession(row.cookie_str);
+    const { loggedIn } = await validateDouyinSession(row.cookie_str);
     const account = row.account_name ?? null;
     const ageDays = (Date.now() - new Date(row.updated_at).getTime()) / (1000 * 60 * 60 * 24);
 

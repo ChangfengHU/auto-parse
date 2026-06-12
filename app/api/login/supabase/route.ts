@@ -1,40 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { validateDouyinSession } from '@/lib/parse/douyin-session';
 import { assertSupabaseRestConfig, parseSupabaseError } from '@/lib/supabase/rest-config';
-
-// Cookie 超过 14 天视为可能已过期
-const EXPIRE_DAYS = 14;
-
-/** 用存储的 cookie 实际调用抖音 API，验证 session 是否仍有效
- *  使用 /web/api/media/aweme/post/ 接口：
- *  - status_code 0  → 已登录
- *  - status_code 8  → 未登录（session 失效）
- *  - 其他 / 超时   → 保守处理，不阻断
- */
-async function validateCookieWithDouyin(cookieStr: string): Promise<{ valid: boolean; account: string | null }> {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    const res = await fetch(
-      'https://creator.douyin.com/web/api/media/aweme/post/?count=1&cursor=0',
-      {
-        headers: {
-          Cookie: cookieStr,
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          Referer: 'https://creator.douyin.com/',
-        },
-        signal: controller.signal,
-      }
-    );
-    clearTimeout(timer);
-    if (!res.ok) return { valid: true, account: null }; // 5xx 等异常保守处理
-    const data = await res.json() as { status_code?: number };
-    if (data?.status_code === 8) return { valid: false, account: null }; // 明确未登录
-    if (data?.status_code === 0) return { valid: true,  account: null }; // 明确已登录
-    return { valid: true, account: null }; // 其他 code 保守处理
-  } catch {
-    return { valid: true, account: null }; // 网络超时保守处理
-  }
-}
 
 /**
  * GET /api/login/supabase?clientId=dy_xxx
@@ -86,8 +52,8 @@ export async function GET(req: NextRequest) {
     }
 
     // 实时调用抖音 API 验证 session 是否有效
-    const { valid: sessionValid, account: liveAccount } = await validateCookieWithDouyin(row.cookie_str);
-    const account = liveAccount ?? row.account_name ?? null;
+    const { loggedIn: sessionValid } = await validateDouyinSession(row.cookie_str);
+    const account = row.account_name ?? null;
 
     if (!sessionValid) {
       return NextResponse.json({
@@ -99,7 +65,6 @@ export async function GET(req: NextRequest) {
     }
 
     // session 有效
-    const expired = ageDays > EXPIRE_DAYS;
     return NextResponse.json({
       found: true,
       expired: false,

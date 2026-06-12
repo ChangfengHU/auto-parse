@@ -24,5 +24,8 @@
       }
     }
   ],
-  "vars": []
+  "vars": [
+    "noteUrl",
+    "imageCount"
+  ]
 }

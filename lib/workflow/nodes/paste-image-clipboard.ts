@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { execFile } from 'child_process';
 
 type DownloadedImage = {
   url: string;
@@ -29,17 +30,28 @@ const DEFAULT_ATTACHMENT_SELECTOR = [
   // 以“缩略图/图片预览”来判断
   'img[src^="blob:"]',
   'img[src^="data:image"]',
+  'img[src*="/backend-api/files/"]',
+  'img[src*="/backend-api/estuary/content"]',
+  'img[alt*="Uploaded" i]',
+  'img[alt*="attachment" i]',
+  'img[alt*="file" i]',
   // 以“移除/删除附件”按钮或语义来判断
   '[aria-label*="Remove image" i]',
+  '[aria-label*="Remove file" i]',
   '[aria-label*="Remove" i]',
   '[aria-label*="删除"]',
   '[aria-label*="移除"]',
   // 常见的 attachment/testid/class 命名
   '[data-testid*="attachment" i]',
   '[data-test-id*="attachment" i]',
+  '[data-testid*="file" i]',
+  '[data-test-id*="file" i]',
+  '[data-testid*="upload" i]',
+  '[data-test-id*="upload" i]',
   '[data-testid*="image" i]',
   '[data-test-id*="image" i]',
   '[class*="attachment" i]',
+  '[class*="upload" i]',
   '[class*="thumbnail" i]',
 ].join(', ');
 
@@ -50,6 +62,75 @@ function extFromMime(mimeType: string): string {
   if (mime.includes('webp')) return 'webp';
   if (mime.includes('gif')) return 'gif';
   return 'png';
+}
+
+async function clearNativeDragOverlay(page: Page): Promise<void> {
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    const makeEvt = (type: string) => {
+      try {
+        return new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
+      } catch {
+        const ev = new Event(type, { bubbles: true, cancelable: true }) as Event & {
+          dataTransfer?: DataTransfer;
+        };
+        Object.defineProperty(ev, 'dataTransfer', { value: dt });
+        return ev;
+      }
+    };
+
+    for (const type of ['dragleave', 'dragend', 'drop']) {
+      window.dispatchEvent(makeEvt(type));
+      document.dispatchEvent(makeEvt(type));
+      document.body?.dispatchEvent(makeEvt(type));
+    }
+
+    for (const el of Array.from(document.querySelectorAll('body *'))) {
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text.includes('Add anything') || !text.includes('Drop any file here')) continue;
+      const style = getComputedStyle(el);
+      if (style.position !== 'fixed') continue;
+      (el as HTMLElement).style.display = 'none';
+      (el as HTMLElement).style.pointerEvents = 'none';
+      el.setAttribute('data-auto-parse-hidden-drag-overlay', '1');
+    }
+  }).catch(() => {});
+}
+
+async function closeNativeOpenFilesDialogs(log: string[]): Promise<void> {
+  if (!process.env.DISPLAY) return;
+
+  const run = (cmd: string, args: string[]) =>
+    new Promise<string>((resolve) => {
+      execFile(cmd, args, { timeout: 2_000 }, (error, stdout) => {
+        resolve(error ? '' : stdout);
+      });
+    });
+
+  const output = await run('xwininfo', ['-root', '-tree']);
+  const windowIds = Array.from(
+    new Set(
+      output
+        .split('\n')
+        .filter((line) => line.includes('"Open Files"') && line.includes('"SunBrowser"'))
+        .map((line) => line.trim().match(/^(0x[0-9a-f]+)/i)?.[1] || '')
+        .filter(Boolean)
+    )
+  );
+  if (windowIds.length === 0) return;
+
+  let closed = 0;
+  for (const windowId of windowIds) {
+    const props = await run('xprop', ['-id', windowId, 'WM_CLASS', 'WM_NAME', '_NET_WM_NAME']);
+    if (!/SunBrowser/.test(props) || !/Open Files/.test(props)) continue;
+    await run('xkill', ['-id', windowId]);
+    closed++;
+  }
+
+  if (closed > 0) {
+    log.push(`🧹 已关闭 ${closed} 个 SunBrowser 原生 Open Files 上传窗口`);
+  }
 }
 
 export async function executePasteImageClipboard(
@@ -73,6 +154,8 @@ export async function executePasteImageClipboard(
   };
 
   try {
+    await closeNativeOpenFilesDialogs(log);
+
     const normalizeImageUrls = (value: unknown): string[] => {
       // 允许三种输入：
       // 1) string：逗号/换行分隔，或 JSON 数组字符串
@@ -275,14 +358,56 @@ export async function executePasteImageClipboard(
       const data = await rootHandle
         .evaluate((root: Element, sel: string) => {
           try {
-            const nodes = Array.from(root.querySelectorAll(sel));
+            const doc = root.ownerDocument || document;
+            const scopedRootSelector = [
+              'form',
+              'footer',
+              '[role="dialog"]',
+              '[data-testid*="composer" i]',
+              '[data-test-id*="composer" i]',
+              '[class*="composer" i]',
+              '[class*="input-area" i]',
+              'input-area-v2',
+              'input-container',
+            ].join(', ');
+            const globalAttachmentSelector = [
+              'img[src^="blob:"]',
+              'img[src^="data:image"]',
+              'img[alt*="Uploaded" i]',
+              'img[alt*="attachment" i]',
+              '[aria-label*="Remove attachment" i]',
+              '[aria-label*="Remove file" i]',
+              '[aria-label*="Remove image" i]',
+              '[aria-label*="移除"]',
+              '[aria-label*="删除"]',
+              '[data-testid*="attachment" i]',
+              '[data-test-id*="attachment" i]',
+              '[data-testid*="upload" i]',
+              '[data-test-id*="upload" i]',
+            ].join(', ');
+            const nodeSet = new Set<Element>();
+            const scopeSet = new Set<Element>([root]);
+            for (const scope of Array.from(doc.querySelectorAll(scopedRootSelector))) {
+              scopeSet.add(scope);
+            }
+            for (const scope of Array.from(scopeSet)) {
+              for (const node of Array.from(scope.querySelectorAll(sel))) {
+                nodeSet.add(node);
+              }
+            }
+            for (const node of Array.from(doc.querySelectorAll(globalAttachmentSelector))) {
+              nodeSet.add(node);
+            }
+            const nodes = Array.from(nodeSet);
             const signatureParts = nodes.map((el) => {
               const tag = String(el?.tagName || '').toLowerCase();
               const src = (el?.getAttribute && el.getAttribute('src')) || '';
+              const alt = (el?.getAttribute && el.getAttribute('alt')) || '';
               const aria = (el?.getAttribute && el.getAttribute('aria-label')) || '';
               const testid = (el?.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-test-id'))) || '';
               const cls = (el?.getAttribute && el.getAttribute('class')) || '';
-              return [tag, src, aria, testid, cls].filter(Boolean).join('#');
+              const text = (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+              return [tag, src, alt, aria, testid, cls, text].filter(Boolean).join('#');
             });
             return { count: nodes.length, signature: signatureParts.join('|') };
           } catch {
@@ -294,6 +419,7 @@ export async function executePasteImageClipboard(
     };
 
     let cleanedExistingAttachments = false;
+    let hasUnclearableExistingAttachment = false;
     const clearExistingAttachments = async () => {
       if (cleanedExistingAttachments) return;
       cleanedExistingAttachments = true;
@@ -305,6 +431,8 @@ export async function executePasteImageClipboard(
 
       const removeSelectors = [
         '[aria-label*="Remove image" i]',
+        '[aria-label*="Remove file" i]',
+        '[aria-label*="Remove attachment" i]',
         '[aria-label*="Remove" i]',
         '[aria-label*="Delete" i]',
         '[aria-label*="删除"]',
@@ -320,13 +448,29 @@ export async function executePasteImageClipboard(
       for (let round = 1; round <= 4; round++) {
         const clicked = await rootHandle
           .evaluate(async (root: Element, selectors: string[]) => {
+            const doc = root.ownerDocument || document;
+            const scopedRootSelector = [
+              'form',
+              'footer',
+              '[role="dialog"]',
+              '[data-testid*="composer" i]',
+              '[data-test-id*="composer" i]',
+              '[class*="composer" i]',
+              '[class*="input-area" i]',
+              'input-area-v2',
+              'input-container',
+            ].join(', ');
             const isVisible = (el: Element) => {
               const rect = (el as HTMLElement).getBoundingClientRect?.();
               return Boolean(rect && rect.width > 0 && rect.height > 0);
             };
+            const scopeSet = new Set<Element>([root]);
+            for (const scope of Array.from(doc.querySelectorAll(scopedRootSelector))) {
+              scopeSet.add(scope);
+            }
             let count = 0;
             for (const sel of selectors) {
-              const nodes = Array.from(root?.querySelectorAll?.(sel) ?? []);
+              const nodes = Array.from(scopeSet).flatMap((scope) => Array.from(scope.querySelectorAll(sel)));
               for (const node of nodes) {
                 if (!(node instanceof HTMLElement)) continue;
                 if (!isVisible(node)) continue;
@@ -347,7 +491,11 @@ export async function executePasteImageClipboard(
         const after = await getAttachmentSnapshot();
         logStage(`🧹 清理附件 round=${round}: click=${clicked}, 剩余=${after.count}`);
         if (after.count <= 0) break;
-        if (!clicked) break;
+        if (!clicked) {
+          hasUnclearableExistingAttachment = true;
+          pushLog('⚠️ 旧附件/预览存在但未找到可点击的清理入口，后续上传校验将允许复用现有附件状态');
+          break;
+        }
       }
     };
 
@@ -383,6 +531,14 @@ export async function executePasteImageClipboard(
           return;
         }
         await page.waitForTimeout(300);
+      }
+
+      if (hasUnclearableExistingAttachment && before.count > 0) {
+        pushLog(
+          `⚠️ ${stage} 后附件计数未变化，但存在无法清理的旧附件/预览（before=${before.count}, after=${last.count}），` +
+            '按复用现有附件状态继续执行'
+        );
+        return;
       }
 
       throw new Error(
@@ -569,13 +725,21 @@ export async function executePasteImageClipboard(
               el.dispatchEvent(makeEvt('dragenter'));
               el.dispatchEvent(makeEvt('dragover'));
               el.dispatchEvent(makeEvt('drop'));
+              el.dispatchEvent(makeEvt('dragleave'));
+              el.dispatchEvent(makeEvt('dragend'));
+              document.dispatchEvent(makeEvt('dragleave'));
+              document.dispatchEvent(makeEvt('dragend'));
+              document.body?.dispatchEvent(makeEvt('dragleave'));
+              document.body?.dispatchEvent(makeEvt('dragend'));
             },
             { base64: img.base64, type: img.mimeType, name: fileName }
           );
 
           logStage(`🧲 [${i + 1}/${downloaded.length}] 已尝试 drag&drop 上传：${img.mimeType}`);
+          await clearNativeDragOverlay(page);
           await page.waitForTimeout(waitAfterUpload);
           await verifyIncrease(before, 1, `第 ${i + 1} 张 drag&drop 上传`, Math.max(6000, waitAfterUpload * 4));
+          await clearNativeDragOverlay(page);
           before = await getAttachmentSnapshot();
         }
         return true;
@@ -598,7 +762,18 @@ export async function executePasteImageClipboard(
       if (!uploadDone) {
         // 先点击输入框使其获得焦点，否则 Gemini 旧版（如 k1bdaoa7）的上传按钮为 disabled 状态
         await target.click({ timeout: 3000 }).catch(() => {});
-        await page.waitForTimeout(400);
+        // 主动轮询上传按钮变为 enabled（最多等 4s），比固定 1200ms 更可靠
+        const addFileSelectors = ['[aria-label="添加文件"]', '[aria-label="Upload & tools"]', '[aria-label="Add files"]'];
+        const pollStart = Date.now();
+        while (Date.now() - pollStart < 4000) {
+          const anyEnabled = await Promise.any(
+            addFileSelectors.map(sel =>
+              page.locator(sel).first().isEnabled().catch(() => false)
+            )
+          ).catch(() => false);
+          if (anyEnabled) break;
+          await page.waitForTimeout(150);
+        }
 
         const uploadButtonCandidates = [
           // Gemini 新版英文界面（k1b908rw）
@@ -730,30 +905,72 @@ export async function executePasteImageClipboard(
 
             for (const entry of entries) {
               const clickStartedAt = Date.now();
-              pushLog(`🔘 尝试上传入口：${entry.label}`);
-              const chooserPromise = page.waitForEvent('filechooser', { timeout: 1800 }).catch(() => null);
-              const clicked = await entry.locator.click({ timeout: 1800 }).then(() => true).catch(() => false);
-              const chooser = await chooserPromise;
-              if (clicked && chooser) {
-                logStage(`✅ 上传入口触发 filechooser：${entry.label}`, clickStartedAt);
-                return chooser;
-              }
-              if (!clicked) continue;
-              logStage(`ℹ️ 上传入口已点击但未直接触发 filechooser：${entry.label}`, clickStartedAt);
+              pushLog(`🟡 尝试上传入口：${entry.label}`);
 
-              for (const menuSel of menuItemCandidates) {
+              // 先确认按钮可见，再注册 filechooser 监听
+              // 旧方案在 click() 之前就开始计时（350ms），若按钮需要等待 actionable 则超时丢失事件
+              const isVisible = await entry.locator.isVisible().catch(() => false);
+              if (!isVisible) continue;
+
+              // 单一长时监听覆盖完整路径（直接触发 + 菜单扫描）；用 Promise.race 做阶段性检测
+              const chooserPromise = page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null);
+
+              const isDisabled = await entry.locator.isDisabled().catch(() => false);
+              let clicked: boolean;
+
+              if (isDisabled) {
+                pushLog(`⚠️ 入口按钮为 disabled，尝试 force click：${entry.label}`);
+                clicked = await entry.locator.click({ timeout: 500, force: true }).then(() => true).catch(() => false);
+              } else {
+                clicked = await entry.locator.click({ timeout: 1000 }).then(() => true).catch(() => false);
+              }
+
+              if (!clicked) {
+                // 不 await（避免阻塞 5s），让其后台超时；关闭可能残留的菜单
+                void chooserPromise;
+                await page.keyboard.press('Escape').catch(() => {});
+                continue;
+              }
+
+              // 阶段①：快速检测按钮是否直接触发 filechooser（500ms 窗口）
+              const quickChooser = await Promise.race([
+                chooserPromise,
+                page.waitForTimeout(500).then(() => null),
+              ]);
+
+              if (quickChooser) {
+                logStage(`✅ 上传入口触发 filechooser：${entry.label}`, clickStartedAt);
+                return quickChooser;
+              }
+
+              // 阶段②：未直接触发 → 等待菜单动画（300ms）再扫描菜单项
+              await page.waitForTimeout(300);
+              logStage(`ℹ️ 入口已点击但未直接触发 filechooser，尝试菜单项：${entry.label}`, clickStartedAt);
+
+              let foundMenuChooser: FileChooser | null = null;
+              outer: for (const menuSel of menuItemCandidates) {
                 const menuItems = await rankedVisibleLocators(menuSel, 4);
                 for (const item of menuItems) {
                   const menuStartedAt = Date.now();
-                  const chooserPromise2 = page.waitForEvent('filechooser', { timeout: 1600 }).catch(() => null);
-                  const clicked2 = await item.locator.click({ timeout: 1600 }).then(() => true).catch(() => false);
-                  const chooser2 = await chooserPromise2;
-                  if (clicked2 && chooser2) {
+                  const clicked2 = await item.locator.click({ timeout: 2000 }).then(() => true).catch(() => false);
+                  if (!clicked2) continue;
+                  // 复用 chooserPromise（仍在 5000ms 窗口内）
+                  const menuChooser = await Promise.race([
+                    chooserPromise,
+                    page.waitForTimeout(1200).then(() => null),
+                  ]);
+                  if (menuChooser) {
                     logStage(`📂 上传菜单项触发 filechooser：${item.label}`, menuStartedAt);
-                    return chooser2;
+                    foundMenuChooser = menuChooser;
+                    break outer;
                   }
                 }
               }
+
+              if (foundMenuChooser) return foundMenuChooser;
+
+              // 菜单扫描失败，关闭残留菜单再试下一入口
+              await page.keyboard.press('Escape').catch(() => {});
             }
 
             return null;
@@ -769,6 +986,7 @@ export async function executePasteImageClipboard(
 
               const setStartedAt = Date.now();
               await chooser.setFiles(filePath);
+              await closeNativeOpenFilesDialogs(log);
               logStage(`📎 [${i + 1}/${downloaded.length}] filechooser 已选择文件：${path.basename(filePath)}（入口=${sel}）`, setStartedAt);
               chosen = true;
               break;
@@ -841,6 +1059,7 @@ export async function executePasteImageClipboard(
             const filePath = downloaded[i].filePath;
             const setStartedAt = Date.now();
             await input.setInputFiles(filePath);
+            await closeNativeOpenFilesDialogs(log);
             logStage(`📎 [${i + 1}/${downloaded.length}] 已 setInputFiles：${path.basename(filePath)}（${fileInputSelector}）`, setStartedAt);
 
             await page.waitForTimeout(waitAfterUpload);
@@ -858,6 +1077,7 @@ export async function executePasteImageClipboard(
     }
 
     const screenshot = await captureScreenshot(page);
+    await closeNativeOpenFilesDialogs(log);
     logStage(`✅ 上传参考图节点完成：attachedVia=${attachedVia}, detail=${attachedViaDetail}`);
     return {
       success: true,

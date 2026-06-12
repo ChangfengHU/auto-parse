@@ -80,6 +80,107 @@ function isSupportedMediaMimeType(mimeType: string): boolean {
   return mimeType.startsWith('image/') || mimeType.startsWith('video/');
 }
 
+function isDownloadPreviewUrl(url: string): boolean {
+  const value = String(url || '').trim().toLowerCase();
+  return (
+    value.startsWith('file:') ||
+    value.startsWith('blob:') ||
+    value.startsWith('chrome://downloads') ||
+    value.startsWith('chrome-error://chromewebdata')
+  );
+}
+
+async function cleanupDownloadPreviewPages(page: Page, log: string[]) {
+  const pages = page.context().pages();
+  let closed = 0;
+  for (const candidate of pages) {
+    if (candidate === page || candidate.isClosed()) continue;
+    const url = candidate.url();
+    if (!isDownloadPreviewUrl(url)) continue;
+    await candidate.close({ runBeforeUnload: false }).catch(() => {});
+    closed++;
+  }
+
+  const currentUrl = page.url();
+  if (isDownloadPreviewUrl(currentUrl)) {
+    const restored = await page
+      .goBack({ waitUntil: 'domcontentloaded', timeout: 3_000 })
+      .then(() => true)
+      .catch(() => false);
+    log.push(
+      restored
+        ? `🧹 已从下载/文件预览页返回工作页: ${currentUrl}`
+        : `⚠️ 当前页停留在下载/文件预览页，自动返回失败: ${currentUrl}`
+    );
+  }
+
+  if (closed > 0) {
+    log.push(`🧹 已关闭 ${closed} 个下载/文件预览标签页，保留 Gemini 工作页`);
+  }
+}
+
+async function closeIfDownloadPreviewPage(candidate: Page, activePage: Page, log: string[]): Promise<boolean> {
+  if (candidate === activePage || candidate.isClosed()) return false;
+
+  for (let attempt = 0; attempt < 12; attempt++) {
+    if (candidate.isClosed()) return false;
+    const url = candidate.url();
+    if (isDownloadPreviewUrl(url)) {
+      await candidate.close({ runBeforeUnload: false }).catch(() => {});
+      log.push(`🧹 已拦截并关闭下载/文件预览标签页: ${url}`);
+      return true;
+    }
+    if (url && url !== 'about:blank') return false;
+    await candidate.waitForTimeout(150).catch(() => {});
+  }
+
+  return false;
+}
+
+async function withDownloadPreviewSuppression<T>(
+  page: Page,
+  log: string[],
+  action: () => Promise<T>
+): Promise<T> {
+  const context = page.context();
+  const pendingClosures: Array<Promise<unknown>> = [];
+
+  const onPage = (candidate: Page) => {
+    pendingClosures.push(closeIfDownloadPreviewPage(candidate, page, log));
+  };
+
+  const restoreCurrentIfPreview = async () => {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline && !page.isClosed()) {
+      const url = page.url();
+      if (isDownloadPreviewUrl(url)) {
+        const restored = await page
+          .goBack({ waitUntil: 'domcontentloaded', timeout: 3_000 })
+          .then(() => true)
+          .catch(() => false);
+        log.push(
+          restored
+            ? `🧹 已抑制当前页下载/文件预览并返回工作页: ${url}`
+            : `⚠️ 当前页进入下载/文件预览，自动返回失败: ${url}`
+        );
+        return;
+      }
+      await page.waitForTimeout(150).catch(() => {});
+    }
+  };
+
+  context.on('page', onPage);
+  try {
+    const restoreCurrent = restoreCurrentIfPreview();
+    const result = await action();
+    await page.waitForTimeout(300).catch(() => {});
+    await Promise.allSettled([restoreCurrent, ...pendingClosures]);
+    return result;
+  } finally {
+    context.off('page', onPage);
+  }
+}
+
 async function downloadWithCdp(
   page: Page,
   click: () => Promise<void>,
@@ -111,9 +212,13 @@ async function downloadWithCdp(
           reject(new Error('CDP 下载被浏览器取消'));
         }
       });
-    });
+    }).then(
+      () => ({ ok: true as const }),
+      (error) => ({ error })
+    );
     await click();
-    await completed;
+    const completedResult = await completed;
+    if ('error' in completedResult) throw completedResult.error;
     if (!guid) throw new Error('CDP 下载完成但未收到 guid');
     return {
       path: path.join(downloadDir, guid),
@@ -130,17 +235,24 @@ async function captureDownloadResponse(
   timeoutMs: number,
   minimumSize: number
 ): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
-  const responsePromise = page.waitForResponse(
-    (response) => {
-      const mimeType = response.headers()['content-type']?.split(';')[0]?.trim().toLowerCase() || '';
-      const contentLength = Number(response.headers()['content-length'] || 0);
-      const looksLikeOriginal = response.url().includes('/rd-gg/') || contentLength >= minimumSize;
-      return response.ok() && isSupportedMediaMimeType(mimeType) && looksLikeOriginal;
-    },
-    { timeout: timeoutMs }
-  );
+  const responsePromise = page
+    .waitForResponse(
+      (response) => {
+        const mimeType = response.headers()['content-type']?.split(';')[0]?.trim().toLowerCase() || '';
+        const contentLength = Number(response.headers()['content-length'] || 0);
+        const looksLikeOriginal = response.url().includes('/rd-gg/') || contentLength >= minimumSize;
+        return response.ok() && isSupportedMediaMimeType(mimeType) && looksLikeOriginal;
+      },
+      { timeout: timeoutMs }
+    )
+    .then(
+      (response) => ({ response }),
+      (error) => ({ error })
+    );
   await click();
-  const response = await responsePromise;
+  const result = await responsePromise;
+  if ('error' in result) throw result.error;
+  const response = result.response;
   const mimeType = response.headers()['content-type']?.split(';')[0]?.trim().toLowerCase() || '';
   const extension = sniffMediaType(Buffer.alloc(0), `media.${mimeType.split('/')[1] || 'bin'}`).extension;
   return {
@@ -253,8 +365,15 @@ async function detectVideoResult(page: Page): Promise<{ isVideo: boolean; reason
 async function detectTextOnlyResponse(page: Page): Promise<{ textOnly: boolean; reason?: string }> {
   try {
     const result = await page.evaluate(() => {
-      const responses = Array.from(document.querySelectorAll('model-response, response-element'));
-      const latest = responses.length > 0 ? responses[responses.length - 1] : null;
+      // 只认顶层 model-response：response-element 嵌套在其内部，混在一起取"最后一个"
+      // 可能拿到图片之后的纯文本子块，把有图的回复误判成仅文本。
+      const modelResponses = Array.from(document.querySelectorAll('model-response'));
+      const responseElements = Array.from(document.querySelectorAll('response-element'));
+      const latest = modelResponses.length > 0
+        ? modelResponses[modelResponses.length - 1]
+        : responseElements.length > 0
+          ? responseElements[responseElements.length - 1]
+          : null;
 
       const scope = latest ?? document.body;
       if (!scope) return { textOnly: false };
@@ -395,6 +514,35 @@ async function pickBestImageSrc(page: Page, selector: string): Promise<{ src: st
     const isChatGpt = location.hostname === 'chatgpt.com' || location.hostname.endsWith('.chatgpt.com');
     if (isChatGpt) {
       const allImages = Array.from(document.querySelectorAll(sel)) as HTMLImageElement[];
+      const generatedImages = allImages
+        .map(imageMeta)
+        .filter((it) => {
+          const alt = it.img.getAttribute('alt') || '';
+          const inComposer =
+            Boolean(it.img.closest('form:has(#prompt-textarea), #prompt-textarea, [contenteditable="true"]')) ||
+            Boolean(it.img.closest('[data-testid*="composer" i]'));
+          return (
+            !inComposer &&
+            it.s &&
+            it.area > 0 &&
+            it.rect.width >= 120 &&
+            it.rect.height >= 120 &&
+            /generated image/i.test(alt)
+          );
+        })
+        .sort((a, b) => b.area - a.area);
+      if (generatedImages[0]?.s) {
+        const it = generatedImages[0];
+        return {
+          src: it.s,
+          debug: [
+            'pickedBy=chatgpt-generated-alt',
+            `area=${Math.round(it.area)}`,
+            `visible=${Math.round(it.rect.width)}x${Math.round(it.rect.height)}`,
+          ].join(', '),
+        };
+      }
+
       const articles = Array.from(document.querySelectorAll('article, [data-testid^="conversation-turn-"]'));
       const ranked = allImages
         .map((img) => {
@@ -485,6 +633,59 @@ async function pickBestImageSrc(page: Page, selector: string): Promise<{ src: st
   };
 }
 
+function isTrustedGeneratedImagePick(debug: string): boolean {
+  const value = String(debug || '').toLowerCase();
+  return (
+    value.includes('pickedby=generated-image') ||
+    value.includes('pickedby=chatgpt-generated-alt') ||
+    value.includes('pickedby=chatgpt-assistant') ||
+    value.includes('pickedby=chatgpt-non-user')
+  );
+}
+
+function hasReferenceImageInput(ctx: WorkflowContext): boolean {
+  const referenceHint = String(ctx.vars?.sourceImageUrl ?? ctx.vars?.sourceImageUrls ?? '').trim();
+  return Boolean(referenceHint);
+}
+
+function shouldRejectUnscopedDomFallback(ctx: WorkflowContext, debug: string): boolean {
+  return hasReferenceImageInput(ctx) && !isTrustedGeneratedImagePick(debug);
+}
+
+async function clearChatGptDragOverlay(page: Page): Promise<void> {
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.evaluate(() => {
+    const dt = new DataTransfer();
+    const makeEvt = (type: string) => {
+      try {
+        return new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: dt });
+      } catch {
+        const ev = new Event(type, { bubbles: true, cancelable: true }) as Event & {
+          dataTransfer?: DataTransfer;
+        };
+        Object.defineProperty(ev, 'dataTransfer', { value: dt });
+        return ev;
+      }
+    };
+
+    for (const type of ['dragleave', 'dragend', 'drop']) {
+      window.dispatchEvent(makeEvt(type));
+      document.dispatchEvent(makeEvt(type));
+      document.body?.dispatchEvent(makeEvt(type));
+    }
+
+    for (const el of Array.from(document.querySelectorAll('body *'))) {
+      const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text.includes('Add anything') || !text.includes('Drop any file here')) continue;
+      const style = getComputedStyle(el);
+      if (style.position !== 'fixed') continue;
+      (el as HTMLElement).style.display = 'none';
+      (el as HTMLElement).style.pointerEvents = 'none';
+      el.setAttribute('data-auto-parse-hidden-drag-overlay', '1');
+    }
+  }).catch(() => {});
+}
+
 /** 点击「复制图片」后读剪贴板（需页面已授予 clipboard-read） */
 async function tryExtractViaCopyButton(
   page: Page,
@@ -564,7 +765,13 @@ async function detectFailFast(
 
   const texts = (rules.textIncludes || []).map((t) => String(t || '').trim()).filter(Boolean);
   if (texts.length > 0) {
-    let bodyText = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+    // 只扫最新一条模型回复：扫整页会把用户自己的提示词、历史会话、侧栏 UI 文案都算进去，
+    // 配合宽泛词表（如 "but"）极易误杀。无 model-response（如 ChatGPT 页面）时退回 body。
+    let bodyText = await page.evaluate(() => {
+      const responses = document.querySelectorAll('model-response');
+      const scope = responses.length > 0 ? responses[responses.length - 1] : document.body;
+      return (scope as HTMLElement)?.innerText || '';
+    }).catch(() => '');
     if (!bodyText) {
       bodyText = await page.locator('body').innerText({ timeout: timeoutMs }).catch(() => '');
     }
@@ -607,6 +814,10 @@ export async function executeExtractImageDownload(
     const minFileSizeBytes = Math.max(0, params.minFileSizeBytes ?? 0);
     const allowDomFallback = params.allowDomFallback ?? false;
     const allowClipboardFallback = params.allowClipboardFallback ?? true;
+    const strictDownloadOnly =
+      (params as { strictDownloadOnly?: unknown }).strictDownloadOnly !== undefined
+        ? Boolean((params as { strictDownloadOnly?: unknown }).strictDownloadOnly)
+        : hasReferenceImageInput(ctx);
     const serializeClipboardAccess = params.serializeClipboardAccess ?? true;
     const menuTriggerSelector = (params.menuTriggerSelector || 'button[aria-label*="More options"], button[aria-label*="更多"]').trim();
     const menuItemSelector = (params.menuItemSelector || '[role="menuitem"]:has-text("Download"), [role="menuitem"]:has-text("下载"), button:has-text("Download"), button:has-text("下载")').trim();
@@ -661,10 +872,17 @@ export async function executeExtractImageDownload(
       const appearTimeout = ((params as { waitImageReadyAppearTimeout?: number }).waitImageReadyAppearTimeout ?? 30_000);
 
       const customText = ((params as { waitImageReadyText?: string }).waitImageReadyText || '').trim();
-      // 优先用文字匹配，其次用选择器，两者都没有则跳过
-      const getLocator = () => customText
-        ? page.getByText(customText, { exact: false }).first()
-        : customSel ? page.locator(customSel).first() : null;
+      // 优先用文字匹配，其次用选择器，两者都没有则跳过。
+      // 选择器优先限定在最新 model-response 内：全页匹配会命中页面上残留的旧图，
+      // 导致"图片已就绪"瞬间误判通过。无 model-response 的页面（如 ChatGPT）退回全页。
+      const getLocator = async () => {
+        if (customText) return page.getByText(customText, { exact: false }).first();
+        if (!customSel) return null;
+        const responses = page.locator('model-response');
+        const n = await responses.count().catch(() => 0);
+        if (n > 0) return responses.nth(n - 1).locator(customSel).first();
+        return page.locator(customSel).first();
+      };
       const matchDesc = customText ? `文字"${customText}"` : customSel ? `选择器 ${customSel}` : '';
 
       // 实时推送日志到 SSE（每 5s 打一次进度，不等节点结束）
@@ -684,7 +902,7 @@ export async function executeExtractImageDownload(
         while (Date.now() < appearDeadline) {
           const reason = await detectFailFast(page, { textIncludes: failFastTextIncludes, selector: failFastSelector }, 300);
           if (reason) { emitLog(`🛑 失败快判：${reason}`); throw new FailFastError(reason); }
-          const loc = getLocator();
+          const loc = await getLocator();
           const visible = loc ? await loc.isVisible({ timeout: 300 }).catch(() => false) : false;
           if (visible) { appeared = true; break; }
           if (Date.now() - lastEmitAppear >= 5000) {
@@ -704,7 +922,7 @@ export async function executeExtractImageDownload(
         while (Date.now() < disappearDeadline) {
           const reason = await detectFailFast(page, { textIncludes: failFastTextIncludes, selector: failFastSelector }, 300);
           if (reason) { emitLog(`🛑 失败快判：${reason}`); throw new FailFastError(reason); }
-          const loc = getLocator();
+          const loc = await getLocator();
           const visible = loc ? await loc.isVisible({ timeout: 300 }).catch(() => false) : false;
           if (!visible) { disappeared = true; break; }
           if (Date.now() - lastEmitDisappear >= 5000) {
@@ -724,7 +942,7 @@ export async function executeExtractImageDownload(
         while (Date.now() < deadline) {
           const reason = await detectFailFast(page, { textIncludes: failFastTextIncludes, selector: failFastSelector }, 300);
           if (reason) { emitLog(`🛑 失败快判：${reason}`); throw new FailFastError(reason); }
-          const loc = getLocator();
+          const loc = await getLocator();
           const visible = loc ? await loc.isVisible({ timeout: 300 }).catch(() => false) : false;
           if (visible) { done = true; break; }
           if (Date.now() - lastEmit >= 5000) {
@@ -744,7 +962,7 @@ export async function executeExtractImageDownload(
         while (Date.now() < deadline) {
           const reason = await detectFailFast(page, { textIncludes: failFastTextIncludes, selector: failFastSelector }, 300);
           if (reason) { emitLog(`🛑 失败快判：${reason}`); throw new FailFastError(reason); }
-          const loc = getLocator();
+          const loc = await getLocator();
           const visible = loc ? await loc.isVisible({ timeout: 300 }).catch(() => false) : false;
           if (!visible) { done = true; break; }
           if (Date.now() - lastEmit >= 5000) {
@@ -757,13 +975,45 @@ export async function executeExtractImageDownload(
       }
     }
 
+    // 生成完成后等待 UI 渲染下载按钮（生成图出现和按钮出现之间有短暂延迟）
+    const waitAfterImageReady = Math.max(
+      0,
+      (params as { waitAfterImageReady?: number }).waitAfterImageReady ?? 0
+    );
+    if (params.waitImageReady && waitAfterImageReady > 0) {
+      log.push(`⏳ waitAfterImageReady: 等待 ${waitAfterImageReady}ms 让下载按钮完成渲染…`);
+      await page.waitForTimeout(waitAfterImageReady);
+    }
+
     pushLog(
       `📥 生图阶段结束 → 后续：${params.preferDomExtraction ? 'DOM 优先提取 → ' : ''}查找下载入口 / 浏览器下载事件 → 本地校验 → ${useLocalApi ? '本地 API' : useR2 ? 'R2' : useOss ? 'OSS' : '本地文件'}`
     );
+    await clearChatGptDragOverlay(page);
+
+    // Gemini 有时从 /images 以新 Tab 方式打开 /app/<id> 结果页（而非在同 Tab 内导航）。
+    // 当前 page 仍停在 /images（无 model-response），需切换到有内容的结果 Tab。
+    let dp = page; // dp = effective download page
+    {
+      const hasResp = await page.locator('model-response, response-element').count().catch(() => 0);
+      if (hasResp === 0) {
+        const candidates = page.context().pages()
+          .filter(p => p !== page && !p.isClosed() && /gemini\.google\.com\/app\//.test(p.url()))
+          .reverse(); // 最近打开的优先
+        for (const candidate of candidates) {
+          const c = await candidate.locator('model-response, response-element').count().catch(() => 0);
+          if (c > 0) {
+            log.push(`🔄 检测到 Gemini 在新 Tab 打开结果页 (${candidate.url()})，切换到该页进行下载`);
+            dp = candidate;
+            break;
+          }
+        }
+        if (dp === page) log.push('⚠️ 当前页无 model-response，且未在其他 Tab 找到结果页，继续在当前页尝试');
+      }
+    }
 
     // 业务硬约束：该节点用于产出视觉媒体；若页面仅文本回复且无可提取视觉元素，立即失败，避免无效重试。
     {
-      const textOnly = await detectTextOnlyResponse(page);
+      const textOnly = await detectTextOnlyResponse(dp);
       if (textOnly.textOnly) {
         const reason = textOnly.reason || '检测到仅文本回复';
         pushLog(`🛑 视觉结果校验失败：${reason}`);
@@ -784,7 +1034,7 @@ export async function executeExtractImageDownload(
       const domFallbackSel = (params.fallbackImageSelector || 'img[src^="blob:"], img[src^="data:image"], img').trim();
       const minSizeDom = Math.max(0, params.minFileSizeBytes ?? 0);
       try {
-        if (copyImageButtonSelector) {
+        if (copyImageButtonSelector && !strictDownloadOnly) {
           const clipBefore = allowClipboardFallback ? await readImageFromClipboard(page).catch(() => null) : null;
           const clipBeforeHash = clipBefore?.buffer?.length ? sha256(clipBefore.buffer) : null;
           const viaCopy = await tryExtractViaCopyButton(
@@ -816,6 +1066,9 @@ export async function executeExtractImageDownload(
         const pickedImage = await pickBestImageSrc(page, domFallbackSel);
         if (pickedImage.src) {
           log.push(`🖼️ 找到图片 src: ${pickedImage.src.slice(0, 100)} (${pickedImage.debug})`);
+          if (shouldRejectUnscopedDomFallback(ctx, pickedImage.debug)) {
+            log.push(`⚠️ DOM 优先候选不是可信生成图，跳过以避免误传参考图: ${pickedImage.debug}`);
+          } else {
           const extracted = await readImageBufferFromPage(page, pickedImage.src);
           if (minSizeDom > 0 && extracted.buffer.length < minSizeDom) {
             log.push(`⚠️ DOM 优先提取过小 (${extracted.buffer.length} bytes < ${minSizeDom})，回退到下载流程`);
@@ -834,6 +1087,7 @@ export async function executeExtractImageDownload(
             extractionMethod = 'dom';
             log.push(`✅ DOM 优先提取成功 (${(imageBuffer.length / 1024).toFixed(1)} KB)，跳过浏览器下载`);
           }
+          }
         } else {
           log.push(`⚠️ DOM 优先提取：未找到图片 src，回退到下载流程`);
         }
@@ -843,7 +1097,7 @@ export async function executeExtractImageDownload(
       }
     }
 
-    const latestScopeMeta = await resolveLatestResponseScope(page);
+    const latestScopeMeta = await resolveLatestResponseScope(dp);
     const inScope = <T extends Locator>(globalLoc: T, scopedLocFactory: () => T): T =>
       latestScopeMeta ? scopedLocFactory() : globalLoc;
     if (latestScopeMeta) {
@@ -945,6 +1199,9 @@ export async function executeExtractImageDownload(
 
     if (mode === 'none') {
       log.push(`⚠️ 未找到下载入口（直连按钮和菜单入口均不存在）`);
+      if (strictDownloadOnly) {
+        throw new Error('严格原图下载模式：未找到下载入口，触发重试');
+      }
     }
 
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'wf-extract-image-download-'));
@@ -988,11 +1245,18 @@ export async function executeExtractImageDownload(
                 pushLog(`🖱️ 点击菜单内下载项（第 ${itemIndex + 1} 个）…`);
                 await itemLoc.nth(itemIndex).click({ timeout: 10_000 });
               }
-              if (waitAfterClick > 0) await page.waitForTimeout(waitAfterClick);
+              if (waitAfterClick > 0) await dp.waitForTimeout(waitAfterClick);
             };
+            const clickDownloadWithPreviewSuppression = () =>
+              withDownloadPreviewSuppression(dp, log, clickDownload);
             try {
               pushLog(`⏳ 捕获下载按钮触发的原图网络响应（超时 ${Math.round(downloadTimeout / 1000)}s）…`);
-              const captured = await captureDownloadResponse(page, clickDownload, downloadTimeout, minFileSizeBytes);
+              const captured = await captureDownloadResponse(
+                dp,
+                clickDownloadWithPreviewSuppression,
+                downloadTimeout,
+                minFileSizeBytes
+              );
               if (captured.buffer.length <= 0) throw new Error('原图网络响应为空');
               if (minFileSizeBytes > 0 && captured.buffer.length < minFileSizeBytes) {
                 throw new Error(`原图网络响应过小(${captured.buffer.length} bytes)，低于阈值 ${minFileSizeBytes}`);
@@ -1001,6 +1265,7 @@ export async function executeExtractImageDownload(
               fileName = captured.fileName;
               contentType = captured.mimeType;
               extractionMethod = 'download';
+              await cleanupDownloadPreviewPages(dp, log);
               pushLog(`✅ 已捕获原图网络响应: ${fileName}（${(imageBuffer.length / 1024).toFixed(1)} KB）`);
               return true;
             } catch (networkErr) {
@@ -1008,7 +1273,12 @@ export async function executeExtractImageDownload(
             }
 
             pushLog(`⏳ 使用 CDP 原生下载通道（超时 ${Math.round(downloadTimeout / 1000)}s）…`);
-            const cdpDownload = await downloadWithCdp(page, clickDownload, tempDir, downloadTimeout);
+            const cdpDownload = await downloadWithCdp(
+              dp,
+              clickDownloadWithPreviewSuppression,
+              tempDir,
+              downloadTimeout
+            );
             fileName = cdpDownload.fileName;
             finalPath = cdpDownload.path;
             const stat = await fs.stat(finalPath);
@@ -1019,6 +1289,7 @@ export async function executeExtractImageDownload(
             imageBuffer = await fs.readFile(finalPath);
             contentType = inferMimeType(fileName);
             extractionMethod = 'download';
+            await cleanupDownloadPreviewPages(dp, log);
             pushLog(`✅ 图片已下载完整: ${fileName}（${(stat.size / 1024).toFixed(1)} KB）`);
             return true;
           } catch (err) {
@@ -1029,7 +1300,9 @@ export async function executeExtractImageDownload(
             }
             log.push(`⚠️ 下载失败: ${message}`);
 
-            if (copyImageButtonSelector) {
+            if (strictDownloadOnly) {
+              log.push('⚠️ 严格原图下载模式：跳过复制/DOM/剪贴板兜底，等待重试');
+            } else if (copyImageButtonSelector) {
               const viaCopy = await tryExtractViaCopyButton(
                 page,
                 copyImageButtonSelector,
@@ -1057,12 +1330,16 @@ export async function executeExtractImageDownload(
             }
 
             // 再尝试 DOM（pickBestImageSrc 已优先 generated-image 内大图，减轻误选参考图预览）
-            if (allowDomFallback) {
+            if (!strictDownloadOnly && allowDomFallback) {
               try {
-                const pickedImage = await pickBestImageSrc(page, fallbackImageSelector);
+                const pickedImage = await pickBestImageSrc(dp, fallbackImageSelector);
                 if (pickedImage.src) {
                   log.push(`🖼️ DOM 兜底候选: ${pickedImage.src.slice(0, 100)} (${pickedImage.debug})`);
-                  const extracted = await readImageBufferFromPage(page, pickedImage.src);
+                  if (shouldRejectUnscopedDomFallback(ctx, pickedImage.debug)) {
+                    log.push(`⚠️ DOM 兜底候选不是可信生成图，跳过以避免误传参考图: ${pickedImage.debug}`);
+                    return false;
+                  }
+                  const extracted = await readImageBufferFromPage(dp, pickedImage.src);
                   if (minFileSizeBytes > 0 && extracted.buffer.length < minFileSizeBytes) {
                     log.push(`⚠️ DOM 兜底图片过小(${extracted.buffer.length} bytes)，低于阈值 ${minFileSizeBytes}`);
                   } else {
@@ -1089,8 +1366,8 @@ export async function executeExtractImageDownload(
               }
             }
 
-            if (allowClipboardFallback) {
-              const clip = await readImageFromClipboard(page);
+            if (!strictDownloadOnly && allowClipboardFallback) {
+              const clip = await readImageFromClipboard(dp);
               if (clip && clip.buffer.length > 0) {
                 const afterHash = sha256(clip.buffer);
                 if (beforeClipHash && afterHash === beforeClipHash) {
@@ -1136,6 +1413,9 @@ export async function executeExtractImageDownload(
     } // end !imageBuffer (button finding + download)
 
     if (!imageBuffer) {
+      if (strictDownloadOnly) {
+        throw new Error('严格原图下载模式：下载链路未拿到原图媒体，触发重试');
+      }
       const beforeFallbackVideoState = await detectVideoResult(page);
       if (beforeFallbackVideoState.isVideo) {
         log.push(`🎬 DOM 兜底前确认当前结果为视频（${beforeFallbackVideoState.reason || '非图片结果'}）`);
@@ -1172,10 +1452,13 @@ export async function executeExtractImageDownload(
           throw new Error('下载链路未拿到媒体，且 allowDomFallback=false，已禁止使用页面预览图兜底');
         }
         log.push(`↩️ 下载事件失败，尝试 DOM 兜底提取: ${fallbackImageSelector}`);
-        const pickedImage = await pickBestImageSrc(page, fallbackImageSelector);
+        const pickedImage = await pickBestImageSrc(dp, fallbackImageSelector);
         if (!pickedImage.src) throw new Error(`兜底提取失败：未找到图片 src (${fallbackImageSelector})；${pickedImage.debug}`);
         log.push(`🖼️ 最终 DOM 兜底候选: ${pickedImage.src.slice(0, 100)} (${pickedImage.debug})`);
-        const extracted = await readImageBufferFromPage(page, pickedImage.src);
+        if (shouldRejectUnscopedDomFallback(ctx, pickedImage.debug)) {
+          throw new Error(`兜底候选不是可信生成图，拒绝上传以避免误传参考图: ${pickedImage.debug}`);
+        }
+        const extracted = await readImageBufferFromPage(dp, pickedImage.src);
         const ffReasonFinal = await detectFailFast(
           page,
           { textIncludes: failFastTextIncludes, selector: failFastSelector },

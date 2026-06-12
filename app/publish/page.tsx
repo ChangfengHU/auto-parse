@@ -289,6 +289,7 @@ function PublishPageInner() {
   const [showDrawer,   setShowDrawer]   = useState(false);
 
   const [loginStatus,   setLoginStatus]  = useState<LoginStatus>('unknown');
+  const [platformLoggedIn, setPlatformLoggedIn] = useState<boolean | null>(null);
   const [loginQr,       setLoginQr]      = useState<string | null>(null);
   const [loginLog,      setLoginLog]     = useState<string>('');
   const [showCookieInput, setShowCookieInput] = useState(false);
@@ -351,14 +352,12 @@ function PublishPageInner() {
   }, []);
 
   useEffect(() => { fetch('/api/materials').then(r => r.json()).then(setMaterials).catch(() => {}); }, []);
-  // 页面加载：本地 Cookie 文件只是"可能有效"，不直接亮绿灯
-  // 真正已登录需要通过插件凭证验证或扫码确认
+  // 页面加载：读取平台 Cookie 的真实登录状态
   useEffect(() => {
     fetch('/api/login').then(r => r.json())
       .then(d => {
-        // 只有本地 cookie 且未被插件验证覆盖时，才做初始状态判断
-        // 保守策略：cookie 存在但未验证 → 'unknown'（灰色），待用户主动验证
-        setLoginStatus(d.loggedIn ? 'unknown' : 'not_logged_in');
+        setPlatformLoggedIn(!!d.loggedIn);
+        setLoginStatus(prev => (prev === 'logged_in' ? 'logged_in' : d.loggedIn ? 'logged_in' : 'not_logged_in'));
       }).catch(() => {});
   }, []);
   useEffect(() => { logsEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
@@ -542,17 +541,17 @@ function PublishPageInner() {
       };
       if (d.error) {
         setPluginMsg({ type: 'error', text: d.error });
-        setLoginStatus('not_logged_in');
+        setLoginStatus(platformLoggedIn ? 'logged_in' : 'not_logged_in');
         return;
       }
       if (!d.found) {
         setPluginMsg({ type: 'error', text: '未找到登录信息，请先安装插件并同步' });
-        setLoginStatus('not_logged_in');
+        setLoginStatus(platformLoggedIn ? 'logged_in' : 'not_logged_in');
         return;
       }
       if (d.expired || !d.cookieStr) {
         setPluginMsg({ type: 'warn', text: d.message ?? 'Cookie 可能已过期，建议重新同步' });
-        setLoginStatus('not_logged_in');  // 与插件验证结果保持一致
+        setLoginStatus(platformLoggedIn ? 'logged_in' : 'not_logged_in');
         return;
       }
       setPluginCookie(d.cookieStr);

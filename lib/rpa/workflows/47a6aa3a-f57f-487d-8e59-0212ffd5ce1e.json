@@ -75,5 +75,9 @@
       "continueOnError": false
     }
   ],
-  "vars": []
+  "vars": [
+    "browserInstanceId",
+    "browserWsUrl",
+    "noteUrl"
+  ]
 }

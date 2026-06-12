@@ -1,0 +1,4 @@
+ingress:
+  - hostname: vnc-vyibc-test.vyibc.com
+    service: http://127.0.0.1:1006
+  - service: http_status:404

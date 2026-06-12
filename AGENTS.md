@@ -12,6 +12,30 @@
 6. `docs/deployment.md`
 7. 相关现有 `docs/*.md`
 
+## 开发环境说明
+
+本项目存在两套开发环境，接手前先确认当前在哪台机器上工作：
+
+### 云端本地开发（GCP Linux VM，`34.71.195.210`）
+
+完整规范见 **`docs/CLOUD_LOCAL_DEV.md`**，涵盖：
+- VNC 桌面 + AdsPower + 本地代理的启动与验证
+- auto-parse dev server（端口 3007）和公网隧道
+- 初始化步骤、验证清单、已知问题与解法
+
+快速验证当前环境是否就绪：
+```bash
+sudo systemctl is-active vnc-xvfb vnc-x11vnc vnc-websockify  # VNC 栈
+systemctl --user is-active adspower proxy7890               # AdsPower 和代理
+ss -tlnp | grep -E ":3007|:7890|:1006"                      # 关键端口
+curl -s http://127.0.0.1:3007/ -o /dev/null -w "%{http_code}" # dev server
+```
+
+公网地址：`https://autoparse-dev.chxyka.ccwu.cc`
+VNC：`https://vnc-vyibc-test.vyibc.com/vnc.html?path=websockify&autoconnect=1&reconnect=1&resize=remote`
+
+### 远端开发（`152.32.214.95`）
+
 ## 主要目录
 - `app/`：Next.js 页面和 API Route。
 - `components/`：共享 React 组件。
@@ -39,7 +63,7 @@ npm run build
 - 工作流修改必须通过 Supabase 对应接口或管理页面完成并验证。
 
 ## 远端开发与部署边界
-- 远端：`root@152.32.214.95:/root/auto-parse`。
+- 远端：`root@152.32.214.95:/root/auto-parse`（即上方"远端开发"环境）。
 - 服务：systemd `auto-parse.service`，当前运行 `npm run dev -- -p 1007`。
 - 只允许 SSH 登录后在远端审计、手工修改、重启和测试。
 - 严禁 `scp`、`rsync`、Git push/pull，严禁把本地项目文件、代码或补丁同步到远端。

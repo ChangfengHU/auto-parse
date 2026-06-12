@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 
 export type XhsBackendSource = 'cli' | 'http';
-export type UploadProvider = 'oss' | 'supabase';
+export type UploadProvider = 'oss' | 'supabase' | 'r2';
 
 export type FastFailStrategy = 'llm_rewrite' | 'direct_retry' | 'skip';
 
@@ -43,7 +43,9 @@ function normalizeSource(value: unknown): XhsBackendSource {
 }
 
 function normalizeUploadProvider(value: unknown): UploadProvider {
-  return value === 'supabase' ? 'supabase' : 'oss';
+  if (value === 'supabase') return 'supabase';
+  if (value === 'r2') return 'r2';
+  return 'oss';
 }
 
 function normalizeBaseUrl(value: unknown): string {

@@ -39,6 +39,8 @@ export interface ExtractImageClipboardParams {
 
   /** 是否上传到 OSS（默认 true） */
   uploadToOSS?: boolean;
+  /** 上传服务商：oss | supabase | r2（默认从系统配置获取） */
+  uploadProvider?: string;
   /** OSS 存储路径，支持 {{timestamp}} 模板 */
   ossPath?: string;
   /** 输出变量名（默认：imageUrl） */
@@ -284,9 +286,13 @@ export async function executeExtractImageClipboard(
       // 步骤 4：上传到 OSS（锁内执行，上传完成后再释放）
       let uploaded = '';
       if (uploadToOSS) {
-        log.push(`☁️ 正在上传到 OSS：${ossPath}`);
-        ctx.emit?.('log', `☁️ 正在上传到 OSS...`);
-        uploaded = await uploadBuffer(copiedBuffer, ossPath, copiedMime.includes('png') ? 'image/png' : copiedMime);
+        const provider = params.uploadProvider || (ctx.vars?.uploadProvider as string);
+        log.push(`☁️ 正在上传到 ${provider || '默认存储'}: ${ossPath}`);
+        ctx.emit?.('log', `☁️ 正在上传到 ${provider || '默认存储'}...`);
+        uploaded = await uploadBuffer(copiedBuffer, ossPath, copiedMime.includes('png') ? 'image/png' : copiedMime, {
+          provider: provider as any,
+          r2: ctx.vars?.r2Config as any,
+        });
         log.push(`✅ 上传成功：${uploaded}`);
         ctx.emit?.('log', `✅ 图片地址：${uploaded}`);
       }

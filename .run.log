@@ -1,0 +1,15 @@
+
+> doouyin@0.2.0 dev
+> next dev -p 1007
+
+⨯ Failed to start server
+Error: listen EACCES: permission denied 0.0.0.0:1007
+    at <unknown> (Error: listen EACCES: permission denied 0.0.0.0:1007)
+    at new Promise (<anonymous>) {
+  code: 'EACCES',
+  errno: -13,
+  syscall: 'listen',
+  address: '0.0.0.0',
+  port: 1007
+}
+[?25h

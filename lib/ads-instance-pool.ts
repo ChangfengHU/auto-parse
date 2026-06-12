@@ -156,6 +156,10 @@ function summarizeWorkingTabs(urls: string[]) {
   return `Gemini 工作页 ${urls.length} 个，默认按可复用处理，首个: ${truncateUrl(urls[0])}`;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function connectOverCDPWithTimeout(wsEndpoint: string, timeoutMs: number) {
   return await new Promise<Awaited<ReturnType<typeof chromium.connectOverCDP>>>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -216,10 +220,20 @@ async function inspectByAdsPower(
     return { active: false, tabOpen: false, source: 'none', detail: '分身未提供可用 ws，当前不可调度' };
   }
 
-  if (options?.skipCdp) {
-    return { active: true, tabOpen: false, source: 'adspower', detail: '分身已激活（跳过 CDP 标签检测）' };
+  const enableCdpProbe = String(process.env.ADS_POOL_ENABLE_CDP_PROBE || '').toLowerCase() === 'true';
+  if (options?.skipCdp || !enableCdpProbe) {
+    return {
+      active: true,
+      tabOpen: false,
+      source: 'adspower',
+      detail: enableCdpProbe
+        ? '分身已激活（跳过 CDP 标签检测）'
+        : '分身已激活（默认跳过 CDP 标签检测，避免误关 AdsPower 分身）',
+    };
   }
 
+  // CDP probe is opt-in only. With AdsPower profiles, Playwright's browser.close()
+  // can close the external profile instead of only detaching from the CDP session.
   let browser: Awaited<ReturnType<typeof chromium.connectOverCDP>> | null = null;
   try {
     browser = await connectOverCDPWithTimeout(wsEndpoint, 8000);
@@ -312,12 +326,22 @@ export async function getDispatchableInstanceStatus(instanceId: string): Promise
 
 export async function listInstanceStatuses(instanceIds: string[]): Promise<InstanceStatus[]> {
   const unique = Array.from(new Set(instanceIds.map((item) => item.trim()).filter(Boolean)));
-  return Promise.all(unique.map((id) => getInstanceStatus(id)));
+  const statuses: InstanceStatus[] = [];
+  for (const id of unique) {
+    statuses.push(await getInstanceStatus(id));
+    if (unique.length > 1) await sleep(1200);
+  }
+  return statuses;
 }
 
 export async function listDispatchableInstanceStatuses(instanceIds: string[]): Promise<InstanceStatus[]> {
   const unique = Array.from(new Set(instanceIds.map((item) => item.trim()).filter(Boolean)));
-  return Promise.all(unique.map((id) => getDispatchableInstanceStatus(id)));
+  const statuses: InstanceStatus[] = [];
+  for (const id of unique) {
+    statuses.push(await getDispatchableInstanceStatus(id));
+    if (unique.length > 1) await sleep(1200);
+  }
+  return statuses;
 }
 
 export async function acquireInstanceLease(

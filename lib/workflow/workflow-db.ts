@@ -25,6 +25,10 @@ const GEMINI_FORCE_AUTO_ENTER_WORKFLOW_IDS = new Set<string>([
   'a8d3b8e1-427c-4b78-b896-afbe35ed026c',
 ]);
 
+const GEMINI_REFERENCE_PASTE_ONLY_WORKFLOW_IDS = new Set<string>([
+  // 4a163587 已改为走 Upload & tools → Files → file input 上传，不再需要 paste-only 模式
+]);
+
 function isLikelyGeminiSendClick(node: WorkflowDef['nodes'][number] | undefined) {
   if (!node || node.type !== 'click') return false;
   const params = (node.params ?? {}) as Record<string, unknown>;
@@ -174,6 +178,135 @@ function normalizeGeminiAutoEnterWorkflow(workflow: WorkflowDef): WorkflowDef {
   return mutated ? { ...workflow, nodes } : workflow;
 }
 
+function normalizeGeminiReferencePasteOnlyWorkflow(workflow: WorkflowDef): WorkflowDef {
+  if (!GEMINI_REFERENCE_PASTE_ONLY_WORKFLOW_IDS.has(workflow.id)) return workflow;
+
+  let mutated = false;
+  const nodes = workflow.nodes.map((node) => {
+    if (node.type === 'navigate') {
+      const params = { ...(node.params as Record<string, unknown>) };
+      let changed = false;
+      if (params.url !== 'https://gemini.google.com/images') {
+        params.url = 'https://gemini.google.com/images';
+        changed = true;
+      }
+      if (params.postClickEnabled !== false) {
+        params.postClickEnabled = false;
+        changed = true;
+      }
+      if (!changed) return node;
+      mutated = true;
+      console.warn(
+        '[wf-workflow] Gemini reference workflow: forcing direct /images navigation',
+        { workflowId: workflow.id }
+      );
+      return { ...node, params };
+    }
+
+    if (node.type === 'click') {
+      const params = (node.params ?? {}) as Record<string, unknown>;
+      const text = String(params.text ?? '').toLowerCase();
+      const elementsText = JSON.stringify(params.elements ?? '').toLowerCase();
+      const likelyCreateImageClick =
+        text.includes('create image') ||
+        text.includes('制作图片') ||
+        elementsText.includes('create image') ||
+        elementsText.includes('制作图片');
+
+      if (likelyCreateImageClick && node.disabled !== true) {
+        mutated = true;
+        console.warn(
+          '[wf-workflow] Gemini reference workflow: disabling create-image click because /images is used directly',
+          { workflowId: workflow.id }
+        );
+        return { ...node, disabled: true };
+      }
+      return node;
+    }
+
+    if (node.type !== 'paste_image_clipboard') return node;
+
+    const params = { ...(node.params as Record<string, unknown>) };
+    let changed = false;
+    const setParam = (key: string, value: unknown) => {
+      if (params[key] === value) return;
+      params[key] = value;
+      changed = true;
+    };
+
+    // Do not open Gemini's Upload/Images/Open files UI for reference images.
+    // That native file chooser can steal focus and invalidate the CDP page in AdsPower.
+    setParam('mode', 'paste');
+    setParam('uploadFallback', false);
+    setParam('openUploaderSelector', '');
+    setParam('fileInputSelector', '');
+    setParam('waitAfterPaste', Math.max(1200, Number(params.waitAfterPaste ?? 0) || 0));
+
+    if (!changed) return node;
+    mutated = true;
+    console.warn(
+      '[wf-workflow] Gemini reference workflow: forcing paste-only image attach to avoid native Open Files dialogs',
+      { workflowId: workflow.id }
+    );
+    return { ...node, params };
+  });
+
+  return mutated ? { ...workflow, nodes } : workflow;
+}
+
+// 根治 Gemini 参考图工作流的下载等待逻辑：
+// 不再依赖"正在加载"文字（易因 Gemini UI 改版而失配），
+// 改为等待 generated-image img 出现（图片渲染即生成完毕），
+// 再加 3s buffer 让下载按钮完成渲染。
+function normalizeGeminiExtractDownload(workflow: WorkflowDef): WorkflowDef {
+  if (!GEMINI_REFERENCE_PASTE_ONLY_WORKFLOW_IDS.has(workflow.id)) return workflow;
+  let mutated = false;
+  const nodes = workflow.nodes.map((node) => {
+    if (node.type !== 'extract_image_download') return node;
+    const params = { ...(node.params as Record<string, unknown>) };
+    let changed = false;
+
+    if (params.waitImageReadySelector !== 'generated-image img') {
+      params.waitImageReadySelector = 'generated-image img';
+      changed = true;
+    }
+    if (params.waitImageReadyAction !== 'appeared') {
+      params.waitImageReadyAction = 'appeared';
+      changed = true;
+    }
+    // 清空旧的文字匹配（"正在加载"依赖 UI 文字，易失配）
+    if (params.waitImageReadyText !== '') {
+      params.waitImageReadyText = '';
+      changed = true;
+    }
+    if ((params.waitAfterImageReady as number | undefined) !== 3000) {
+      params.waitAfterImageReady = 3000;
+      changed = true;
+    }
+    // 图片出现后再找按钮，60s 已足够；保留至少 90s 作安全边界
+    if (!params.buttonTimeout || (params.buttonTimeout as number) < 90_000) {
+      params.buttonTimeout = 90_000;
+      changed = true;
+    }
+    // 修正 menuTriggerSelector 大小写：实际按钮是 "Show more options"（小写 m），
+    // 原 "More options" 因 CSS 属性选择器大小写敏感而无法匹配
+    const correctMenuTrigger = 'button[aria-label="Show more options"], button[aria-label*="更多"]';
+    if (params.menuTriggerSelector !== correctMenuTrigger) {
+      params.menuTriggerSelector = correctMenuTrigger;
+      changed = true;
+    }
+
+    if (!changed) return node;
+    mutated = true;
+    console.warn(
+      '[wf-workflow] Gemini reference workflow: overriding extract_image_download waitImageReady to use generated-image img selector',
+      { workflowId: workflow.id }
+    );
+    return { ...node, params };
+  });
+  return mutated ? { ...workflow, nodes } : workflow;
+}
+
 export interface WorkflowRow {
   id: string;
   name: string;
@@ -186,7 +319,21 @@ export interface WorkflowRow {
 
 export interface ListWorkflowsPageOptions { limit?: number; cursor?: string; page?: number; q?: string; }
 export interface ListWorkflowsPageResult { source: 'supabase'; items: WorkflowRow[]; nextCursor: string | null; page: number; totalPages: number; total: number; }
-function rowToDef(row: WorkflowRow): WorkflowDef { return normalizeGeminiAutoEnterWorkflow(normalizeDouyinPublishWorkflow({ id: row.id, name: row.name, description: row.description, nodes: row.nodes, vars: row.vars })); }
+function rowToDef(row: WorkflowRow): WorkflowDef {
+  return normalizeGeminiExtractDownload(
+    normalizeGeminiReferencePasteOnlyWorkflow(
+      normalizeGeminiAutoEnterWorkflow(
+        normalizeDouyinPublishWorkflow({
+          id: row.id,
+          name: row.name,
+          description: row.description,
+          nodes: row.nodes,
+          vars: row.vars,
+        })
+      )
+    )
+  );
+}
 function assertSupabaseEnabled(): void { if (!SUPABASE_URL.trim() || !SUPABASE_KEY.trim()) throw new Error('工作流配置仅支持 Supabase，请配置 SUPABASE_URL 和 SUPABASE_SERVICE_ROLE_KEY'); }
 function clampLimit(limit?: number): number { return Number.isFinite(limit) ? Math.max(1, Math.min(200, Math.floor(limit as number))) : 50; }
 function clampPage(page?: number): number { return Number.isFinite(page) ? Math.max(1, Math.floor(page as number)) : 1; }

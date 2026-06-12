@@ -3,6 +3,7 @@ import { chromium } from 'playwright';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { validateDouyinSession } from '@/lib/parse/douyin-session';
 import { getPlatformDouyinCookie, hasValidDouyinCookie } from '@/lib/parse/resolve-auth';
 
 const COOKIE_FILE = path.join(process.cwd(), '.douyin-cookie.json');
@@ -30,18 +31,23 @@ function isPublishLocked(): boolean {
 // GET /api/login → 快速返回 Cookie 文件状态（不开浏览器）
 export async function GET() {
   const platformCookie = getPlatformDouyinCookie();
-  const loggedIn = hasValidDouyinCookie(platformCookie);
+  const hasSessionId = hasValidDouyinCookie(platformCookie);
 
-  if (!loggedIn && !fs.existsSync(COOKIE_FILE)) {
+  if (!hasSessionId && !fs.existsSync(COOKIE_FILE)) {
     return NextResponse.json({ loggedIn: false, reason: 'no_cookie_file', hasCookieString: false });
   }
 
   try {
     const stat = fs.existsSync(COOKIE_FILE) ? fs.statSync(COOKIE_FILE) : null;
     const ageHours = stat ? Math.round((Date.now() - stat.mtimeMs) / 3_600_000) : null;
+    let loggedIn = false;
+    if (hasSessionId) {
+      const result = await validateDouyinSession(platformCookie);
+      loggedIn = result.loggedIn;
+    }
     return NextResponse.json({
       loggedIn,
-      hasCookieString: loggedIn,
+      hasCookieString: hasSessionId,
       cookieAgeHours: ageHours,
       updatedAt: stat ? new Date(stat.mtimeMs).toLocaleString('zh-CN') : null,
       updatedAtMs: stat?.mtimeMs ?? null,
@@ -50,7 +56,7 @@ export async function GET() {
         : 'none',
     });
   } catch {
-    return NextResponse.json({ loggedIn: false, reason: 'parse_error', hasCookieString: loggedIn });
+    return NextResponse.json({ loggedIn: false, reason: 'parse_error', hasCookieString: hasSessionId });
   }
 }
 

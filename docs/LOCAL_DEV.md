@@ -1,4 +1,7 @@
-# 本地启动说明
+# 本地启动说明（旧 Mac 环境，已归档）
+
+> **注意**：本文档描述的是旧 Mac 本地开发环境（路径 `/Users/huchangfeng/doouyin`），已不再使用。
+> 当前云端本地开发规范请参考：[docs/CLOUD_LOCAL_DEV.md](./CLOUD_LOCAL_DEV.md)
 
 这份文档只回答三件事：
 

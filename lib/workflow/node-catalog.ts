@@ -795,7 +795,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
     label: '📋 剪贴板高清提取',
     icon: '📋',
     category: 'advanced',
-    desc: '点击页面"复制图片"按钮 → 通过系统剪贴板中转 → 保存原始分辨率 PNG → 上传 OSS。专为 Gemini 等使用 blob: URL 的平台设计，图片质量远优于截图方案',
+    desc: '点击页面"复制图片"按钮 → 通过系统剪贴板中转 → 保存原始分辨率 PNG → 上传 R2。专为 Gemini 等使用 blob: URL 的平台设计，图片质量远优于截图方案',
     defaultParams: {
       copyButtonSelector: '[aria-label="Copy image"]',
       copyButtonTimeout: 60000,
@@ -810,6 +810,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       failFastSelector: '',
       failFastAction: 'skip_node',
       uploadToOSS: true,
+      uploadProvider: 'r2',
       ossPath: 'gemini-images/{{timestamp}}.png',
       outputVar: 'imageUrl',
     },
@@ -859,6 +860,16 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         desc: '是否将图片上传到 OSS（默认 true）',
         type: 'boolean',
         example: 'true',
+      },
+      uploadProvider: {
+        label: '上传服务商',
+        desc: '选择上传的目标服务商：oss = 阿里 OSS，r2 = Cloudflare R2，supabase = Supabase Storage。默认 r2',
+        type: 'select',
+        options: [
+          { label: 'Cloudflare R2', value: 'r2' },
+          { label: '阿里 OSS', value: 'oss' },
+          { label: 'Supabase Storage', value: 'supabase' },
+        ],
       },
       ossPath: {
         label: 'OSS 存储路径',

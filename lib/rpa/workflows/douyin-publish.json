@@ -7,7 +7,7 @@
       "type": "material",
       "label": "素材节点",
       "params": {
-        "materialId": "",
+        "materialId": "1779570770158-zv45",
         "outputTitleVar": "title",
         "outputVideoVar": "videoUrl"
       }
@@ -17,7 +17,9 @@
       "label": "打开创作者首页",
       "params": {
         "url": "https://creator.douyin.com",
-        "waitUntil": "domcontentloaded"
+        "waitUntil": "domcontentloaded",
+        "useAdsPower": true,
+        "adsProfileId": "k1b908rw"
       }
     },
     {

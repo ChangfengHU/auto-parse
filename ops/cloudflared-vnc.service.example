@@ -1,0 +1,18 @@
+[Unit]
+Description=Cloudflare Tunnel for auto-parse noVNC via vyibc.com
+After=network-online.target vnc-websockify.service
+Wants=network-online.target
+Requires=vnc-websockify.service
+
+[Service]
+Type=simple
+User=a01020323900
+Environment=TOKEN_FILE=/home/a01020323900/.secrets/cloudflared-vyibc-vnc-test-token
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run --token-file ${TOKEN_FILE}
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
