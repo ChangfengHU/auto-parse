@@ -27,11 +27,30 @@ except:
     print('')
 " 2>/dev/null)
 
+# 查询 auto-parse pool 中被锁定（正在被 Playwright 使用）的实例，避免 stop 时打断进行中的任务
+PARSE_API="${PARSE_API_URL:-http://127.0.0.1:3007}"
+LOCKED_IDS=$(curl -s --max-time 5 "${PARSE_API}/api/image-generate/ads-pool/status" 2>/dev/null | \
+  python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    locked = [inst['instanceId'] for inst in d.get('instances', []) if inst.get('locked', False)]
+    print(','.join(locked))
+except:
+    print('')
+" 2>/dev/null)
+
 IFS=',' read -ra INSTANCES <<< "$ADS_INSTANCE_POOL_IDS"
 
 for ID in "${INSTANCES[@]}"; do
   ID=$(echo "$ID" | tr -d ' ')
   [ -z "$ID" ] && continue
+
+  # 若实例正被 Playwright 任务锁定，跳过，不能 stop 正在使用中的浏览器
+  if echo ",$LOCKED_IDS," | grep -q ",${ID},"; then
+    echo "[ads-watchdog] $(date -u +%FT%TZ) instance ${ID} is locked (task in progress), skipping"
+    continue
+  fi
 
   # 检查该 ID 是否在真实活跃列表里
   if echo ",$ACTIVE_IDS," | grep -q ",${ID},"; then
