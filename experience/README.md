@@ -10,6 +10,7 @@
 | [cloudflare-api.md](cloudflare-api.md) | CF API Key 认证格式（Global Key vs API Token）、Tunnel 纯 API 创建流程 |
 | [adspower.md](adspower.md) | AdsPower 端口说明、browser/active 缓存坑、浏览器重启标准操作、安装方法 |
 | [linux-disk.md](linux-disk.md) | 云主机磁盘在线扩容、Swap 创建 |
+| [playwright-headless-leak.md](playwright-headless-leak.md) | ⚠️ 天坑：chrome-headless-shell 孤儿进程堆积 → 内存/swap 耗尽 → 生图超时，根因与修复 |
 
 ## 使用原则
 

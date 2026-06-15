@@ -55,6 +55,10 @@ function updateTaskRuntime(
 ) {
   const current = TASK_RUNTIME.get(taskId);
   if (!current) return;
+  // 如果 browser 被替换（placeholder → AdsPower CDP），先关掉旧的 placeholder，防止孤儿 headless 进程堆积
+  if (patch.browser !== undefined && patch.browser !== current.browser && current.browser) {
+    current.browser.close().catch(() => {});
+  }
   if (patch.page !== undefined) current.page = patch.page;
   if (patch.browser !== undefined) current.browser = patch.browser;
   if (patch.closePageOnFinish !== undefined) current.closePageOnFinish = patch.closePageOnFinish;
