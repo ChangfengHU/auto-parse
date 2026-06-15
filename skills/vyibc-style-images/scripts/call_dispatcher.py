@@ -340,6 +340,7 @@ def run_mega_dispatch(runs_with_styles, base_image):
         "workflowId": WORKFLOW_ID,
         "maxAttemptsPerPrompt": 6,
         "optimizePromptOnRetry": True,
+        "autoCloseTab": True,
         "force": FORCE_DISPATCH,
         "forceReason": "vyibc-style-images"
     }
