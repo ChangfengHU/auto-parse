@@ -340,7 +340,7 @@ function HistoricalAttempt({ attemptIndex, batchTaskId }: { attemptIndex: number
           <div className="text-red-400 break-all">{detail.error}</div>
         )}
         {detail?.completedAt && (
-          <div className="text-muted-foreground">结束：{formatTime(detail.completedAt)}</div>
+          <div className="text-muted-foreground">结束：{formatTime(new Date(detail.completedAt).toISOString())}</div>
         )}
       </div>
     </div>
