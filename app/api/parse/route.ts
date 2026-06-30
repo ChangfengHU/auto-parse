@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { parseDouyin, parseDouyinFast } from '@/lib/parsers/douyin';
 import { fetchXhsPost } from '@/lib/analysis/xhs-fetch';
+import { parseWechat } from '@/lib/parsers/wechat-playwright';
+import { publishWechatHtml } from '@/lib/wechat-html-publisher';
 import { uploadVideoFromUrl, uploadFromFile, type UploadTargetOptions } from '@/lib/oss';
 import { addMaterial } from '@/lib/materials';
 import { resolveDouyinCookieForParse, getPlatformDouyinCookie, hasValidDouyinCookie } from '@/lib/parse/resolve-auth';
@@ -9,9 +11,21 @@ import { DEFAULT_PARSE_EXPORT_CONFIG } from '@/lib/parse/types';
 
 export const maxDuration = 600;
 
+function hasSupabaseUploadConfig(): boolean {
+  return Boolean(
+    (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL) &&
+      (process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        process.env.SUPABASE_ANON_KEY ||
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)
+  );
+}
+
 function mergeExportConfig(partial?: ParseRequestOptions['export']): ParseExportConfig {
+  const requestedProvider = partial?.provider ?? DEFAULT_PARSE_EXPORT_CONFIG.provider;
+  const provider = requestedProvider === 'supabase' && !hasSupabaseUploadConfig() ? 'r2' : requestedProvider;
+
   return {
-    provider: partial?.provider ?? DEFAULT_PARSE_EXPORT_CONFIG.provider,
+    provider,
     r2: {
       ...DEFAULT_PARSE_EXPORT_CONFIG.r2,
       ...(partial?.r2 ?? {}),
@@ -32,10 +46,12 @@ export async function POST(req: NextRequest) {
       url.includes('v.douyin.com') || url.includes('douyin.com') || url.includes('iesdouyin.com');
     const isXhs =
       url.includes('xiaohongshu.com') || url.includes('xhslink.com');
+    const isWechat =
+      url.includes('weixin.qq.com/sph/') || url.includes('channels.weixin.qq.com') || url.includes('mp.weixin.qq.com/s/');
 
-    if (!isDouyin && !isXhs) {
+    if (!isDouyin && !isXhs && !isWechat) {
       return NextResponse.json(
-        { error: '暂不支持该平台，目前支持抖音、小红书' },
+        { error: '暂不支持该平台，目前支持抖音、小红书、微信视频号/公众号' },
         { status: 400 }
       );
     }
@@ -104,6 +120,19 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    if (isWechat) {
+      const parsed = await parseWechat(url);
+      const published = await publishWechatHtml(parsed, exportConfig.r2);
+      return NextResponse.json({
+        ...parsed,
+        htmlUrl: published.htmlUrl,
+        coverOssUrl: published.coverOssUrl,
+        images: published.images,
+        imageCount: published.images.length,
+        uploadProvider: 'r2',
+      });
+    }
+
     const { cookieStr, source: authSource } = await resolveDouyinCookieForParse(authOpt);
     uploadTarget.downloadCookie = cookieStr ?? undefined;
 
@@ -132,10 +161,22 @@ export async function POST(req: NextRequest) {
     const result = {
       success: true,
       platform: parsed.platform,
+      mediaType: 'video' as const,
       videoId: parsed.videoId,
       title: parsed.title ?? '',
+      desc: parsed.desc ?? parsed.title ?? '',
       videoUrl: parsed.videoUrl,
       ossUrl,
+      coverUrl: parsed.coverUrl ?? '',
+      cover: parsed.cover,
+      author: parsed.author,
+      music: parsed.music,
+      statistics: parsed.statistics,
+      hashtags: parsed.hashtags ?? [],
+      mentions: parsed.mentions ?? [],
+      createTime: parsed.createTime,
+      shareUrl: parsed.shareUrl ?? '',
+      videoMeta: parsed.videoMeta,
       watermark: (parsed as { watermark?: boolean }).watermark ?? watermark,
       uploadProvider: exportConfig.provider,
       authSource,

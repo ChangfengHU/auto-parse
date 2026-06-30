@@ -4,6 +4,18 @@ import fs from 'fs';
 import path from 'path';
 
 const COOKIE_FILE = path.join(process.cwd(), '.douyin-cookie.json');
+const CHROME_CANDIDATES = [
+  process.env.PLAYWRIGHT_CHROME_EXECUTABLE_PATH,
+  process.env.CHROME_EXECUTABLE_PATH,
+  '/opt/google/chrome/chrome',
+  '/usr/bin/google-chrome',
+  '/usr/bin/chromium-browser',
+  '/usr/bin/chromium',
+].filter(Boolean) as string[];
+
+function resolveChromeExecutablePath(): string | undefined {
+  return CHROME_CANDIDATES.find((candidate) => fs.existsSync(candidate));
+}
 
 function parseCookies(cookieStr: string) {
   return cookieStr.split(';').map(c => {
@@ -114,12 +126,105 @@ async function resolveDouyinPlayUrl(url: string, cookieStrOverride?: string): Pr
   return res.headers.location || url;
 }
 
-export async function parseDouyinWithPlaywright(videoId: string, cookieStrOverride?: string): Promise<{
+function firstUrl(value: unknown): string {
+  const item = value as { url_list?: string[]; uri?: string } | undefined;
+  return item?.url_list?.find((url) => typeof url === 'string' && url.startsWith('http')) || item?.uri || '';
+}
+
+function normalizeCount(value: unknown): number {
+  const num = Number(value ?? 0);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeTextExtras(value: unknown) {
+  return ((Array.isArray(value) ? value : []) as Array<Record<string, unknown>>)
+    .map((item) => ({
+      hashtagName: String(item.hashtag_name || '').trim(),
+      userId: String(item.user_id || '').trim(),
+      secUid: String(item.sec_uid || '').trim(),
+      type: Number(item.type ?? 0),
+      start: Number(item.start ?? 0),
+      end: Number(item.end ?? 0),
+    }))
+    .filter((item) => item.hashtagName || item.userId || item.secUid);
+}
+
+function normalizeAwemeDetail(detail: Record<string, unknown>, selectedVideoUrl: string, watermark: boolean) {
+  const video = (detail.video || {}) as Record<string, unknown>;
+  const author = (detail.author || {}) as Record<string, unknown>;
+  const music = (detail.music || {}) as Record<string, unknown>;
+  const statistics = (detail.statistics || {}) as Record<string, unknown>;
+  const textExtra = normalizeTextExtras(detail.text_extra);
+  const bitRate = ((Array.isArray(video.bit_rate) ? video.bit_rate : []) as Array<Record<string, unknown>>)[0] || {};
+
+  return {
+    desc: String(detail.desc || ''),
+    createTime: Number(detail.create_time ?? 0) || undefined,
+    shareUrl: String(detail.share_url || ''),
+    coverUrl: firstUrl(video.cover) || firstUrl(video.origin_cover) || firstUrl(video.dynamic_cover),
+    cover: {
+      url: firstUrl(video.cover),
+      originUrl: firstUrl(video.origin_cover),
+      dynamicUrl: firstUrl(video.dynamic_cover),
+    },
+    author: {
+      id: String(author.uid || ''),
+      secUid: String(author.sec_uid || ''),
+      shortId: String(author.short_id || ''),
+      uniqueId: String(author.unique_id || ''),
+      nickname: String(author.nickname || ''),
+      signature: String(author.signature || ''),
+      avatarUrl: firstUrl(author.avatar_medium) || firstUrl(author.avatar_thumb) || firstUrl(author.avatar_larger),
+      profileUrl: author.sec_uid ? 'https://www.douyin.com/user/' + String(author.sec_uid) : '',
+      followerCount: normalizeCount(author.follower_count),
+      totalFavorited: normalizeCount(author.total_favorited),
+    },
+    music: {
+      id: String(music.id_str || music.mid || ''),
+      title: String(music.title || ''),
+      author: String(music.author || ''),
+      ownerNickname: String(music.owner_nickname || ''),
+      duration: normalizeCount(music.duration),
+      coverUrl: firstUrl(music.cover_medium) || firstUrl(music.cover_thumb) || firstUrl(music.cover_large),
+      playUrl: firstUrl(music.play_url),
+    },
+    statistics: {
+      diggCount: normalizeCount(statistics.digg_count),
+      commentCount: normalizeCount(statistics.comment_count),
+      collectCount: normalizeCount(statistics.collect_count),
+      shareCount: normalizeCount(statistics.share_count),
+      playCount: normalizeCount(statistics.play_count),
+    },
+    hashtags: textExtra.map((item) => item.hashtagName).filter(Boolean),
+    mentions: textExtra.filter((item) => item.userId || item.secUid).map((item) => ({
+      userId: item.userId,
+      secUid: item.secUid,
+    })),
+    videoMeta: {
+      duration: normalizeCount(video.duration) || normalizeCount(detail.duration),
+      width: normalizeCount(video.width),
+      height: normalizeCount(video.height),
+      ratio: String(video.ratio || ''),
+      bitrate: normalizeCount(bitRate.bit_rate),
+      qualityType: normalizeCount(bitRate.quality_type),
+      format: selectedVideoUrl.includes('mime_type=video_mp4') || selectedVideoUrl.includes('.mp4') ? 'mp4' : '',
+      selectedUrlWatermark: watermark,
+    },
+    rawAwemeId: String(detail.aweme_id || ''),
+  };
+}
+
+export async function parseDouyinWithPlaywright(videoId: string, cookieStrOverride?: string): Promise<Record<string, unknown> & {
   videoUrl: string;
   title: string;
   watermark: boolean;
 }> {
-  const browser = await chromium.launch({ headless: true });
+  const executablePath = resolveChromeExecutablePath();
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath,
+    args: ['--no-sandbox', '--disable-dev-shm-usage'],
+  });
   try {
     const context = await browser.newContext({
       userAgent:
@@ -136,42 +241,68 @@ export async function parseDouyinWithPlaywright(videoId: string, cookieStrOverri
 
     const result = await new Promise<{ videoUrl: string; title: string; watermark: boolean }>(
       async (resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('Playwright 超时（60s）')), 60000);
+        let settled = false;
+        const timer = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            reject(new Error('Playwright 超时（60s）'));
+          }
+        }, 60000);
+
+        const finishFromDetail = async (detail: any) => {
+          if (settled) return;
+          const video = detail?.video;
+          if (!video) return;
+
+          const title: string = detail.desc ?? '';
+          const suffixIds = extractSuffixLogoFileIds(video);
+          let videoUrl = pickBestVideoUrl(video);
+          if (!videoUrl) return;
+
+          videoUrl = await resolveDouyinPlayUrl(videoUrl, cookieStrOverride);
+          const usedExplicitWm = isExplicitWatermarkedUrl(videoUrl, suffixIds);
+          // video.has_watermark describes Douyin's video metadata, not the specific CDN URL we selected.
+          // Treat the selected direct URL as no-watermark unless it is an explicit watermark/suffix-logo URL.
+          const watermark = usedExplicitWm;
+
+          settled = true;
+          clearTimeout(timer);
+          resolve({ videoUrl, title, watermark, ...normalizeAwemeDetail(detail, videoUrl, watermark) });
+        };
 
         page.on('response', async resp => {
           if (!resp.url().includes('/aweme/v1/web/aweme/detail/')) return;
           try {
             const json = await resp.json();
-            const detail = json?.aweme_detail;
-            const video = detail?.video;
-            if (!video) return;
-
-            const title: string = detail.desc ?? '';
-            const suffixIds = extractSuffixLogoFileIds(video);
-            let videoUrl = pickBestVideoUrl(video);
-
-            if (!videoUrl) return;
-
-            clearTimeout(timer);
-            videoUrl = await resolveDouyinPlayUrl(videoUrl, cookieStrOverride);
-
-            const hasPlatformWatermark = !!video.has_watermark;
-            const usedExplicitWm = isExplicitWatermarkedUrl(videoUrl, suffixIds);
-            const watermark = hasPlatformWatermark || usedExplicitWm;
-
-            resolve({ videoUrl, title, watermark });
+            await finishFromDetail(json?.aweme_detail);
           } catch { /* ignore */ }
         });
 
         try {
           await page.goto(`https://www.douyin.com/video/${videoId}`, {
-            waitUntil: 'load',
+            waitUntil: 'domcontentloaded',
             timeout: 50000,
           });
         } catch { /* load timeout ok */ }
 
-        await page.waitForTimeout(5000).catch(() => {});
-        reject(new Error('Playwright 未捕获到视频地址'));
+        await page.waitForTimeout(3000).catch(() => {});
+
+        try {
+          const json = await page.evaluate(async (id) => {
+            const res = await fetch(`/aweme/v1/web/aweme/detail/?aweme_id=${id}&aid=6383&device_platform=webapp`, {
+              credentials: 'include',
+            });
+            return await res.json();
+          }, videoId);
+          await finishFromDetail(json?.aweme_detail);
+        } catch { /* active fetch fallback failed; keep waiting for network response */ }
+
+        await page.waitForTimeout(20000).catch(() => {});
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          reject(new Error('Playwright 未捕获到视频地址'));
+        }
       }
     );
 

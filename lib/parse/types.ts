@@ -36,7 +36,7 @@ export const DEFAULT_R2_CONFIG: ParseR2Config = {
 };
 
 export const DEFAULT_PARSE_EXPORT_CONFIG: ParseExportConfig = {
-  provider: 'supabase',
+  provider: 'r2',
   r2: { ...DEFAULT_R2_CONFIG },
 };
 

@@ -9,6 +9,17 @@ export interface ParseResult {
   videoId: string;
   videoUrl: string;
   title?: string;
+  desc?: string;
+  coverUrl?: string;
+  createTime?: number;
+  shareUrl?: string;
+  cover?: unknown;
+  author?: unknown;
+  music?: unknown;
+  statistics?: unknown;
+  hashtags?: string[];
+  mentions?: unknown[];
+  videoMeta?: unknown;
   watermark: boolean;
 }
 
@@ -40,8 +51,8 @@ export async function parseDouyin(input: string, options: ParseDouyinOptions = {
   // 优先：用 Playwright 打开页面，注入 Cookie，拦截真实视频地址（无水印）
   if (videoId && hasDouyinAuth(cookieStr)) {
     try {
-      const { videoUrl, title, watermark } = await parseDouyinWithPlaywright(videoId, cookieStr);
-      return { platform: 'douyin', videoId, videoUrl, title, watermark };
+      const detail = await parseDouyinWithPlaywright(videoId, cookieStr);
+      return { platform: 'douyin', videoId, ...detail };
     } catch (e) {
       console.warn('[douyin] Playwright 失败，降级走 playwm:', e instanceof Error ? e.message : e);
     }

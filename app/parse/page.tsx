@@ -33,6 +33,54 @@ interface XhsImageResult {
   height?: number;
 }
 
+interface DouyinAuthor {
+  id?: string;
+  secUid?: string;
+  shortId?: string;
+  uniqueId?: string;
+  nickname?: string;
+  signature?: string;
+  avatarUrl?: string;
+  profileUrl?: string;
+  followerCount?: number;
+  totalFavorited?: number;
+}
+
+interface DouyinMusic {
+  id?: string;
+  title?: string;
+  author?: string;
+  ownerNickname?: string;
+  duration?: number;
+  coverUrl?: string;
+  playUrl?: string;
+}
+
+interface DouyinCover {
+  url?: string;
+  originUrl?: string;
+  dynamicUrl?: string;
+}
+
+interface DouyinStatistics {
+  diggCount?: number;
+  commentCount?: number;
+  collectCount?: number;
+  shareCount?: number;
+  playCount?: number;
+}
+
+interface DouyinVideoMeta {
+  duration?: number;
+  width?: number;
+  height?: number;
+  ratio?: string;
+  bitrate?: number;
+  qualityType?: number;
+  format?: string;
+  selectedUrlWatermark?: boolean;
+}
+
 interface XhsNoteData {
   noteId: string;
   postUrl: string;
@@ -70,6 +118,15 @@ interface Result {
   videoUrl: string;
   ossUrl: string;
   coverUrl?: string;
+  cover?: DouyinCover;
+  author?: DouyinAuthor;
+  music?: DouyinMusic;
+  statistics?: DouyinStatistics;
+  hashtags?: string[];
+  mentions?: Array<{ userId?: string; secUid?: string }>;
+  createTime?: number;
+  shareUrl?: string;
+  videoMeta?: DouyinVideoMeta;
   images?: XhsImageResult[];
   imageCount?: number;
   liveCount?: number;
@@ -80,6 +137,16 @@ interface Result {
   authSource?: string;
   hasLogin?: boolean;
   noteData?: XhsNoteData;
+  sourceType?: string;
+  originalUrl?: string;
+  resolvedUrl?: string;
+  publishTime?: string;
+  text?: string;
+  stats?: Record<string, number>;
+  links?: Array<{ index: number; text: string; href: string }>;
+  captchaSuspected?: boolean;
+  htmlUrl?: string;
+  coverOssUrl?: string;
 }
 
 type ContentSaveProgress = {
@@ -98,10 +165,11 @@ type ContentSaveProgress = {
 
 const STEPS = ['解析链接', '提取作品数据', '整理媒体资源', '生成预览'];
 
-function detectPlatform(input: string): 'douyin' | 'xiaohongshu' | 'tiktok' | null {
+function detectPlatform(input: string): 'douyin' | 'xiaohongshu' | 'tiktok' | 'wechat' | null {
   if (input.includes('douyin.com') || input.includes('v.douyin.com')) return 'douyin';
   if (input.includes('xiaohongshu.com') || input.includes('xhslink.com')) return 'xiaohongshu';
   if (input.includes('tiktok.com') || input.includes('vm.tiktok.com')) return 'tiktok';
+  if (input.includes('weixin.qq.com') || input.includes('mp.weixin.qq.com') || input.includes('channels.weixin.qq.com')) return 'wechat';
   return null;
 }
 
@@ -116,6 +184,23 @@ function formatStat(value: number | undefined) {
   const num = Number(value ?? 0);
   if (Math.abs(num) >= 10000) return `${(num / 10000).toFixed(1)}w`;
   return String(num);
+}
+
+function formatDurationMs(value: number | undefined) {
+  const totalSeconds = Math.max(0, Math.round(Number(value ?? 0) / 1000));
+  if (!totalSeconds) return '-';
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return String(minutes) + ':' + String(seconds).padStart(2, '0');
+}
+
+function formatUnixTime(value: number | undefined) {
+  if (!value) return '-';
+  return new Date(value * 1000).toLocaleString('zh-CN');
+}
+
+function firstNonEmpty(...values: Array<string | undefined>) {
+  return values.find((value) => value && value.trim()) || '';
 }
 
 function extractShareFlag(shareInfo: unknown) {
@@ -246,7 +331,7 @@ export default function ParsePage() {
   async function handleParse() {
     if (!input.trim() || loading) return;
     const platform = detectPlatform(input);
-    if (!platform) { setError('请输入有效的抖音、小红书或TikTok分享链接'); return; }
+    if (!platform) { setError('请输入有效的抖音、小红书、TikTok 或微信分享链接'); return; }
     setLoading(true); setError(''); setResult(null); setStep(0); setSaveMessage(''); setSavedContentId(''); setContentSaveProgress(null);
     const t1 = setTimeout(() => setStep(1), 800);
     const t2 = setTimeout(() => setStep(2), 2000);
@@ -586,6 +671,238 @@ export default function ParsePage() {
     );
   };
 
+  const renderWechatResult = (data: Result) => {
+    const stats = data.stats || {};
+    const images = data.images || [];
+    const links = data.links || [];
+    const authorName = data.author?.nickname || data.author?.id || '未知作者';
+    const isChannels = data.sourceType === 'channels';
+
+    return (
+      <div className="mt-5 bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+        <div className="p-4 border-b border-border flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold">{isChannels ? '微信视频号详情' : '微信公众号文章详情'}</div>
+          <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-semibold">已解析</span>
+        </div>
+        <div className="p-4 space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-4">
+            {data.coverUrl ? (
+              <a href={data.coverUrl} target="_blank" rel="noopener noreferrer" className="rounded-xl overflow-hidden border border-border bg-muted block">
+                <img src={data.coverUrl} alt={data.title} className="w-full aspect-video object-cover" loading="lazy" />
+              </a>
+            ) : <div className="rounded-xl border border-border bg-muted aspect-video" />}
+            <div className="space-y-3 min-w-0">
+              <div className="text-base font-bold leading-relaxed">{data.title || '无标题'}</div>
+              <div className="text-xs text-muted-foreground">{authorName}{data.publishTime ? ' · ' + data.publishTime : ''}</div>
+              {data.desc && <div className="rounded-xl bg-muted/30 p-3 text-sm text-muted-foreground leading-relaxed">{data.desc}</div>}
+              {isChannels && (
+                <div className="grid grid-cols-4 gap-2">
+                  <StatCard value={stats.likeCount ?? 0} label="点赞" />
+                  <StatCard value={stats.commentCount ?? 0} label="评论" />
+                  <StatCard value={stats.shareCount ?? 0} label="分享" />
+                  <StatCard value={stats.collectCount ?? 0} label="收藏" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          {data.text && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">正文</div>
+                <button onClick={() => copy(data.text || '', 'wechat-text')} className="px-2 py-0.5 rounded border border-border text-[10px]">{copied === 'wechat-text' ? '已复制' : '复制正文'}</button>
+              </div>
+              <div className="rounded-xl bg-muted/30 p-3 text-xs text-muted-foreground leading-relaxed whitespace-pre-line max-h-80 overflow-auto">{data.text}</div>
+            </div>
+          )}
+
+          {images.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">图片资源 · {images.length} 张</div>
+                <button onClick={() => copy(images.map((image) => image.originalUrl || image.previewUrl).join('\n'), 'wechat-images')} className="px-2 py-0.5 rounded border border-border text-[10px]">{copied === 'wechat-images' ? '已复制' : '复制图片'}</button>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {images.slice(0, 12).map((image) => (
+                  <a key={image.index} href={image.originalUrl || image.previewUrl} target="_blank" rel="noopener noreferrer" className="rounded-xl overflow-hidden border border-border bg-muted">
+                    <img src={image.originalUrl || image.previewUrl} alt={'wechat-image-' + image.index} className="w-full aspect-square object-cover" loading="lazy" />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">链接</div>
+            {[
+              ['图文 HTML', data.htmlUrl || '', 'wechat-html'],
+              ['原始链接', data.originalUrl || '', 'wechat-original'],
+              ['解析后链接', data.resolvedUrl || '', 'wechat-resolved'],
+              ['R2 封面', data.coverOssUrl || '', 'wechat-cover-oss'],
+              ['封面', data.coverUrl || '', 'wechat-cover'],
+            ].filter((item) => item[1]).map(([label, url, key]) => (
+              <div key={key} className="flex items-center gap-2 bg-muted rounded-lg p-2.5">
+                <span className="w-20 text-[11px] text-muted-foreground flex-shrink-0">{label}</span>
+                <span className="text-xs text-blue-500 flex-1 truncate font-mono">{url}</span>
+                <button onClick={() => copy(url, key)} className="flex-shrink-0 px-2.5 py-1 bg-background border border-border hover:bg-muted rounded text-xs transition-colors shadow-sm">{copied === key ? '已复制' : '复制'}</button>
+              </div>
+            ))}
+          </div>
+
+          {links.length > 0 && (
+            <div className="text-xs text-muted-foreground">正文链接：{links.length} 个</div>
+          )}
+
+          <div className="flex gap-2 pt-1 flex-wrap">
+            {data.htmlUrl && <a href={data.htmlUrl} target="_blank" rel="noopener noreferrer" className="flex-1 py-2 bg-primary text-white hover:bg-primary/90 rounded-lg text-xs font-semibold text-center transition-all shadow-md shadow-primary/10">打开图文 HTML</a>}
+            <button onClick={() => copy(JSON.stringify(data, null, 2), 'wechat-json')} className="flex-1 py-2 bg-muted border border-border hover:bg-border/50 rounded-lg text-xs font-semibold text-center text-foreground transition-all">{copied === 'wechat-json' ? '已复制' : '复制 JSON'}</button>
+            <button onClick={() => { setResult(null); setError(''); setStep(-1); }} className="flex-1 py-2 text-muted-foreground hover:text-foreground text-xs transition-colors">重新解析</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderDouyinResult = (data: Result) => {
+    const author = data.author;
+    const music = data.music;
+    const stats = data.statistics;
+    const meta = data.videoMeta;
+    const coverUrl = firstNonEmpty(data.coverUrl, data.cover?.originUrl, data.cover?.url, data.cover?.dynamicUrl);
+    const authorName = author?.nickname || '未知作者';
+    const authorId = firstNonEmpty(author?.uniqueId, author?.shortId, author?.id);
+    const musicTitle = music?.title || '';
+
+    return (
+      <div className="mt-5 bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
+        <div className="p-4 border-b border-border flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold">抖音作品详情</div>
+          <span className="px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-[10px] font-semibold">
+            {data.watermark === false ? '无水印' : data.watermark ? '有水印' : '已解析'} · {providerLabel((data.uploadProvider as ParseExportConfig['provider']) ?? exportConfig.provider)}
+          </span>
+        </div>
+
+        <div className="p-4 space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] gap-4">
+            <div className="rounded-xl overflow-hidden bg-black border border-border">
+              <video src={data.ossUrl || data.videoUrl} poster={coverUrl || undefined} controls playsInline className="w-full max-h-[560px] object-contain" preload="metadata" />
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 rounded-xl bg-muted/40 p-3">
+                {author?.avatarUrl && <img src={author.avatarUrl} alt={authorName} className="h-12 w-12 rounded-full object-cover border border-border" />}
+                <div className="min-w-0 flex-1">
+                  <div className="font-bold text-sm truncate">{authorName}</div>
+                  <div className="text-[11px] text-muted-foreground truncate">{authorId || data.videoId}</div>
+                  {author?.signature && <div className="text-[11px] text-muted-foreground truncate mt-0.5">{author.signature}</div>}
+                </div>
+                {author?.profileUrl && (
+                  <a href={author.profileUrl} target="_blank" rel="noopener noreferrer" className="px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-semibold">主页</a>
+                )}
+              </div>
+
+              <div className="grid grid-cols-4 gap-2">
+                <StatCard value={stats?.diggCount ?? 0} label="点赞" />
+                <StatCard value={stats?.collectCount ?? 0} label="收藏" />
+                <StatCard value={stats?.commentCount ?? 0} label="评论" />
+                <StatCard value={stats?.shareCount ?? 0} label="分享" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-lg bg-muted/30 p-2"><span className="text-muted-foreground">作品ID：</span>{data.videoId}</div>
+                <div className="rounded-lg bg-muted/30 p-2"><span className="text-muted-foreground">发布时间：</span>{formatUnixTime(data.createTime)}</div>
+                <div className="rounded-lg bg-muted/30 p-2"><span className="text-muted-foreground">时长：</span>{formatDurationMs(meta?.duration)}</div>
+                <div className="rounded-lg bg-muted/30 p-2"><span className="text-muted-foreground">尺寸：</span>{meta?.width && meta?.height ? String(meta.width) + 'x' + String(meta.height) : '-'}</div>
+                <div className="rounded-lg bg-muted/30 p-2"><span className="text-muted-foreground">码率：</span>{meta?.bitrate ? String(meta.bitrate) : '-'}</div>
+                <div className="rounded-lg bg-muted/30 p-2"><span className="text-muted-foreground">格式：</span>{meta?.format || '-'}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">标题 / 正文</div>
+              <button onClick={() => copy(data.desc || data.title || '', 'dy-desc')} className="px-2 py-0.5 rounded border border-border text-[10px]">
+                {copied === 'dy-desc' ? '已复制' : '复制'}
+              </button>
+            </div>
+            <div className="rounded-xl bg-muted/30 p-3 text-sm leading-relaxed whitespace-pre-line">{data.desc || data.title || '无正文'}</div>
+          </div>
+
+          {data.hashtags && data.hashtags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {data.hashtags.map((tag) => (
+                <span key={tag} className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 dark:bg-rose-950/30 dark:text-rose-300 text-[11px]">#{tag}</span>
+              ))}
+            </div>
+          )}
+
+          {coverUrl && (
+            <div className="grid grid-cols-1 sm:grid-cols-[180px_minmax(0,1fr)] gap-3 rounded-xl border border-border bg-muted/20 p-3">
+              <a href={coverUrl} target="_blank" rel="noopener noreferrer" className="rounded-lg overflow-hidden bg-black border border-border">
+                <img src={coverUrl} alt="douyin-cover" className="w-full aspect-video object-cover" loading="lazy" />
+              </a>
+              <div className="min-w-0 space-y-2">
+                <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">封面资源</div>
+                <div className="flex items-center gap-2 rounded-lg bg-background p-2">
+                  <span className="text-xs text-blue-500 font-mono truncate flex-1">{coverUrl}</span>
+                  <button onClick={() => copy(coverUrl, 'dy-cover')} className="px-2 py-1 rounded bg-muted border border-border text-xs">{copied === 'dy-cover' ? '已复制' : '复制'}</button>
+                </div>
+                {data.cover?.dynamicUrl && <a href={data.cover.dynamicUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-primary font-semibold">打开动态封面</a>}
+              </div>
+            </div>
+          )}
+
+          {(musicTitle || music?.playUrl || music?.coverUrl) && (
+            <div className="grid grid-cols-1 sm:grid-cols-[72px_minmax(0,1fr)] gap-3 rounded-xl border border-border bg-muted/20 p-3">
+              {music?.coverUrl && <img src={music.coverUrl} alt={musicTitle} className="h-16 w-16 rounded-lg object-cover border border-border" />}
+              <div className="min-w-0 space-y-2">
+                <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">音乐</div>
+                <div className="text-sm font-semibold truncate">{musicTitle || '未知音乐'}</div>
+                <div className="text-xs text-muted-foreground truncate">{firstNonEmpty(music?.author, music?.ownerNickname)} · {formatDurationMs((music?.duration ?? 0) * 1000)}</div>
+                {music?.playUrl && (
+                  <div className="space-y-2">
+                    <audio src={music.playUrl} controls preload="none" className="w-full h-9" />
+                    <div className="flex items-center gap-2 rounded-lg bg-background p-2">
+                      <span className="text-xs text-blue-500 font-mono truncate flex-1">{music.playUrl}</span>
+                      <button onClick={() => copy(music.playUrl || '', 'dy-music')} className="px-2 py-1 rounded bg-muted border border-border text-xs">{copied === 'dy-music' ? '已复制' : '复制'}</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">资源地址</div>
+            {[
+              ['R2 视频', data.ossUrl, 'dy-oss'],
+              ['原始视频', data.videoUrl, 'dy-video'],
+              ['分享链接', data.shareUrl || '', 'dy-share'],
+            ].filter((item) => item[1]).map(([label, url, key]) => (
+              <div key={key} className="flex items-center gap-2 bg-muted rounded-lg p-2.5">
+                <span className="w-16 text-[11px] text-muted-foreground flex-shrink-0">{label}</span>
+                <span className="text-xs text-blue-500 flex-1 truncate font-mono">{url}</span>
+                <button onClick={() => copy(url, key)} className="flex-shrink-0 px-2.5 py-1 bg-background border border-border hover:bg-muted rounded text-xs transition-colors shadow-sm">
+                  {copied === key ? '已复制' : '复制'}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex gap-2 pt-1 flex-wrap">
+            <a href={data.ossUrl} download target="_blank" rel="noopener noreferrer" className="flex-1 py-2 bg-primary text-white hover:bg-primary/90 rounded-lg text-xs font-semibold text-center transition-all shadow-md shadow-primary/10">下载视频</a>
+            <button onClick={() => copy(JSON.stringify(data, null, 2), 'dy-json')} className="flex-1 py-2 bg-muted border border-border hover:bg-border/50 rounded-lg text-xs font-semibold text-center text-foreground transition-all">
+              {copied === 'dy-json' ? '已复制' : '复制 JSON'}
+            </button>
+            <a href="/publish" className="flex-1 py-2 bg-muted border border-border hover:bg-border/50 rounded-lg text-xs font-semibold text-center text-foreground transition-all">去发布</a>
+            <button onClick={() => { setResult(null); setError(''); setStep(-1); }} className="flex-1 py-2 text-muted-foreground hover:text-foreground text-xs transition-colors">重新解析</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   function handleSaveConfig(nextExport: ParseExportConfig, nextAuth: ParseAuthConfig) {
     saveParseConfigs(nextExport, nextAuth);
     setExportConfig(nextExport);
@@ -729,7 +1046,7 @@ export default function ParsePage() {
 
       {/* Result */}
       {result && (
-        result.platform === 'xiaohongshu' && result.noteData ? renderXhsResult(result) : (
+        result.platform === 'xiaohongshu' && result.noteData ? renderXhsResult(result) : result.platform === 'douyin' ? renderDouyinResult(result) : result.platform === 'wechat' ? renderWechatResult(result) : (
         <div className="mt-5 bg-card border border-border rounded-xl p-4 space-y-4 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs text-muted-foreground">ID: {result.videoId}</span>
