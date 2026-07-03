@@ -122,9 +122,18 @@ export async function POST(req: NextRequest) {
 
     if (isWechat) {
       const parsed = await parseWechat(url);
+      let ossUrl = '';
+      const sourceVideoUrl = (parsed as { videoUrl?: string }).videoUrl;
+      if (parsed.sourceType === 'channels' && sourceVideoUrl) {
+        const videoId = (parsed as { dynamicExportId?: string }).dynamicExportId
+          ? String((parsed as { dynamicExportId?: string }).dynamicExportId).split('/').pop()
+          : `wechat-${Date.now()}`;
+        ossUrl = await uploadVideoFromUrl(sourceVideoUrl, `wechat/${videoId}.mp4`, uploadTarget);
+      }
       const published = await publishWechatHtml(parsed, exportConfig.r2);
       return NextResponse.json({
         ...parsed,
+        ossUrl,
         htmlUrl: published.htmlUrl,
         coverOssUrl: published.coverOssUrl,
         images: published.images,

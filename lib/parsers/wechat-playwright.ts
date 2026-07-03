@@ -27,6 +27,27 @@ function parseNumber(value: string | undefined) {
   return Number.isFinite(num) ? num : 0;
 }
 
+function pickVideoUrl(feedInfo: Record<string, any> | undefined) {
+  if (!feedInfo) return '';
+  return feedInfo.h264VideoInfo?.videoUrl
+    || feedInfo.h265VideoInfo?.videoUrl
+    || feedInfo.videoUrl
+    || '';
+}
+
+function pickVideoMeta(feedInfo: Record<string, any> | undefined) {
+  if (!feedInfo) return {};
+  return {
+    h264VideoInfo: feedInfo.h264VideoInfo,
+    h265VideoInfo: feedInfo.h265VideoInfo,
+    videoUrl: feedInfo.videoUrl,
+    mediaType: feedInfo.mediaType,
+    duration: feedInfo.duration,
+    width: feedInfo.width,
+    height: feedInfo.height,
+  };
+}
+
 export async function parseWechat(inputUrl: string) {
   const executablePath = resolveChromeExecutablePath();
   const browser = await chromium.launch({
@@ -44,7 +65,7 @@ export async function parseWechat(inputUrl: string) {
     const resp = await page.goto(inputUrl, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => null);
     await page.waitForTimeout(5000).catch(() => {});
 
-    return await page.evaluate(({ inputUrl, status }) => {
+    const parsed = await page.evaluate(({ inputUrl, status }) => {
       const normalize = (url: string) => {
         if (!url) return '';
         if (url.startsWith('//')) return 'https:' + url;
@@ -140,7 +161,52 @@ export async function parseWechat(inputUrl: string) {
         captchaSuspected: /wappoc|captcha/i.test(location.href) || /验证|环境异常|继续访问/.test(text(document.body)),
       };
     }, { inputUrl, status: resp?.status() || 0 });
+
+    if (parsed?.sourceType === 'channels') {
+      const sceneInfo = await getChannelsSceneInfo(page);
+      const feedInfo = sceneInfo?.dynamicExportId
+        ? await getChannelsFeedInfo(page, sceneInfo.dynamicExportId)
+        : null;
+      const videoUrl = pickVideoUrl(feedInfo);
+      return {
+        ...parsed,
+        sceneInfo: sceneInfo ?? undefined,
+        dynamicExportId: sceneInfo?.dynamicExportId,
+        videoUrl,
+        videoMeta: pickVideoMeta(feedInfo ?? undefined),
+        feedUnavailableReason: !videoUrl ? feedInfo?.errMsg?.title || feedInfo?.errMsg || undefined : undefined,
+      };
+    }
+
+    return parsed;
   } finally {
     await browser.close().catch(() => {});
   }
+}
+
+async function getChannelsSceneInfo(page: import('playwright').Page) {
+  return await page.evaluate(async () => {
+    const params = new URLSearchParams(location.search);
+    const shortUri = params.get('id') || location.href.split('/sph/')[1]?.split(/[?#]/)[0] || '';
+    if (!shortUri) return null;
+    const resp = await fetch('/finder-preview/api/feed/get_feed_info?_rid=auto_parse_sph&_pageUrl=https:%2F%2Fchannels.weixin.qq.com%2Ffinder-preview%2Fpages%2Fsph', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ baseReq: { generalToken: '' }, shortUri }),
+    });
+    const data = await resp.json();
+    return data?.data?.sceneInfo || null;
+  }).catch(() => null);
+}
+
+async function getChannelsFeedInfo(page: import('playwright').Page, exportId: string) {
+  return await page.evaluate(async (exportId) => {
+    const resp = await fetch('/finder-preview/api/feed/get_feed_info?_rid=auto_parse_feed&_pageUrl=https:%2F%2Fchannels.weixin.qq.com%2Ffinder-preview%2Fpages%2Ffeed', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ baseReq: { generalToken: '' }, exportId }),
+    });
+    const data = await resp.json();
+    return data?.data?.feedInfo || data?.data || null;
+  }, exportId).catch(() => null);
 }
