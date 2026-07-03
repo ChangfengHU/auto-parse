@@ -48,6 +48,52 @@ function pickVideoMeta(feedInfo: Record<string, any> | undefined) {
   };
 }
 
+function pickChannelsProfileFeedInfo(profile: Record<string, any> | null | undefined) {
+  return profile?.data?.feedInfo || null;
+}
+
+function pickChannelsProfileAuthor(profile: Record<string, any> | null | undefined) {
+  const authorInfo = profile?.data?.authorInfo;
+  if (!authorInfo) return undefined;
+  return {
+    name: authorInfo.nickname || '',
+    avatar: authorInfo.headImgUrl || '',
+    authIconUrl: authorInfo.authIconUrl || '',
+  };
+}
+
+function parseCount(text: string | undefined) {
+  if (!text) return 0;
+  if (text.endsWith('万')) {
+    const value = Number(text.slice(0, -1));
+    return Number.isFinite(value) ? Math.round(value * 10000) : 0;
+  }
+  return parseNumber(text);
+}
+
+async function fetchChannelsVideoProfile(inputUrl: string) {
+  const endpoint = process.env.WECHAT_CHANNELS_PROFILE_API_URL
+    || 'https://sph.litao.workers.dev/api/fetch_video_profile';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000);
+  try {
+    const resp = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: inputUrl }),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      return { error: `profile api http ${resp.status}` };
+    }
+    return await resp.json();
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'profile api failed' };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function parseWechat(inputUrl: string) {
   const executablePath = resolveChromeExecutablePath();
   const browser = await chromium.launch({
@@ -167,14 +213,42 @@ export async function parseWechat(inputUrl: string) {
       const feedInfo = sceneInfo?.dynamicExportId
         ? await getChannelsFeedInfo(page, sceneInfo.dynamicExportId)
         : null;
-      const videoUrl = pickVideoUrl(feedInfo);
+      let videoUrl = pickVideoUrl(feedInfo);
+      const profile = !videoUrl ? await fetchChannelsVideoProfile(inputUrl) : null;
+      const profileFeedInfo = pickChannelsProfileFeedInfo(profile);
+      if (!videoUrl) {
+        videoUrl = pickVideoUrl(profileFeedInfo);
+      }
+      const profileAuthor = pickChannelsProfileAuthor(profile);
+      const profileCoverUrl = normalizeUrl(profileFeedInfo?.coverUrl || '');
       return {
         ...parsed,
+        title: profileFeedInfo?.description || parsed.title,
+        desc: profileFeedInfo?.description || parsed.desc,
+        author: profileAuthor || parsed.author,
+        coverUrl: profileCoverUrl || parsed.coverUrl,
         sceneInfo: sceneInfo ?? undefined,
         dynamicExportId: sceneInfo?.dynamicExportId,
+        wxExportId: profile?.data?.wxExportId,
         videoUrl,
-        videoMeta: pickVideoMeta(feedInfo ?? undefined),
-        feedUnavailableReason: !videoUrl ? feedInfo?.errMsg?.title || feedInfo?.errMsg || undefined : undefined,
+        videoMeta: {
+          ...pickVideoMeta(feedInfo ?? undefined),
+          ...pickVideoMeta(profileFeedInfo ?? undefined),
+        },
+        stats: profileFeedInfo ? {
+          likeCount: parseCount(profileFeedInfo.likeCountFmt),
+          commentCount: parseCount(profileFeedInfo.commentCountFmt),
+          shareCount: parseCount(profileFeedInfo.forwardCountFmt),
+          collectCount: parseCount(profileFeedInfo.favCountFmt),
+        } : parsed.stats,
+        channelsProfileApi: profile ? {
+          source: 'profile_api',
+          ok: Boolean(videoUrl),
+          error: profile.error,
+        } : undefined,
+        feedUnavailableReason: !videoUrl
+          ? profile?.error || feedInfo?.errMsg?.title || feedInfo?.errMsg || undefined
+          : undefined,
       };
     }
 
