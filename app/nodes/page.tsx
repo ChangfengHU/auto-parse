@@ -17,6 +17,7 @@ const TYPE_STYLE: Record<ParamMeta['type'], string> = {
   boolean:  'bg-yellow-500/15 text-yellow-400 border-yellow-400/30',
   array:    'bg-cyan-500/15 text-cyan-400 border-cyan-400/30',
   select:   'bg-indigo-500/15 text-indigo-400 border-indigo-400/30',
+  elements: 'bg-teal-500/15 text-teal-400 border-teal-400/30',
 };
 
 // ── 单参数行 ──────────────────────────────────────────────────────────────────

@@ -176,7 +176,7 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
-function formatTime(iso?: string | null) {
+function formatTime(iso?: string | number | null) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('zh-CN', {
     month: '2-digit', day: '2-digit',
