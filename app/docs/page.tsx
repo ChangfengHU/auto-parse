@@ -37,6 +37,12 @@ interface ModuleDoc {
 
 const MODULES: ModuleDoc[] = [
   {
+    id: 'youtube-pipeline',
+    title: 'YouTube 音视频与字幕管线',
+    desc: '提供基于 Cloudflare Workers 的全套 YouTube 视频下载、音频提取、 Whisper 转录、双语字幕生成及 TTS 角色配音能力。',
+    goal: '输入 YouTube 链接或参数，输出结构化的字幕数据、切片视频或配音后的多媒体文件。',
+  },
+  {
     id: 'media-parse',
     title: '媒体解析',
     desc: '把抖音/小红书分享链接解析成可稳定消费的 OSS 视频地址，适合作为后续发布、归档、训练素材的统一入口。',
@@ -57,6 +63,72 @@ const MODULES: ModuleDoc[] = [
 ];
 
 const ENDPOINTS: EndpointDoc[] = [
+  {
+    id: 'youtube-audio',
+    moduleId: 'youtube-pipeline',
+    method: 'POST',
+    path: 'https://youtube-audio.hb67egcim4.workers.dev/clip',
+    title: 'YouTube 基础音频提取与剪辑',
+    summary: '底层引擎，使用 FFmpeg 和 yt-dlp 物理下载和切割 YouTube 音视频。可提取纯音频或带烧录字幕的短视频。',
+    aiGuidance: '不推荐直接调用，除非你需要纯粹的 MP4/MP3 物理截取。通常作为内部引擎被 Trim 或 Dub 调度。',
+    requestType: 'application/json',
+    responseType: 'application/json',
+    body: [
+      { name: 'url', type: 'string', required: true, desc: 'YouTube 视频链接' },
+      { name: 'clips', type: 'string', required: false, desc: '需要切片的时间段数组' },
+      { name: 'srt', type: 'string', required: false, desc: '可选的 SRT 字符串，用于硬烧录进画面' }
+    ],
+    response: '{"job_id": "xxx", "status": "pending"}',
+    notes: [
+      '该服务运行在包含 FFmpeg 的容器环境中。',
+      '需配合 Bearer Token 使用。'
+    ]
+  },
+  {
+    id: 'youtube-trim',
+    moduleId: 'youtube-pipeline',
+    method: 'POST',
+    path: 'https://youtube-trim.hb67egcim4.workers.dev/trim',
+    title: 'YouTube 高级字幕与切片 (Trim)',
+    summary: '支持角色识别、双语翻译及 ASS 格式生成的高级切片器。新增 only_subtitles 参数支持纯字幕极速提取。',
+    aiGuidance: '当你需要高质量双语字幕（不带视频）或者一键生成剪辑好的短视频切片时，调用此接口。',
+    requestType: 'application/json',
+    responseType: 'application/json',
+    body: [
+      { name: 'url', type: 'string', required: true, desc: 'YouTube 视频链接' },
+      { name: 'start_sec', type: 'number', required: false, desc: '开始时间（秒）。不传且 end_sec 不传时，处理全视频。' },
+      { name: 'end_sec', type: 'number', required: false, desc: '结束时间（秒）。' },
+      { name: 'only_subtitles', type: 'boolean', required: false, desc: '（推荐）设为 true 时，跳过视频下载和 FFmpeg 处理，极速返回双语/ASS 等字幕链接全家桶。', example: 'true' }
+    ],
+    response: '{"success": true, "subtitles_srt_bilingual": "https://...", "subtitles_ass": "https://..."}',
+    notes: [
+      '若 only_subtitles=true 且不传时间参数，可用于几分钟内获取 1 小时长视频的全套角色识别字幕。',
+      '会生成物理 R2 文件。'
+    ]
+  },
+  {
+    id: 'youtube-dub',
+    moduleId: 'youtube-pipeline',
+    method: 'POST',
+    path: 'https://youtube-dub.hb67egcim4.workers.dev/dub',
+    title: 'YouTube 多角色配音 (Dub)',
+    summary: '全自动化 YouTube 视频本地化配音。支持区分主客角色，自动对齐时间轴并使用 Azure TTS 克隆/合成语音。',
+    aiGuidance: '用于将英文视频一键转换为中文配音视频，自动降低背景音分贝并混入合成语音。',
+    requestType: 'application/json',
+    responseType: 'application/json',
+    body: [
+      { name: 'url', type: 'string', required: true, desc: 'YouTube 视频链接' },
+      { name: 'start_sec', type: 'number', required: false, desc: '开始时间。不传代表全视频配音。' },
+      { name: 'end_sec', type: 'number', required: false, desc: '结束时间。' },
+      { name: 'host_voice', type: 'string', required: false, desc: '主讲人声纹（如 Leda）', example: 'Leda' },
+      { name: 'guest_voice', type: 'string', required: false, desc: '嘉宾声纹（如 Fenrir）', example: 'Fenrir' }
+    ],
+    response: '{"success": true, "audio_url": "https://...", "subtitles_srt": "..."}',
+    notes: [
+      '内部调用了 youtube-audio 进行 -20dB 的背景音量避让 (Duck)。'
+    ]
+  },
+
   {
     id: 'parse-short-video',
     moduleId: 'media-parse',
