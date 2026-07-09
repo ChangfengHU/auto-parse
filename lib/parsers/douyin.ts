@@ -106,7 +106,7 @@ function parseDouyinShareImages(html: string): DouyinShareImage[] {
   let imageArray: unknown;
   try {
     imageArray = JSON.parse(raw);
-  } catch (err) {
+  } catch {
     return [];
   }
 
@@ -177,10 +177,11 @@ export async function parseDouyin(input: string, options: ParseDouyinOptions = {
 
   const cookieStr = options.cookieStr?.trim() || undefined;
 
-  // 优先：用 Playwright 打开页面，注入 Cookie，拦截真实视频地址（无水印）
-  if (videoIdMatch && hasDouyinAuth(cookieStr)) {
+  // 优先：有 Cookie 时用 Playwright 打开页面，拦截真实视频地址（无水印）
+  // 兼容 /video/<id> 与 /note/<id> 两种跳转类型。
+  if ((videoIdMatch || noteIdMatch) && hasDouyinAuth(cookieStr)) {
     try {
-      const detail = await parseDouyinWithPlaywright(contentId, cookieStr);
+      const detail = await parseDouyinWithPlaywright(contentId, noteIdMatch ? 'note' : 'video', cookieStr);
       if ((detail as { mediaType?: 'video' | 'image' }).mediaType === 'image') {
         return {
           platform: 'douyin',
@@ -222,7 +223,14 @@ export async function parseDouyin(input: string, options: ParseDouyinOptions = {
   const cdnUrl: string = step3.headers['location'];
   if (!cdnUrl) throw new Error('无法获取视频 CDN 地址');
 
-  return { platform: 'douyin', videoId: contentId || Date.now().toString(), videoUrl: cdnUrl, title, watermark: true };
+  return {
+    platform: 'douyin',
+    videoId: contentId || Date.now().toString(),
+    videoUrl: cdnUrl,
+    title,
+    watermark: true,
+    mediaType: 'video',
+  };
 }
 
 // 快速模式：不用 Playwright，直接走 playwm（带水印，约 3s）

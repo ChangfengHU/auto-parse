@@ -49,8 +49,66 @@ export function hasDouyinAuth(cookieStrOverride?: string): boolean {
   return loadDouyinCookies(cookieStrOverride).some(c => c.name === 'sessionid' || c.name === 'sessionid_ss');
 }
 
+interface DouyinShareImage {
+  url: string;
+  width?: number;
+  height?: number;
+}
+
+interface PlaywrightDouyinResult {
+  videoUrl: string;
+  title: string;
+  watermark: boolean;
+  mediaType?: 'video' | 'image';
+  images?: DouyinShareImage[];
+  imageCount?: number;
+  coverUrl?: string;
+  music?: unknown;
+  author?: unknown;
+  statistics?: unknown;
+  hashtags?: string[];
+  mentions?: unknown[];
+  videoMeta?: unknown;
+  createTime?: number;
+  shareUrl?: string;
+  cover?: unknown;
+  desc?: string;
+}
+
 function fileIdFromUrl(url: string): string | undefined {
   return url.match(/tos-cn-ve-15\/([^/?]+)/i)?.[1];
+}
+
+function normalizeImageFromSource(value: unknown): string {
+  if (!value || typeof value !== 'string') return '';
+  return value.trim();
+}
+
+function extractImagesFromUnknownList(value: unknown): DouyinShareImage[] {
+  if (!Array.isArray(value)) return [];
+
+  return value.reduce<DouyinShareImage[]>((list, item) => {
+    if (!item || typeof item !== 'object') return list;
+    const source = item as Record<string, unknown>;
+    const candidates = [
+      ...(Array.isArray(source.url_list) ? (source.url_list as unknown[]) : []),
+      source.url,
+      source.uri,
+    ].filter((v) => typeof v === 'string') as string[];
+
+    const url = normalizeImageFromSource(candidates[0]);
+    if (!url) return list;
+
+    const width = Number(source.width);
+    const height = Number(source.height);
+
+    list.push({
+      url,
+      width: Number.isFinite(width) ? width : undefined,
+      height: Number.isFinite(height) ? height : undefined,
+    });
+    return list;
+  }, []);
 }
 
 function extractSuffixLogoFileIds(video: Record<string, unknown>): Set<string> {
@@ -214,11 +272,11 @@ function normalizeAwemeDetail(detail: Record<string, unknown>, selectedVideoUrl:
   };
 }
 
-export async function parseDouyinWithPlaywright(videoId: string, cookieStrOverride?: string): Promise<Record<string, unknown> & {
-  videoUrl: string;
-  title: string;
-  watermark: boolean;
-}> {
+export async function parseDouyinWithPlaywright(
+  videoId: string,
+  target: 'video' | 'note',
+  cookieStrOverride?: string
+): Promise<PlaywrightDouyinResult> {
   const executablePath = resolveChromeExecutablePath();
   const browser = await chromium.launch({
     headless: true,
@@ -239,7 +297,7 @@ export async function parseDouyinWithPlaywright(videoId: string, cookieStrOverri
 
     const page = await context.newPage();
 
-    const result = await new Promise<{ videoUrl: string; title: string; watermark: boolean }>(
+        const result = await new Promise<PlaywrightDouyinResult>(
       async (resolve, reject) => {
         let settled = false;
         const timer = setTimeout(() => {
@@ -249,12 +307,12 @@ export async function parseDouyinWithPlaywright(videoId: string, cookieStrOverri
           }
         }, 60000);
 
-        const finishFromDetail = async (detail: any) => {
+        const finishFromDetail = async (detail: Record<string, unknown>) => {
           if (settled) return;
-          const video = detail?.video;
+          const video = detail.video as Record<string, unknown> | undefined;
           if (!video) return;
 
-          const title: string = detail.desc ?? '';
+          const title = String(detail.desc ?? '');
           const suffixIds = extractSuffixLogoFileIds(video);
           let videoUrl = pickBestVideoUrl(video);
           if (!videoUrl) return;
@@ -270,16 +328,55 @@ export async function parseDouyinWithPlaywright(videoId: string, cookieStrOverri
           resolve({ videoUrl, title, watermark, ...normalizeAwemeDetail(detail, videoUrl, watermark) });
         };
 
+        const finishFromNote = async (note: Record<string, unknown>) => {
+          if (settled) return;
+          const typedNote = note as {
+            images?: unknown;
+            image_list?: unknown;
+            cover?: { images?: unknown } | unknown;
+            desc?: unknown;
+            title?: unknown;
+          };
+          const cover = typedNote.cover && typeof typedNote.cover === 'object' ? (typedNote.cover as Record<string, unknown>) : {};
+          const images = extractImagesFromUnknownList(
+            typedNote.images ?? typedNote.image_list ?? cover?.images
+          );
+          if (!images.length) return;
+
+          const title: string = String(note?.desc || note?.title || '');
+          const first = images[0]?.url || '';
+          settled = true;
+          clearTimeout(timer);
+          resolve({
+            videoUrl: '',
+            title,
+            desc: title,
+            watermark: false,
+            mediaType: 'image',
+            images,
+            imageCount: images.length,
+            coverUrl: first,
+          });
+        };
+
         page.on('response', async resp => {
-          if (!resp.url().includes('/aweme/v1/web/aweme/detail/')) return;
+          const url = resp.url();
+          if (!url.includes('/aweme/v1/web/aweme/detail/') && !url.includes('/aweme/v1/web/note/detail/')) return;
           try {
             const json = await resp.json();
             await finishFromDetail(json?.aweme_detail);
+            if (!settled && json?.note) {
+              await finishFromNote(json.note);
+            }
+            if (!settled && json?.note_detail) {
+              await finishFromNote(json.note_detail);
+            }
           } catch { /* ignore */ }
         });
 
         try {
-          await page.goto(`https://www.douyin.com/video/${videoId}`, {
+          const targetUrl = target === 'note' ? `https://www.douyin.com/note/${videoId}` : `https://www.douyin.com/video/${videoId}`;
+          await page.goto(targetUrl, {
             waitUntil: 'domcontentloaded',
             timeout: 50000,
           });
@@ -288,13 +385,23 @@ export async function parseDouyinWithPlaywright(videoId: string, cookieStrOverri
         await page.waitForTimeout(3000).catch(() => {});
 
         try {
-          const json = await page.evaluate(async (id) => {
-            const res = await fetch(`/aweme/v1/web/aweme/detail/?aweme_id=${id}&aid=6383&device_platform=webapp`, {
+          const fallbackUrl =
+            target === 'note'
+              ? `/aweme/v1/web/aweme/detail/?aweme_id=${videoId}&aid=6383&device_platform=webapp`
+              : `/aweme/v1/web/aweme/detail/?aweme_id=${videoId}&aid=6383&device_platform=webapp`;
+          const json = await page.evaluate(async (path) => {
+            const res = await fetch(path, {
               credentials: 'include',
             });
             return await res.json();
-          }, videoId);
+          }, fallbackUrl);
           await finishFromDetail(json?.aweme_detail);
+          if (!settled && json?.note) {
+            await finishFromNote(json.note);
+          }
+          if (!settled && json?.note_detail) {
+            await finishFromNote(json.note_detail);
+          }
         } catch { /* active fetch fallback failed; keep waiting for network response */ }
 
         await page.waitForTimeout(20000).catch(() => {});
