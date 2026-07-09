@@ -3,7 +3,7 @@ import { parseDouyin, parseDouyinFast } from '@/lib/parsers/douyin';
 import { fetchXhsPost } from '@/lib/analysis/xhs-fetch';
 import { parseWechat } from '@/lib/parsers/wechat-playwright';
 import { publishWechatHtml } from '@/lib/wechat-html-publisher';
-import { uploadVideoFromUrl, uploadFromFile, type UploadTargetOptions } from '@/lib/oss';
+import { uploadVideoFromUrl, uploadFromFile, uploadFromUrl, type UploadTargetOptions } from '@/lib/oss';
 import { addMaterial } from '@/lib/materials';
 import { resolveDouyinCookieForParse, getPlatformDouyinCookie, hasValidDouyinCookie } from '@/lib/parse/resolve-auth';
 import type { ParseExportConfig, ParseRequestOptions } from '@/lib/parse/types';
@@ -31,6 +31,16 @@ function mergeExportConfig(partial?: ParseRequestOptions['export']): ParseExport
       ...(partial?.r2 ?? {}),
     },
   };
+}
+
+function pickImageExt(url: string): string {
+  const cleanPath = url.split(/[?#]/)[0];
+  const match = cleanPath.match(/\.([a-zA-Z0-9]{2,8})(?:$|\/)/);
+  return match?.[1]?.toLowerCase() || 'jpg';
+}
+
+function isHttpUrl(url: string): boolean {
+  return url.startsWith('http://') || url.startsWith('https://');
 }
 
 export async function POST(req: NextRequest) {
@@ -149,28 +159,53 @@ export async function POST(req: NextRequest) {
       ? await parseDouyinFast(url)
       : await parseDouyin(url, { cookieStr: cookieStr ?? undefined });
 
-    const ossKey = `${parsed.platform}/${parsed.videoId}.mp4`;
+    const isImageResult = parsed.mediaType === 'image';
     let ossUrl = '';
+    let images = (parsed.images as Array<{ url: string }> | undefined) ?? [];
+    images = images.filter((image) => isHttpUrl(image.url));
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const localFile = (parsed as { localFile?: string }).localFile;
-        ossUrl = localFile
-          ? await uploadFromFile(localFile, ossKey, 'video/mp4', uploadTarget)
-          : await uploadVideoFromUrl(parsed.videoUrl, ossKey, uploadTarget);
-        break;
-      } catch (e) {
-        if (attempt === 3) throw e;
-        parsed = watermark
-          ? await parseDouyinFast(url)
-          : await parseDouyin(url, { cookieStr: cookieStr ?? undefined });
+    if (isImageResult && images.length > 0) {
+      const uploadedImages = await Promise.all(
+        images.map(async (image, index) => {
+          try {
+            const ext = pickImageExt(image.url);
+            const contentType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : ext === 'gif' ? 'image/gif' : 'image/jpeg';
+            const imageKey = `${parsed.platform}/${parsed.videoId}/img-${index + 1}.${ext}`;
+            const uploadedUrl = await uploadFromUrl(image.url, imageKey, contentType);
+            return { ...image, url: uploadedUrl };
+          } catch (e) {
+            console.warn('[parse] douyin image upload failed', e instanceof Error ? e.message : e);
+            return image;
+          }
+        })
+      );
+      images = uploadedImages;
+      ossUrl = uploadedImages[0]?.url || '';
+    } else {
+      const ossKey = `${parsed.platform}/${parsed.videoId}.mp4`;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const localFile = (parsed as { localFile?: string }).localFile;
+          if (!parsed.videoUrl) {
+            throw new Error('未获取到视频地址');
+          }
+          ossUrl = localFile
+            ? await uploadFromFile(localFile, ossKey, 'video/mp4', uploadTarget)
+            : await uploadVideoFromUrl(parsed.videoUrl, ossKey, uploadTarget);
+          break;
+        } catch (e) {
+          if (attempt === 3) throw e;
+          parsed = watermark
+            ? await parseDouyinFast(url)
+            : await parseDouyin(url, { cookieStr: cookieStr ?? undefined });
+        }
       }
     }
 
     const result = {
       success: true,
       platform: parsed.platform,
-      mediaType: 'video' as const,
+      mediaType: (parsed.mediaType as 'video' | 'image' | undefined) ?? 'video',
       videoId: parsed.videoId,
       title: parsed.title ?? '',
       desc: parsed.desc ?? parsed.title ?? '',
@@ -186,16 +221,19 @@ export async function POST(req: NextRequest) {
       createTime: parsed.createTime,
       shareUrl: parsed.shareUrl ?? '',
       videoMeta: parsed.videoMeta,
+      images: isImageResult ? images : undefined,
+      imageCount: isImageResult ? images.length : undefined,
       watermark: (parsed as { watermark?: boolean }).watermark ?? watermark,
       uploadProvider: exportConfig.provider,
       authSource,
       hasLogin: hasValidDouyinCookie(cookieStr ?? getPlatformDouyinCookie()),
     };
 
+    const materialVideoUrl = isImageResult ? (images[0]?.url || '') : result.videoUrl;
     addMaterial({
       platform: result.platform,
       title: result.title,
-      videoUrl: result.videoUrl,
+      videoUrl: materialVideoUrl,
       ossUrl: result.ossUrl,
       watermark: result.watermark,
     });
