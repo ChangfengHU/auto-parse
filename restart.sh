@@ -1,22 +1,19 @@
 #!/bin/bash
+set -euo pipefail
 
-PORT=1007
+for unit in auto-parse-65.service auto-parse.service; do
+  if systemctl cat "$unit" >/dev/null 2>&1; then
+    echo "Restarting $unit through systemd..."
+    systemctl restart "$unit"
+    systemctl --no-pager --full status "$unit"
+    exit 0
+  fi
+done
 
-echo "🔄 清理旧进程..."
-
-# 杀所有 next dev 进程（包括后台启动、还没绑定端口的）
-pkill -f "next dev" 2>/dev/null
-
-# 再杀仍然占用端口的进程（兜底）
-PID=$(lsof -t -i:$PORT 2>/dev/null)
-if [ -n "$PID" ]; then
-  kill -9 $PID 2>/dev/null
+if lsof -t -i:1007 >/dev/null 2>&1; then
+  echo "Port 1007 is already in use; refusing to start a second auto-parse process." >&2
+  exit 1
 fi
 
-# 清除 Next.js dev 锁文件，防止 "Unable to acquire lock" 报错
-rm -f .next/dev/lock
-
-sleep 1
-
-echo "🚀 正在启动 Next.js 开发服务器..."
-npm run dev
+echo "No systemd unit found; starting a foreground development server."
+exec npm run dev

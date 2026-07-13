@@ -4,6 +4,15 @@
 
 ## In Progress
 
+- [INFRA-001] 统一远端运行和部署方式
+  Status: In Progress
+  Owner: codex
+  Scope: infra / deployment
+  Updated: 2026-07-13T04:18:00Z
+  Commit: pending
+  Log: dev-log/2026-07-13-auto-parse-systemd-ownership.md
+  Next: 切换 65 到 production build + systemd 单一进程并验证解析。
+
 - [GOV-001] 初始化 Agent 项目治理体系
   Status: In Progress
   Owner: codex
@@ -43,15 +52,6 @@
   Next: 处理现有 TypeScript 错误并确定浏览器测试隔离方式。
 
 ## Backlog
-
-- [INFRA-001] 统一远端运行和部署方式
-  Status: Backlog
-  Owner: unassigned
-  Scope: infra / deployment
-  Updated: 2026-06-04T13:40:00Z
-  Commit: pending
-  Log: pending
-  Next: 决定继续使用开发服务还是切换生产构建，并处理冲突的旧 Docker/scp 文档。
 
 - [DOCS-001] 修正文档中的过期路径、端口和事实源描述
   Status: Backlog
