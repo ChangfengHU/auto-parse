@@ -17,4 +17,8 @@
 - Port 1007 moved into `/system.slice/auto-parse-65.service`.
 - systemd restart count reset to zero.
 - Isolated `npm run build` completed successfully before production cutover.
-- Final production-mode checks pending.
+- Production build completed and `/etc/systemd/system/auto-parse-65.service` was installed from `ops/auto-parse-65.service`.
+- Service runs `npm run start` under `/system.slice/auto-parse-65.service` with restart count zero.
+- Local and public `/parse` returned HTTP 200.
+- A real Douyin parse for `v.douyin.com/yWSaXEDgMec/` returned video and cover successfully.
+- After the real parse, the service cgroup used about 573 MB with a 726 MB peak; the machine retained about 4.1 GB available memory and load average remained near 1.0.

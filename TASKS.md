@@ -4,15 +4,6 @@
 
 ## In Progress
 
-- [INFRA-001] 统一远端运行和部署方式
-  Status: In Progress
-  Owner: codex
-  Scope: infra / deployment
-  Updated: 2026-07-13T04:18:00Z
-  Commit: pending
-  Log: dev-log/2026-07-13-auto-parse-systemd-ownership.md
-  Next: 切换 65 到 production build + systemd 单一进程并验证解析。
-
 - [GOV-001] 初始化 Agent 项目治理体系
   Status: In Progress
   Owner: codex
@@ -64,4 +55,11 @@
 
 ## Done
 
-暂无可在本次审计中确认同时满足实现、验证、提交与必要部署条件的历史任务。
+- [INFRA-001] 统一 65 远端运行和部署方式
+  Status: Done
+  Owner: codex
+  Scope: infra / deployment
+  Updated: 2026-07-13T04:21:00Z
+  Commit: `d1b496a`
+  Log: dev-log/2026-07-13-auto-parse-systemd-ownership.md
+  Result: 清理遗留 SSH 进程，systemd 单一接管 1007，切换 production build，真实抖音解析通过。
