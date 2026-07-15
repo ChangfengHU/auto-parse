@@ -12,6 +12,7 @@ Environment=HOSTNAME=127.0.0.1
 Environment=ADSPOWER_DISABLE_AUTO_START=true
 Environment=ADS_POOL_ENABLE_CDP_PROBE=false
 Environment=NEXT_TELEMETRY_DISABLED=1
+EnvironmentFile=-/etc/auto-parse-65.env
 ExecStartPre=/usr/bin/test -f /opt/auto-parse/.next/BUILD_ID
 ExecStart=/usr/bin/npm run start -- -p 1007 -H 127.0.0.1
 Restart=on-failure

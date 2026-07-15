@@ -22,3 +22,7 @@
 - Local and public `/parse` returned HTTP 200.
 - A real Douyin parse for `v.douyin.com/yWSaXEDgMec/` returned video and cover successfully.
 - After the real parse, the service cgroup used about 573 MB with a 726 MB peak; the machine retained about 4.1 GB available memory and load average remained near 1.0.
+
+## 2026-07-15 Secret Environment Follow-up
+
+The first production unit omitted the proxy authentication token inherited by the old SSH process. Existing cached mini program sessions continued to work, but a later JWT refresh failed before task creation because `/api/suqu/wechat-code2session` returned 401. The unit now loads `/etc/auto-parse-65.env`; deployment must keep that file mode 600 with `SUQU_WECHAT_PROXY_TOKEN` matching the `suqu-api` upload token.
