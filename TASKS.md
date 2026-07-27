@@ -4,6 +4,15 @@
 
 ## In Progress
 
+- [API-001] 自建腾讯元宝扫码登录与视频号取流
+  Status: In Progress
+  Owner: codex
+  Scope: backend / frontend / browser runtime / parser
+  Updated: 2026-07-23T13:45:00Z
+  Commit: pending
+  Log: dev-log/2026-07-23-yuanbao-channels-login.md
+  Next: 实现受保护扫码页、持久化会话并验证视频号真实取流。
+
 - [GOV-001] 初始化 Agent 项目治理体系
   Status: In Progress
   Owner: codex
