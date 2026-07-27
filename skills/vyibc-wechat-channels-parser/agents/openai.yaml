@@ -1,0 +1,4 @@
+interface:
+  display_name: "WeChat Channels Parser"
+  short_description: "Maintain WeChat Channels parsing in Auto Parse and Suqu"
+  default_prompt: "Use $vyibc-wechat-channels-parser to restore WeChat Channels parsing."
