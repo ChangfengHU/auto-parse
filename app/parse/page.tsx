@@ -35,11 +35,13 @@ interface XhsImageResult {
 
 interface DouyinAuthor {
   id?: string;
+  name?: string;
   secUid?: string;
   shortId?: string;
   uniqueId?: string;
   nickname?: string;
   signature?: string;
+  avatar?: string;
   avatarUrl?: string;
   profileUrl?: string;
   followerCount?: number;
@@ -675,8 +677,10 @@ export default function ParsePage() {
     const stats = data.stats || {};
     const images = data.images || [];
     const links = data.links || [];
-    const authorName = data.author?.nickname || data.author?.id || '未知作者';
     const isChannels = data.sourceType === 'channels';
+    const videoUrl = isChannels ? firstNonEmpty(data.ossUrl, data.videoUrl) : '';
+    const coverUrl = firstNonEmpty(data.coverOssUrl, data.coverUrl);
+    const authorName = data.author?.nickname || data.author?.name || data.author?.id || '未知作者';
 
     return (
       <div className="mt-5 bg-card border border-border rounded-2xl overflow-hidden shadow-sm">
@@ -686,9 +690,9 @@ export default function ParsePage() {
         </div>
         <div className="p-4 space-y-5">
           <div className="grid grid-cols-1 lg:grid-cols-[220px_minmax(0,1fr)] gap-4">
-            {data.coverUrl ? (
-              <a href={data.coverUrl} target="_blank" rel="noopener noreferrer" className="rounded-xl overflow-hidden border border-border bg-muted block">
-                <img src={data.coverUrl} alt={data.title} className="w-full aspect-video object-cover" loading="lazy" />
+            {coverUrl ? (
+              <a href={coverUrl} target="_blank" rel="noopener noreferrer" className="rounded-xl overflow-hidden border border-border bg-muted block">
+                <img src={coverUrl} alt={data.title} className="w-full aspect-video object-cover" loading="lazy" />
               </a>
             ) : <div className="rounded-xl border border-border bg-muted aspect-video" />}
             <div className="space-y-3 min-w-0">
@@ -705,6 +709,23 @@ export default function ParsePage() {
               )}
             </div>
           </div>
+
+          {isChannels && videoUrl && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">视频资源</div>
+                <span className="text-[11px] text-emerald-600 font-medium">{data.ossUrl ? '已转存 R2' : '原始视频流'}</span>
+              </div>
+              <div className="rounded-xl overflow-hidden bg-black border border-border">
+                <video src={videoUrl} poster={coverUrl || undefined} controls playsInline className="w-full max-h-[560px] object-contain" preload="metadata" />
+              </div>
+              <div className="flex items-center gap-2 bg-muted rounded-lg p-2.5">
+                <span className="w-16 text-[11px] text-muted-foreground flex-shrink-0">{data.ossUrl ? 'R2 视频' : '原始视频'}</span>
+                <span className="text-xs text-blue-500 flex-1 truncate font-mono">{videoUrl}</span>
+                <button onClick={() => copy(videoUrl, 'wechat-video')} className="flex-shrink-0 px-2.5 py-1 bg-background border border-border hover:bg-muted rounded text-xs transition-colors shadow-sm">{copied === 'wechat-video' ? '已复制' : '复制'}</button>
+              </div>
+            </div>
+          )}
 
           {data.text && (
             <div className="space-y-2">
@@ -736,10 +757,12 @@ export default function ParsePage() {
             <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">链接</div>
             {[
               ['图文 HTML', data.htmlUrl || '', 'wechat-html'],
+              ['R2 视频', data.ossUrl || '', 'wechat-oss'],
+              ['原始视频', data.videoUrl || '', 'wechat-video-source'],
               ['原始链接', data.originalUrl || '', 'wechat-original'],
               ['解析后链接', data.resolvedUrl || '', 'wechat-resolved'],
               ['R2 封面', data.coverOssUrl || '', 'wechat-cover-oss'],
-              ['封面', data.coverUrl || '', 'wechat-cover'],
+              ['封面', coverUrl, 'wechat-cover'],
             ].filter((item) => item[1]).map(([label, url, key]) => (
               <div key={key} className="flex items-center gap-2 bg-muted rounded-lg p-2.5">
                 <span className="w-20 text-[11px] text-muted-foreground flex-shrink-0">{label}</span>
@@ -755,6 +778,7 @@ export default function ParsePage() {
 
           <div className="flex gap-2 pt-1 flex-wrap">
             {data.htmlUrl && <a href={data.htmlUrl} target="_blank" rel="noopener noreferrer" className="flex-1 py-2 bg-primary text-white hover:bg-primary/90 rounded-lg text-xs font-semibold text-center transition-all shadow-md shadow-primary/10">打开图文 HTML</a>}
+            {isChannels && videoUrl && <a href={videoUrl} download target="_blank" rel="noopener noreferrer" className="flex-1 py-2 bg-primary text-white hover:bg-primary/90 rounded-lg text-xs font-semibold text-center transition-all shadow-md shadow-primary/10">下载视频</a>}
             <button onClick={() => copy(JSON.stringify(data, null, 2), 'wechat-json')} className="flex-1 py-2 bg-muted border border-border hover:bg-border/50 rounded-lg text-xs font-semibold text-center text-foreground transition-all">{copied === 'wechat-json' ? '已复制' : '复制 JSON'}</button>
             <button onClick={() => { setResult(null); setError(''); setStep(-1); }} className="flex-1 py-2 text-muted-foreground hover:text-foreground text-xs transition-colors">重新解析</button>
           </div>
@@ -1010,7 +1034,7 @@ export default function ParsePage() {
         <textarea
           className="w-full bg-transparent resize-none text-sm text-foreground placeholder-muted-foreground outline-none leading-relaxed"
           rows={4}
-          placeholder="粘贴抖音/小红书/TikTok 分享链接或文本..."
+          placeholder="粘贴抖音/小红书/TikTok/微信分享链接或文本..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
           disabled={loading}
