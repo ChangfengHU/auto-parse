@@ -1,0 +1,1 @@
+{"date":"2026-08-04","task":"brain-init","summary":"接入 project-brains:考古+凭据发现+生成接收协议 HANDOFF","files":[".brain/HANDOFF.md"],"verify":"systemctl is-active auto-parse.service && curl -so /dev/null -w %{http_code} http://127.0.0.1:1007/ && git ls-remote https://github.com/ChangfengHU/auto-parse.git HEAD","exit":0,"risks":"全量.env位置未知;95/183/GCP三机访问凭据缺失待用户补答","commit":"9f0464a"}
