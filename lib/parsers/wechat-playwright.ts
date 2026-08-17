@@ -9,6 +9,10 @@ const CHROME_CANDIDATES = [
   '/usr/bin/chromium',
 ].filter(Boolean) as string[];
 
+const YUANBAO_CDP_URL = process.env.YUANBAO_CDP_URL || 'http://127.0.0.1:9222';
+let yuanbaoBrowserPromise: ReturnType<typeof chromium.connectOverCDP> | null = null;
+let yuanbaoProfileQueue: Promise<void> = Promise.resolve();
+
 function resolveChromeExecutablePath(): string | undefined {
   const fs = require('fs') as typeof import('fs');
   return CHROME_CANDIDATES.find((candidate) => fs.existsSync(candidate));
@@ -71,7 +75,132 @@ function parseCount(text: string | undefined) {
   return parseNumber(text);
 }
 
+function getYuanbaoBrowser() {
+  if (!yuanbaoBrowserPromise) {
+    yuanbaoBrowserPromise = chromium.connectOverCDP(YUANBAO_CDP_URL, { timeout: 10000 });
+    yuanbaoBrowserPromise.then((browser) => {
+      browser.once('disconnected', () => {
+        yuanbaoBrowserPromise = null;
+      });
+    }).catch(() => {
+      yuanbaoBrowserPromise = null;
+    });
+  }
+  return yuanbaoBrowserPromise;
+}
+
+async function withYuanbaoProfileLock<T>(action: () => Promise<T>) {
+  const previous = yuanbaoProfileQueue;
+  let release = () => {};
+  yuanbaoProfileQueue = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+  }
+}
+
+function selectYuanbaoHeaders(headers: Record<string, string>) {
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => (
+    name === 'accept'
+    || name === 'accept-language'
+    || name === 'content-type'
+    || name === 't-userid'
+    || name.startsWith('x-')
+  )));
+}
+
+async function captureYuanbaoHeaders(page: import('playwright').Page) {
+  return await new Promise<Record<string, string>>((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      page.off('request', onRequest);
+    };
+    const onRequest = (request: import('playwright').Request) => {
+      const url = request.url();
+      const headers = request.headers();
+      if (!url.startsWith('https://yuanbao.tencent.com/api/') || !headers['x-device-id']) return;
+      cleanup();
+      resolve(selectYuanbaoHeaders(headers));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('yuanbao request headers unavailable'));
+    }, 12000);
+    page.on('request', onRequest);
+    page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+  });
+}
+
+async function fetchChannelsFeedInfo(playableUrl: string) {
+  const playable = new URL(playableUrl);
+  const generalToken = playable.searchParams.get('token') || '';
+  const exportId = playable.searchParams.get('eid') || '';
+  if (!generalToken || !exportId) throw new Error('yuanbao playable parameters missing');
+
+  const rid = `${Math.floor(Date.now() / 1000).toString(16)}-${crypto.randomUUID().slice(0, 8)}`;
+  const endpoint = `https://channels.weixin.qq.com/finder-preview/api/feed/get_feed_info?_rid=${rid}&_pageUrl=https:%2F%2Fchannels.weixin.qq.com%2Ffinder-preview%2Fpages%2Ffeed`;
+  const resp = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      accept: 'application/json, text/plain, */*',
+      'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'content-type': 'application/json',
+      origin: 'https://channels.weixin.qq.com',
+      referer: `https://channels.weixin.qq.com/finder-preview/pages/feed?entry_card_type=48&comment_scene=39&appid=0&token=${encodeURIComponent(generalToken)}&entry_scene=0&eid=${encodeURIComponent(exportId)}`,
+      'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36',
+    },
+    body: JSON.stringify({ baseReq: { generalToken }, exportId }),
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!resp.ok) throw new Error(`channels feed http ${resp.status}`);
+  const result = await resp.json() as Record<string, any>;
+  if (Number(result?.errCode) !== 0 || !result?.data?.feedInfo) {
+    throw new Error(`channels feed error ${result?.errCode ?? 'unknown'}`);
+  }
+  return result;
+}
+
+async function fetchChannelsVideoProfileFromYuanbao(inputUrl: string) {
+  return await withYuanbaoProfileLock(async () => {
+    const browser = await getYuanbaoBrowser();
+    const context = browser.contexts()[0];
+    const page = context?.pages().find((candidate) => candidate.url().includes('yuanbao.tencent.com/chat'));
+    if (!page) throw new Error('yuanbao login page unavailable');
+
+    const headers = await captureYuanbaoHeaders(page);
+    const parsed = await page.evaluate(async ({ inputUrl, headers }) => {
+      const resp = await fetch('/api/weixin/get_parse_result', {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'video_channel_url', url: inputUrl, scene: 1 }),
+      });
+      const result = await resp.json().catch(() => ({}));
+      return { status: resp.status, result };
+    }, { inputUrl, headers });
+    if (parsed.status !== 200 || !parsed.result?.data?.playable_url) {
+      throw new Error(`yuanbao parse http ${parsed.status}`);
+    }
+
+    const profile = await fetchChannelsFeedInfo(parsed.result.data.playable_url);
+    profile.data = {
+      ...profile.data,
+      wxExportId: parsed.result.data.wx_export_id,
+    };
+    return profile;
+  });
+}
+
 async function fetchChannelsVideoProfile(inputUrl: string) {
+  try {
+    return await fetchChannelsVideoProfileFromYuanbao(inputUrl);
+  } catch (err) {
+    console.warn('[wechat channels] local yuanbao profile failed', err instanceof Error ? err.message : 'unknown');
+  }
+
   const endpoint = process.env.WECHAT_CHANNELS_PROFILE_API_URL
     || 'https://sph.litao.workers.dev/api/fetch_video_profile';
   const controller = new AbortController();
