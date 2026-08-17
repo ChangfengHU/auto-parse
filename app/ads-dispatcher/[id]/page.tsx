@@ -589,6 +589,7 @@ function ItemRow({
 }) {
   const primaryMedia = item.mediaUrls?.[0] || item.imageUrls?.[0];
   const isImage = item.primaryMediaType === 'image' || (!item.primaryMediaType && primaryMedia);
+  const [promptCopied, setPromptCopied] = useState(false);
   return (
     <>
       <tr
@@ -598,6 +599,16 @@ function ItemRow({
         <td className="px-4 py-2.5 text-muted-foreground text-xs w-10">{item.index + 1}</td>
         <td className="px-4 py-2.5 max-w-[200px]">
           <span className="text-xs text-foreground" title={item.prompt}>{truncate(item.prompt, 55)}</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              void navigator.clipboard.writeText(item.prompt || '');
+              setPromptCopied(true);
+              setTimeout(() => setPromptCopied(false), 1200);
+            }}
+            className="ml-1 text-[10px] text-muted-foreground hover:text-foreground align-middle"
+            title="复制此条提示词"
+          >{promptCopied ? '✅' : '⧉'}</button>
           {(item.promptOptimizedCount ?? 0) > 0 && (
             <span className="ml-1 text-[10px] text-amber-400 border border-amber-500/30 rounded px-1">改写×{item.promptOptimizedCount}</span>
           )}
@@ -752,6 +763,7 @@ export default function AdsDispatcherDetailPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [previewMode, setPreviewMode] = useState(false);
   const [copiedRuns, setCopiedRuns] = useState(false);
+  const [copiedPrompts, setCopiedPrompts] = useState(false);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -877,6 +889,19 @@ export default function AdsDispatcherDetailPage() {
     }));
   }, [task]);
 
+  // 一键获取提示词:复制全部子任务的当前 prompt(改写过的取最新版),纯文本、空行分隔
+  async function copyAllPrompts() {
+    if (!task) return;
+    const text = task.items.map((item) => item.prompt || '').filter(Boolean).join('\n\n');
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedPrompts(true);
+      setTimeout(() => setCopiedPrompts(false), 1800);
+    } catch (e) {
+      alert(String(e));
+    }
+  }
+
   async function copyRunsInputJson() {
     try {
       await navigator.clipboard.writeText(JSON.stringify(runsInput, null, 2));
@@ -948,6 +973,13 @@ export default function AdsDispatcherDetailPage() {
             </div>
             {/* Operation buttons */}
             <div className="flex gap-2 flex-wrap">
+              <button
+                onClick={() => void copyAllPrompts()}
+                className="px-3 py-1.5 text-xs bg-primary/20 text-primary border border-primary/30 rounded-lg hover:bg-primary/30 transition-colors"
+                title="复制全部子任务的提示词(纯文本,空行分隔)"
+              >
+                {copiedPrompts ? '✅ 已复制提示词' : '📋 一键复制提示词'}
+              </button>
               <button
                 onClick={() => void copyRunsInputJson()}
                 className="px-3 py-1.5 text-xs bg-muted hover:bg-muted/80 rounded-lg transition-colors"
