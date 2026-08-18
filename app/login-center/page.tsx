@@ -43,6 +43,7 @@ export default function LoginCenterPage() {
       } catch { /* ignore malformed */ }
     };
     es.onerror = () => {
+      setLogs((l) => [...l, '❌ 连接中断(可能上一会话未结束或网络波动),3 秒后可重点按钮重试']);
       setState((s) => (s === 'running' ? 'error' : s));
       es.close();
     };

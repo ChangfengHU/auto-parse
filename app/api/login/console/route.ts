@@ -22,14 +22,26 @@ const TARGETS: Record<string, TargetSpec> = {
     url: 'https://yuanbao.tencent.com/',
     match: 'yuanbao.tencent.com',
     qrSelectors: [
+      'iframe[src*="open.weixin.qq.com"]',
       '[class*="login"] img[src^="data:image"]',
       'img[src^="data:image"]',
       '[class*="qrcode"] img',
       'canvas',
     ],
     prepare: async (page) => {
-      const btn = page.locator('button:has-text("Log In"), button:has-text("登录"), text=Log In').first();
+      // 等页面渲染出登录入口再点,并确认二维码弹窗真正出现
+      for (let i = 0; i < 8; i += 1) {
+        const t = await page.evaluate(() => document.body.innerText.slice(0, 800)).catch(() => '');
+        if (/Log In|登录/i.test(t)) break;
+        await page.waitForTimeout(1000);
+      }
+      const btn = page.locator('button:has-text("Log In"), button:has-text("登录")').first();
       if (await btn.count().catch(() => 0)) await btn.click().catch(() => {});
+      await page
+        .locator('img[src^="data:image"], [class*="qrcode"] img, canvas')
+        .first()
+        .waitFor({ state: 'visible', timeout: 15_000 })
+        .catch(() => {});
     },
     loggedIn: async (page) => {
       // 等页面真正渲染出侧栏文本再判定,避免加载骨架期误判
@@ -57,8 +69,10 @@ const TARGETS: Record<string, TargetSpec> = {
   },
 };
 
-// 同一 target 同时只允许一个登录流,避免互相刷新二维码
+// 同一 target 同时只允许一个登录流;新连接可顶替旧连接
 const activeStreams = new Set<string>();
+let streamSeq = 0;
+const currentStream = new Map<string, number>();
 
 export async function GET(req: NextRequest) {
   const target = req.nextUrl.searchParams.get('target') || '';
@@ -66,14 +80,15 @@ export async function GET(req: NextRequest) {
   if (!spec) {
     return new Response(JSON.stringify({ error: '未知 target,支持: yuanbao | mp' }), { status: 400 });
   }
-  if (activeStreams.has(target)) {
-    return new Response(JSON.stringify({ error: '该目标已有登录会话进行中,请稍后再试' }), { status: 409 });
-  }
+  // 新连接直接顶替旧连接:旧循环发现 streamId 不再是自己即退出
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       activeStreams.add(target);
+      streamSeq += 1;
+      const myStreamId = streamSeq;
+      currentStream.set(target, myStreamId);
       const send = (type: string, payload: string) => {
         try {
           controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type, payload })}\n\n`));
@@ -112,7 +127,11 @@ export async function GET(req: NextRequest) {
         };
 
         let lastQr = '';
-        const first = await captureQr();
+        let first: string | null = null;
+        for (let i = 0; i < 4 && !first; i += 1) {
+          first = await captureQr();
+          if (!first) await page.waitForTimeout(2000);
+        }
         if (!first) {
           send('error', '未捕获到二维码,请稍后重试');
           return;
@@ -123,6 +142,7 @@ export async function GET(req: NextRequest) {
 
         const deadline = Date.now() + 180_000;
         while (Date.now() < deadline) {
+          if (currentStream.get(target) !== myStreamId || req.signal.aborted) return;
           await page.waitForTimeout(3000);
           if (await spec.loggedIn(page)) {
             send('done', JSON.stringify({ target, loggedIn: true, message: '登录成功,会话已保存在服务器浏览器' }));
