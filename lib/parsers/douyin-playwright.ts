@@ -309,6 +309,32 @@ export async function parseDouyinWithPlaywright(
 
         const finishFromDetail = async (detail: Record<string, unknown>) => {
           if (settled) return;
+
+          // 图文帖(aweme_type 68)的 aweme_detail 里同样带 video 字段——那是背景音乐/封面
+          // 派生出来的流,直接当视频返回会让小程序播到一个只有声音的 mp4(2026-08-20 实测
+          // v.douyin.com/NOm2s2HRW7Y 返回的 ossUrl 首字节是 ID3,即 mp3 改名)。
+          // 所以先看有没有图片列表,有就按图文帖返回。
+          const detailImages = extractImagesFromUnknownList(
+            (detail as { images?: unknown; image_list?: unknown }).images ??
+              (detail as { image_list?: unknown }).image_list
+          );
+          if (detailImages.length) {
+            const imgTitle = String(detail.desc ?? "");
+            settled = true;
+            clearTimeout(timer);
+            resolve({
+              videoUrl: "",
+              title: imgTitle,
+              desc: imgTitle,
+              watermark: false,
+              mediaType: "image",
+              images: detailImages,
+              imageCount: detailImages.length,
+              coverUrl: detailImages[0]?.url || "",
+            });
+            return;
+          }
+
           const video = detail.video as Record<string, unknown> | undefined;
           if (!video) return;
 
