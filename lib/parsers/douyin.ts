@@ -156,20 +156,7 @@ function buildImageResult(
 }
 
 export async function parseDouyin(input: string, options: ParseDouyinOptions = {}): Promise<ParseResult> {
-  // 从分享文本中提取短链
-  const urlMatch = input.match(/https?:\/\/v\.douyin\.com\/[A-Za-z0-9_\-]+\/?/);
-  if (!urlMatch) throw new Error('未找到有效的抖音分享链接');
-  const shortUrl = urlMatch[0];
-
-  // 第1跳：短链 → iesdouyin 重定向，拿到数字 videoId
-  const step1 = await axios.get(shortUrl, {
-    maxRedirects: 0,
-    validateStatus: (s) => s >= 200 && s < 400,
-    headers: { 'User-Agent': UA_MOBILE },
-    timeout: 10000,
-  });
-  const iesdouyinUrl: string = step1.headers['location'];
-  if (!iesdouyinUrl) throw new Error('短链解析失败，未获取到重定向地址');
+  const iesdouyinUrl = await resolveDouyinContentUrl(input);
 
   const videoIdMatch = iesdouyinUrl.match(/\/video\/(\d+)/);
   const noteIdMatch = iesdouyinUrl.match(/\/note\/(\d+)/);
@@ -235,18 +222,7 @@ export async function parseDouyin(input: string, options: ParseDouyinOptions = {
 
 // 快速模式：不用 Playwright，直接走 playwm（带水印，约 3s）
 export async function parseDouyinFast(input: string): Promise<ParseResult> {
-  const urlMatch = input.match(/https?:\/\/v\.douyin\.com\/[A-Za-z0-9_\-]+\/?/);
-  if (!urlMatch) throw new Error('未找到有效的抖音分享链接');
-  const shortUrl = urlMatch[0];
-
-  const step1 = await axios.get(shortUrl, {
-    maxRedirects: 0,
-    validateStatus: (s) => s >= 200 && s < 400,
-    headers: { 'User-Agent': UA_MOBILE },
-    timeout: 10000,
-  });
-  const iesdouyinUrl: string = step1.headers['location'];
-  if (!iesdouyinUrl) throw new Error('短链解析失败');
+  const iesdouyinUrl = await resolveDouyinContentUrl(input);
 
   const videoIdMatch = iesdouyinUrl.match(/\/video\/(\d+)/);
   const noteIdMatch = iesdouyinUrl.match(/\/note\/(\d+)/);
@@ -280,4 +256,21 @@ export async function parseDouyinFast(input: string): Promise<ParseResult> {
   if (!cdnUrl) throw new Error('无法获取视频 CDN 地址');
 
   return { platform: 'douyin', videoId: videoIdMatch?.[1] || contentId || Date.now().toString(), videoUrl: cdnUrl, title, watermark: true };
+}
+
+
+async function resolveDouyinContentUrl(input: string): Promise<string> {
+  const canonical = input.match(/https?:\/\/(?:www\.)?douyin\.com\/(?:video|note)\/\d+/i);
+  if (canonical) return canonical[0];
+  const shared = input.match(/https?:\/\/v\.douyin\.com\/[A-Za-z0-9_\-]+\/?/);
+  if (!shared) throw new Error('未找到有效的抖音视频或分享链接');
+  const step = await axios.get(shared[0], {
+    maxRedirects: 0,
+    validateStatus: (status) => status >= 200 && status < 400,
+    headers: { 'User-Agent': UA_MOBILE },
+    timeout: 10000,
+  });
+  const resolved = step.headers['location'];
+  if (!resolved) throw new Error('短链解析失败，未获取到重定向地址');
+  return resolved;
 }
