@@ -64,6 +64,15 @@
 
 ## Done
 
+- [API-002] 抖音解析兼容行为系统返回的正式视频链接
+  Status: Done
+  Owner: codex
+  Scope: parser / video-content MCP integration
+  Updated: 2026-08-29T16:55:00Z
+  Commit: `d7941f8`
+  Log: dev-log/2026-08-29-douyin-canonical-video-url.md
+  Result: 生产节点接受 `/video/<id>`，指定 Codex 自动剪辑视频返回正确标题、ID 和视频流。
+
 - [INFRA-001] 统一 65 远端运行和部署方式
   Status: Done
   Owner: codex
