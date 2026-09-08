@@ -12,7 +12,7 @@ import { test } from 'node:test';
 const source = stripTypeScriptTypes(fs.readFileSync(new URL('../lib/workflow/nodes/file-upload.ts', import.meta.url), 'utf8'), { mode: 'transform' })
   .replace(/^import .*;\s*$/gm, '').replace(/^export /gm, '');
 
-for (const mode of ['success', 'http-failure', 'partial-download', 'input-failure', 'screenshot-failure']) {
+for (const mode of ['success', 'http-failure', 'partial-download', 'input-failure', 'screenshot-failure', 'douyin-success', 'douyin-failed', 'douyin-timeout']) {
   test('upload temp directory removed: ' + mode, async () => {
     const dirs = [];
     const server = http.createServer((_req, res) => {
@@ -36,7 +36,13 @@ for (const mode of ['success', 'http-failure', 'partial-download', 'input-failur
     vm.runInContext(source + '\n globalThis.execute = executeFileUpload;', sandbox);
     let consumed = false;
     const page = {
-      locator: () => ({ first: () => ({
+      url: () => mode.startsWith('douyin-') ? 'https://creator.douyin.com/creator-micro/content/post' : 'https://example.org/upload',
+      waitForFunction: async () => {
+        assert.equal(fs.readFileSync(path.join(dirs[0], 'video.mp4'), 'utf8'), 'test-video-bytes',
+          'selected file must survive asynchronous browser upload');
+        if (mode === 'douyin-timeout') throw Error('upload_timeout');
+      },
+      locator: () => ({ innerText: async () => mode === 'douyin-failed' ? '上传失败，重新上传' : '上传成功 重新上传', first: () => ({
         waitFor: async () => {},
         setInputFiles: async file => {
           assert.equal(fs.readFileSync(file, 'utf8'), 'test-video-bytes');
@@ -50,8 +56,8 @@ for (const mode of ['success', 'http-failure', 'partial-download', 'input-failur
       const result = await sandbox.execute(page, {
         url: 'http://127.0.0.1:' + server.address().port + '/video.mp4', selector: 'input',
       }, { emit: () => {} });
-      assert.equal(result.success, mode === 'success');
-      if (mode === 'success') assert.equal(consumed, true);
+      assert.equal(result.success, mode === 'success' || mode === 'douyin-success');
+      if (mode === 'success' || mode === 'douyin-success') assert.equal(consumed, true);
       assert.equal(dirs.length, 1);
       for (const dir of dirs) assert.equal(fs.existsSync(dir), false, 'temporary directory leaked');
     } finally {

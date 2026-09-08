@@ -10,6 +10,21 @@ const cli = await readFile(new URL('../lib/workflow/workflow-task-cli.ts', impor
 const startSource = clean(cli.slice(cli.indexOf('async function startWorkflowAsync('), cli.indexOf('\nfunction buildTaskProgress(')));
 const publish = { type: 'douyin_publish', params: {} };
 
+test('failed workflow step persists its diagnostic screenshot', async () => {
+  const source = await readFile(new URL('../lib/workflow/task-store.ts', import.meta.url), 'utf8');
+  const fn = clean(source.slice(source.indexOf('export function setTaskStepError('), source.indexOf('export function setTaskStepSkipped(')));
+  const task = { steps: [{}] };
+  let persisted = false;
+  const sandbox = { TASK_STORE: new Map([['task', task]]),
+    parseWorkflowStepErrorMessage: () => ({ error_code: 'ERROR', error_msg: 'failed' }),
+    persistWorkflowTask: value => { assert.equal(value, task); persisted = true; } };
+  vm.createContext(sandbox); vm.runInContext(fn, sandbox);
+  sandbox.setTaskStepError('task', 0, 'failed', 10, { screenshot: 'data:image/png;base64,test' });
+  assert.equal(task.steps[0].screenshot, 'data:image/png;base64,test');
+  assert.equal(task.steps[0].status, 'error');
+  assert.equal(persisted, true);
+});
+
 test('isolation selection preserves legacy and disabled nodes; rejects shared browser switching', () => {
   const sandbox = { Error }; vm.createContext(sandbox);
   vm.runInContext(runtimeSource, sandbox);

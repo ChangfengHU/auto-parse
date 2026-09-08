@@ -6,6 +6,11 @@
 - 上轮通过正式API建立候选douyin-publish-sunlight-20260908，保留旧douyin-publish未替换；素材库仅追加已校验的给小花找太阳视频，未覆盖旧素材。任务75ce4d51-8fa4-46ee-af09-9f5d1ed995fa在全部节点开始前报fleet_dispatch_unavailable，不能解读为抖音登录失败。失败证据保留在.data/douyin-workflow-check；临时服务停止，.next/dev约107MiB已清理，生产构建保留。
 - 本轮58/58回归通过，更新的测试明确禁止本地发布调用Fleet；账号不符、上传失败、AI声明缺失、未知回执及重复提交仍受保护。相关源码/测试ESLint与git diff --check通过。未新增依赖；准备复用84已有环境重跑同一素材、账号和稳定requestId。
 - 按vyibc-ops从Vault核对SSH、Supabase和GitHub配置，在84确认正式候选工作流存在、运行环境与金库Supabase配置一致、GitHub目标仓库和push权限。实际发布结果待下文追加，不把单元测试作为作品发布成功。
+- 门禁修复提交cca0f48已立即push并ls-remote一致。任务629c540f-2386-4988-9ae0-87e15c82642b实际通过目标账号及创作者上传权限，无需扫码；到编辑页面后明确显示上传失败，未点击发布。
+- 发现先前清理逻辑过早：Playwright本地浏览器传入文件路径不代表异步上传已读完，原setInputFiles后两秒即删除。抖音页面改为等待真实上传结果再finally清理，新增异步读取/失败/超时清理测试。61项回归通过；任务d180e31d-ceb2-44db-99b7-62613f3b6bf1上传节点成功且截图有视频预览，后续发布节点publication_step_failed，未点击发布。不能把上传节点成功当作作品创建成功。
+- 为下一次实际定位增加发布节点阶段错误码和失败截图，不输出原始异常中的敏感内容；沿用同一稳定requestId，不修改或删除发布意图账本。临时服务仅127.0.0.1:11008，生产11007未切换。
+- 后续实测定位为AI声明确认；ea479bf3截图显示选项随后已选中，因此不能把即时isChecked=false说成最终未选中。去掉隐藏input强制点击与旧预览文案硬匹配，改为点击可见label、等待同一input的checked状态，再确认。待真实整链复验。
+- 修复失败节点截图被task-store丢弃的问题：setTaskStepError接收并持久化已有NodeResult.screenshot，复用原任务证据不另建目录。新增截图持久化与AI未选中必须停止测试；63项回归通过。全仓tsc仍为task-store.ts既有11项PersistedTask类型错误，没有新增类型错误，不能宣称全仓通过。
 
 ## 目标与边界
 

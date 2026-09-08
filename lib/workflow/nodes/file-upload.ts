@@ -51,6 +51,18 @@ export async function executeFileUpload(
     await input.waitFor({ state: 'attached', timeout: 15_000 });
     await input.setInputFiles(tmpFile);
 
+    if (new URL(page.url()).origin === 'https://creator.douyin.com') {
+      ctx.emit?.('log', '等待抖音实际上传完成，完成前保留临时文件');
+      await page.waitForFunction(() => {
+        const text = document.body.innerText;
+        return /上传失败|上传出错|文件损坏/.test(text) ||
+          (!/取消上传/.test(text) && /上传成功|重新上传/.test(text));
+      }, null, { timeout: 600000 });
+      if (/上传失败|上传出错|文件损坏/.test(await page.locator('body').innerText())) {
+        throw new Error('video_upload_failed');
+      }
+    }
+
     await page.waitForTimeout(2000);
     log.push(`✅ 文件上传触发成功`);
 
@@ -62,7 +74,8 @@ export async function executeFileUpload(
     const screenshot = await captureScreenshot(page).catch(() => undefined);
     return { success: false, log, error, screenshot };
   } finally {
-    // setInputFiles resolves after Playwright has consumed the local file.
+    // A local browser may read the selected path asynchronously after setInputFiles.
+    // For Douyin, keep it until the actual upload finishes (or this node fails).
     // Own the directory before download starts, including partial-file failures.
     if (tmpDir) {
       await fs.promises.rm(tmpDir, { recursive: true, force: true });

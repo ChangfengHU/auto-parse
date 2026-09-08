@@ -383,6 +383,7 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
           setTaskStepError(taskId, stepIdx, result.error ?? 'failed', dur, {
             errorCode: result.errorCode,
             errorMsg: result.errorMsg,
+            screenshot: result.screenshot,
           });
         }
       },

@@ -51,7 +51,7 @@ test('AI disclosure is part of request fingerprint and unsafe asset origin is re
   assert.throws(() => ledger.publicationIdentity('request-test-01', uid, 'https://example.org/file.mp4', 'test'), /video_url_invalid/);
 });
 
-for (const mode of ['success', 'ai-success', 'ai-control-missing', 'upload-failed', 'content-failed', 'held', 'account-mismatch', 'missing-preflight', 'unknown-receipt', 'hold-before-submit']) {
+for (const mode of ['success', 'ai-success', 'ai-control-missing', 'ai-not-selected', 'upload-failed', 'content-failed', 'held', 'account-mismatch', 'missing-preflight', 'unknown-receipt', 'hold-before-submit']) {
   test('actual workflow node: ' + mode, async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'douyin-publication-test-'));
     let clicks = 0, fleetCalls = 0, declarations = 0;
@@ -60,13 +60,16 @@ for (const mode of ['success', 'ai-success', 'ai-control-missing', 'upload-faile
     const context = { vars: {}, outputs: { creatorVerified: true, accountId: uid, uploadedSourceUrl: videoUrl, title: 'test' }, emit: () => {} };
     if (mode === 'missing-preflight') context.outputs = {};
     const sandbox = { ...ledger, path, URL, AbortSignal, Error, process: { cwd: () => dir, env: { FLEET_NODE_ID: 'host-84' } },
+      captureScreenshot: async () => undefined,
       fetch: async () => { fleetCalls++; throw new Error('local_workflow_must_not_call_fleet'); },
     };
     vm.createContext(sandbox); vm.runInContext(runtimeSource + '\n' + nodeSource + '\n globalThis.execute = executeDouyinPublish;', sandbox);
     const locator = { count: async () => 1, fill: async () => {}, first() { return this; },
       innerText: async () => mode === 'upload-failed' ? '上传失败' : mode === 'content-failed' ? '上传成功 检测通过 审核不通过' : '上传成功 检测通过',
       filter() { return { count: async () => mode === 'ai-control-missing' ? 0 : 1,
-        locator: () => ({ click: async () => { declarations++; } }) }; },
+        click: async () => { declarations++; },
+        evaluate: async () => [],
+        locator: () => ({ click: async () => { declarations++; }, elementHandle: async () => ({}), isChecked: async () => mode !== 'ai-not-selected' }) }; },
     };
     const button = { count: async () => 1, isEnabled: async () => true, click: async () => { clicks++; } };
     const response = { url: () => url, request: () => ({ method: () => 'POST' }), status: () => 200,
@@ -84,7 +87,7 @@ for (const mode of ['success', 'ai-success', 'ai-control-missing', 'upload-faile
       assert.equal(result.success, success);
       assert.equal(fleetCalls, 0, 'local publication never depends on Fleet dispatch state');
       assert.equal(clicks, success || mode === 'unknown-receipt' ? 1 : 0);
-      assert.equal(declarations, mode === 'ai-success' ? 1 : 0);
+      assert.equal(declarations, ['ai-success', 'ai-not-selected'].includes(mode) ? 1 : 0);
       if (success || mode === 'unknown-receipt') {
         const replay = await sandbox.execute(page, params, context);
         assert.equal(replay.success, success);
