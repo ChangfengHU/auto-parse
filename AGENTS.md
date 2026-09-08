@@ -2,6 +2,8 @@
 
 ## 当前机主约定（2026-09-08，优先于下方历史环境说明）
 
+- GitHub、Cloudflare、Supabase、R2等操作先查Vault对应配置（未知键先列目录），在实际执行机器用最小只读请求核对身份、目标及所需权限，再执行提交、推送或部署。不得因本机未配置认证就盲试或要求用户提供已有密钥。凭据只在操作进程使用，不写URL、源码、日志或明文缓存；认证、权限、网络和Git分支分歧分别报告，认证成功不保证写入成功。
+
 - 本任务及后续 auto-parse 开发仅在 `84.8.217.45:/opt/auto-parse` 完成。95 只是 SSH 编排入口，不保留工作副本、不安装依赖、不构建；原双环境一致性要求不再适用，不得为满足旧条款重建 95 副本。
 - 实况检查：`systemctl show auto-parse -p WorkingDirectory -p ExecStart`。本次核实为 production start、回环端口 11007；入口为 auto-parse-v2.vyibc.com / auto-parse-65.vyibc.com。
 - 仍在 SSH 登录后基于远端真实代码最小修改，保护 `.materials.json` 等其他工作；不得覆盖运行目录。验证后的本任务提交立即 push，只用于保存成果，不用于从另一环境覆盖部署。

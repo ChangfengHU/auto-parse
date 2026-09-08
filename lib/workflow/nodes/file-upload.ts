@@ -6,23 +6,22 @@ import path from 'path';
 import fs from 'fs';
 import https from 'https';
 import http from 'http';
+import { pipeline } from 'node:stream/promises';
 
 /** 下载 URL 到本地临时文件，返回临时文件路径 */
-async function downloadToTemp(url: string): Promise<string> {
-  const ext = path.extname(new URL(url).pathname) || '.mp4';
-  const tmpFile = path.join(os.tmpdir(), `wf-upload-${Date.now()}${ext}`);
-
-  return new Promise((resolve, reject) => {
+async function downloadToTemp(url: string, tmpFile: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
     const proto = url.startsWith('https') ? https : http;
-    const file = fs.createWriteStream(tmpFile);
-    proto.get(url, res => {
+    const request = proto.get(url, res => {
       if (res.statusCode !== 200) {
+        res.resume();
         reject(new Error(`下载失败 HTTP ${res.statusCode}`));
         return;
       }
-      res.pipe(file);
-      file.on('finish', () => file.close(() => resolve(tmpFile)));
+      pipeline(res, fs.createWriteStream(tmpFile, { flags: 'wx', mode: 0o600 }))
+        .then(resolve, reject);
     }).on('error', reject);
+    request.setTimeout(60_000, () => request.destroy(new Error('视频下载超时')));
   });
 }
 
@@ -33,13 +32,18 @@ export async function executeFileUpload(
 ): Promise<NodeResult> {
   const log: string[] = [];
   let tmpFile = '';
+  let tmpDir = '';
 
   try {
     const url = params.url;
     log.push(`⬇️ 下载视频：${url.slice(-50)}`);
     ctx.emit?.('log', `⬇️ 下载视频中...`);
 
-    tmpFile = await downloadToTemp(url);
+    const source = new URL(url);
+    if (!['https:', 'http:'].includes(source.protocol)) throw new Error('视频地址必须是 HTTP(S)');
+    tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'wf-upload-'));
+    tmpFile = path.join(tmpDir, 'video' + (path.extname(source.pathname) || '.mp4'));
+    await downloadToTemp(url, tmpFile);
     log.push(`✅ 下载完成：${path.basename(tmpFile)}`);
 
     log.push(`📤 注入文件到上传控件：${params.selector}`);
@@ -58,11 +62,11 @@ export async function executeFileUpload(
     const screenshot = await captureScreenshot(page).catch(() => undefined);
     return { success: false, log, error, screenshot };
   } finally {
-    // 延迟清理临时文件（上传可能还在进行）
-    if (tmpFile) {
-      setTimeout(() => {
-        try { fs.unlinkSync(tmpFile); } catch { /* ignore */ }
-      }, 300_000); // 5 分钟后清理
+    // setInputFiles resolves after Playwright has consumed the local file.
+    // Own the directory before download starts, including partial-file failures.
+    if (tmpDir) {
+      await fs.promises.rm(tmpDir, { recursive: true, force: true });
+      ctx.emit?.('log', '🧹 本节点临时上传文件已清理');
     }
   }
 }
