@@ -390,6 +390,8 @@ export interface CredentialLoginParams {
   credentialId?: string
   strict?: boolean
   outputCookieVar?: string
+  verifyDouyinCreator?: boolean
+  expectedAccountId?: string
 }
 
 export interface WorkflowCallParams {

@@ -1,5 +1,7 @@
 # 当前远端开发与部署规范
 
+> 2026-09-08 机主修订：本文下方95/双环境/开发服务器描述是历史记录，不再用于当前任务。唯一开发目录为84.8.217.45:/opt/auto-parse；用 `systemctl show auto-parse -p WorkingDirectory -p ExecStart` 查询生产命令，当前回环11007。95不留副本。验证后在84提交并立即push保存，不从其他环境覆盖部署。详见AGENTS.md顶部当前约定。
+
 本文记录 `152.32.214.95:/root/auto-parse` 当前事实。`deploy/README.md` 和 `deploy/*.sh` 是历史 Docker/镜像推送方案，未经负责人批准不得用于当前远端。
 
 ## 强制边界

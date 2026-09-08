@@ -1,0 +1,18 @@
+{
+  "schema": 2,
+  "repository": "ChangfengHU/auto-parse",
+  "content_status": "needs-review",
+  "documents": {
+    "state": ".brain/STATE.md",
+    "tasks": "TASKS.md",
+    "handoff": ".brain/HANDOFF.md",
+    "evidence": ".brain/evidence.jsonl",
+    "dev_log": "dev-log",
+    "wiki": "experience",
+    "conventions": ".brain/conventions",
+    "capabilities": ".brain/capabilities.tsv"
+  },
+  "pending": [
+    "Verify goals, decisions, tasks and runtime; do not infer completion from initialization."
+  ]
+}

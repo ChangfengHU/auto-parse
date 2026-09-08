@@ -1,5 +1,14 @@
 # Agent 项目接手入口
 
+## 当前机主约定（2026-09-08，优先于下方历史环境说明）
+
+- 本任务及后续 auto-parse 开发仅在 `84.8.217.45:/opt/auto-parse` 完成。95 只是 SSH 编排入口，不保留工作副本、不安装依赖、不构建；原双环境一致性要求不再适用，不得为满足旧条款重建 95 副本。
+- 实况检查：`systemctl show auto-parse -p WorkingDirectory -p ExecStart`。本次核实为 production start、回环端口 11007；入口为 auto-parse-v2.vyibc.com / auto-parse-65.vyibc.com。
+- 仍在 SSH 登录后基于远端真实代码最小修改，保护 `.materials.json` 等其他工作；不得覆盖运行目录。验证后的本任务提交立即 push，只用于保存成果，不用于从另一环境覆盖部署。
+- 临时依赖、下载和构建中间产物用完清理；R2 文件确认可下载且校验完整后，删除无后续用途的本地副本。运行中的生产依赖及唯一成果不能当临时文件删。
+- 95 退役副本已获机主授权保全至本机 `/home/claude/task-recovery/auto-parse-95-20260908`，仅供核对未提交测试/记录，不是开发或部署目录；归并且保存后删除。禁止继续双副本开发。
+- DOUYIN-PUBLISH 必须通过 Supabase 正式工作流执行，Fleet/MCP 仅作入口或登录来源。以真实作品 ID/创建回执验收，未知提交结果不重试，不绕过机群隔离。
+
 ## 项目定位
 `auto-parse` 是 Next.js 全栈自动化平台，包含视频解析/发布、浏览器自动化、工作流、Gemini 网页生图和批量任务。远端运行目录 `/root/auto-parse`，公网入口 `https://parse.vyibc.com`。
 

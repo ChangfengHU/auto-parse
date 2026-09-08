@@ -1290,9 +1290,20 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       },
       outputCookieVar: {
         label: 'Cookie 输出变量名',
-        desc: '把注入前的原始 Cookie 字符串写入变量，供后续调试。',
+        desc: '旧模式下输出原始 Cookie。开启抖音发布前检查时不输出 Cookie 或凭证ID。',
         type: 'string',
         example: 'credentialCookieStr',
+      },
+      verifyDouyinCreator: {
+        label: '抖音发布前检查',
+        desc: '注入凭证后验证创作者账号与视频上传控件。必须填写目标账号UID；失败即停止，不跳过、不要求重新扫码。默认关闭，保留旧流程。',
+        type: 'boolean',
+      },
+      expectedAccountId: {
+        label: '目标抖音账号UID',
+        desc: '来自已确认的创作者账号发现结果（不是昵称或抖音号）。验证实际账号一致，防止串号。',
+        type: 'template',
+        example: '{{douyinAccountId}}',
       },
     },
   },

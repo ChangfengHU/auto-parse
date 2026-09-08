@@ -1,5 +1,11 @@
 # HANDOFF — auto-parse(接收协议)
 
+## 机主最新接收约定（2026-09-08）
+
+开发工作区仅为 `84.8.217.45:/opt/auto-parse`。从 Vault 的 SSH 配置定位并登录后，执行 `systemctl show auto-parse -p WorkingDirectory -p ExecStart` 和 `git status --short` 获取实况；不要按下方历史实例表在 95 克隆项目。机主已取消双环境开发要求。
+
+规范以 AGENTS.md 顶部最新约定为准，状态读 TASKS.md 与 dev-log/2026-09-08-douyin-workflow-credential.md。运行环境变量由 `/etc/auto-parse.env` 提供，只读变量名和引用位置，不回显值。机群登录由 Vault/Fleet 发现与同步，auto-parse 正式 Supabase 工作流执行发布。
+
 本文件的唯一职责:**零上下文的新 agent 如何从一无所有到接管本项目**。
 它不是进度报告、不是任务清单。任务看 `TASKS.md`;发生过什么看 `dev-log/`;
 踩坑经验看 `experience/`(**接手前必读**,它就是本项目的 wiki 前身)。

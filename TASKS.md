@@ -4,6 +4,15 @@
 
 ## In Progress
 
+- [WORKFLOW-002] 抖音凭证预检与正式工作流自动发布
+  Status: In Progress
+  Owner: codex
+  Scope: credential / workflow / publishing
+  Updated: 2026-09-08
+  Commit: pending
+  Log: dev-log/2026-09-08-douyin-workflow-credential.md
+  Next: 仅在 84 开发；验证并部署凭证节点，调整 Supabase 正式工作流及 MCP，取得真实作品回执。95 副本已删除。
+
 - [API-001] 自建腾讯元宝扫码登录与视频号取流
   Status: In Progress
   Owner: codex
