@@ -52,6 +52,19 @@ const TIMEOUT_META: ParamMeta = {
 // ── 节点目录 ──────────────────────────────────────────────────────────────────
 
 export const NODE_CATALOG: NodeCatalogItem[] = [
+  {
+    type: 'douyin_publish', label: '抖音发布与真实回执', icon: '📤', category: 'advanced',
+    desc: '接在凭证与上传节点后，等待真实上传/检测完成、选择AI声明、只提交一次并持久化作品ID；结果不明禁止重试。',
+    defaultParams: { requestId: '{{requestId}}', expectedAccountId: '{{douyinAccountId}}', videoUrl: '{{videoUrl}}', title: '{{title}}', aiGenerated: true, confirmPublish: false },
+    paramMeta: {
+      requestId: { label: '稳定请求ID', type: 'template', required: true, desc: '同一发布意图必须复用，禁止失败后换ID盲重试。' },
+      expectedAccountId: { label: '目标账号UID', type: 'template', required: true, desc: '与凭证预检的创作者UID一致。' },
+      videoUrl: { label: '视频地址', type: 'template', required: true, desc: '已上传R2的公开MP4，参与幂等校验。' },
+      title: { label: '作品标题', type: 'template', required: true, desc: '最多30字，与素材保持一致。' },
+      aiGenerated: { label: 'AI生成内容', type: 'boolean', desc: '开启后必须成功选择平台AI声明。' },
+      confirmPublish: { label: '确认真实发布', type: 'boolean', desc: '默认关闭；仅在机主授权发布时开启。' },
+    },
+  },
   // ── 基础节点 ──────────────────────────────────────────────────────────────
 
   {

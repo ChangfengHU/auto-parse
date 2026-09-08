@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { chromium, type Browser, type Page } from 'playwright';
 import { getPersistentContext } from '@/lib/persistent-browser';
 import { shouldDeferNativePageBootstrap } from '@/lib/workflow/node-runtime';
+import { needsIsolatedDouyinBrowser, verifyDouyinDispatch } from '@/lib/workflow/douyin-runtime';
 import { runWorkflow } from '@/lib/workflow/engine';
 import {
   addTaskLog,
@@ -323,7 +324,9 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
     initialStatus: task.status,
   });
   try {
-    if (deferBootstrap) {
+    const isolatedDouyin = needsIsolatedDouyinBrowser(task.workflow);
+    if (isolatedDouyin) await verifyDouyinDispatch();
+    if (isolatedDouyin || deferBootstrap) {
       placeholderBrowser = await chromium.launch({ headless: true });
       page = await placeholderBrowser.newPage();
     } else {
@@ -434,6 +437,8 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
       pageWasClosed: page ? page.isClosed() : true,
     });
     await closeTaskRuntimeNow(taskId).catch(() => {});
+    // Also close a task-owned browser if page creation failed before registration.
+    if (placeholderBrowser) await placeholderBrowser.close().catch(() => {});
     clearTaskRuntime(taskId);
   }
 }

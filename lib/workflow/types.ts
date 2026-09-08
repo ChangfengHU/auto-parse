@@ -23,6 +23,7 @@ export type NodeType =
   | 'localhost_image_download' // 高级：本地解析页面图片批量下载 → 上传 OSS
   | 'localhost_image_download_debug' // 调试：本地图片批量下载调试版本
   | 'credential_login' // 高级：按凭证 ID 拉取并注入平台 Cookie
+  | 'douyin_publish' // 业务：上传后检查、AI声明、单次发布与真实作品回执
   | 'workflow_call' // 高级：把现有工作流当作节点执行（支持并发多次调用）
   | 'metaai_generate' // 高级：调用外部 Python 脚本执行 Meta AI 生成视频并上传 OSS
   | 'gemini_parallel_generate' // 高级：并发打开多个 Tab 同时触发 Gemini 生图

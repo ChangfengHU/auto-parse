@@ -31,6 +31,7 @@ import { executeXhsDownload } from './nodes/xhs-download';
 import { executeLocalhostImageDownload } from './nodes/localhost-image-download';
 import { executeLocalhostImageDownloadDebug } from './nodes/localhost-image-download-debug';
 import { executeCredentialLogin } from './nodes/credential-login';
+import { executeDouyinPublish } from './nodes/douyin-publish';
 import { executeWorkflowCall } from './nodes/workflow-call';
 import { executeMetaAIGenerate } from './nodes/metaai-generate';
 import { executeGeminiParallelGenerate } from './nodes/gemini-parallel-generate';
@@ -63,6 +64,7 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   localhost_image_download: executeLocalhostImageDownload,
   localhost_image_download_debug: executeLocalhostImageDownloadDebug,
   credential_login:       executeCredentialLogin,
+  douyin_publish:         executeDouyinPublish,
   workflow_call:          executeWorkflowCall,
   metaai_generate:       executeMetaAIGenerate,
   gemini_parallel_generate: executeGeminiParallelGenerate,

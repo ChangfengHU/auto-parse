@@ -55,7 +55,7 @@ export async function executeFileUpload(
     log.push(`✅ 文件上传触发成功`);
 
     const screenshot = await captureScreenshot(page);
-    return { success: true, log, screenshot, output: { tmpFile } };
+    return { success: true, log, screenshot, output: { tmpFile, uploadedSourceUrl: params.url } };
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     log.push(`❌ 文件上传失败: ${error}`);
