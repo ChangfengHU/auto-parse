@@ -69,3 +69,4 @@
 - 新增helper/节点/测试ESLint及diff-check通过；全仓类型检查仍需如实记录历史task-store.ts错误，不宣称全仓通过。未安装依赖，临时测试文件finally清理。
 - 84恢复副本清单无独有文件；凭证运行时代码仅注释差异，历史材料文件无修改，4ad4f43含原分支及远端提交。确认lsof无使用后精确删除 `/home/claude/task-recovery/auto-parse-95-20260908`，约8.1MiB；约1264KiB唯一制作记录保留。95已确认清理项未重新创建。
 - 仍未构建/重启生产服务，未修改Supabase工作流，未接通Fleet MCP，未上传/发布本次视频；需要FLEET_NODE_ID配置及后续整链验收。84新鲜proxy.fresh_exit检查仍失败，修复需沿正常Fleet流程，不能解除隔离绕行。
+- 收尾复验：60/60再次通过，ESLint和diff-check通过；`tsc --noEmit --incremental false`只有原task-store.ts的11项历史错误，无新增诊断。Vault-first在84核对GitHub身份/仓库push权限后提交 `a00eae58ecd8adf77f61d2a06913dde79e474a18`，立即push并以ls-remote核对同一哈希；原.materials.json哈希仍为481b54a148b0f606457836ebee98d6ff21819a33a5d8d7050257dd37b756f6a6。07:49 UTC只读复查84仍dispatchHeld=true，95已确认删除路径仍不存在，磁盘约17GiB可用。

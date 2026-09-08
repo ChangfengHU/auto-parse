@@ -9,7 +9,7 @@
   Owner: codex
   Scope: credential / workflow / publishing
   Updated: 2026-09-08
-  Commit: pending
+  Commit: a00eae58 (已核对 GitHub main)
   Log: dev-log/2026-09-08-douyin-workflow-credential.md
   Next: 仅在84开发；60项节点/运行器回归通过，待处理Fleet代理隔离、构建部署并配置执行节点身份、调整Supabase正式工作流及MCP，取得真实作品回执。95副本和84恢复副本已删除；生产尚未切换。
 
