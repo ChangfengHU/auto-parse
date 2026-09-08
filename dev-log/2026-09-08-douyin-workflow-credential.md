@@ -1,5 +1,14 @@
 # WORKFLOW-002 — auto-parse 抖音凭证发布前检查
 
+## 远程原浏览器验证（2026-09-08）
+
+- 用户扫码后，从 84 经回环反向 SSH 隧道实际访问 95 browser-3 创作者接口，status_code=0，账号 53017623213 / 唯伊不可，视频上传控件存在。只关诊断自建页，未覆盖 Cookie；不需要安装浏览器插件才能控制原会话。
+- 按用户授权扩展现有节点和运行时：`useExistingBrowser` 连接服务端回环 CDP，在原 context 创建任务页；校验真实账号但完全跳过凭证查询及 Cookie 注入。保留本地隔离模式，不恢复 Fleet 门禁。进程级远程租约及外层浏览器活动 flock 防止本任务共享控制；不是生产分布式浏览器池。
+- 文件上传支持 buffer（50 MiB 上限），避免把 84 路径交给 95 浏览器；仍在 84 下载并 finally 清理。首个正式 HTTP 任务 21171b6a-4d1f-4171-b915-04bf7ec6a03c 账号验证成功，setInputFiles 默认 30 秒超时，未执行发布节点；远程传输改为 180 秒后再次验证。
+- 任务 c534c8d9-5d65-47a1-bb22-2a2badb8d5a2 再次验证同一账号，二进制传入完成并进入等待实际上传。2026-09-08 11:08:18 UTC，95 systemd journal 记录 browser@3 被 stop/start，任务报 Target page, context or browser has been closed。不是本轮发起的重启，具体操作者尚未确认；不能说视频已上传成功或登录失效。已向用户确认是否另一个会话在操作，暂停继续重试。
+- Supabase 候选仍是 douyin-publish-sunlight-20260908，同一 materialId、视频、账号和 requestId；只更新远程模式及文件传输参数。写前用 Vault 在 84 核验配置与目标表，写后通过正式 API 校验。旧 douyin-publish、生产 11007 构建、Fleet MCP 未切换；无发布点击、无作品 ID，意图账本目录检查为空。
+- 70/70 回归通过（远程端点限制、互斥释放、仅自建标签页、零 Cookie 注入、buffer 及大小限制/清理等），相关 ESLint 通过；全仓 tsc 仍是 task-store.ts 既有 11 项类型错误。所有修改只在 84 /opt/auto-parse；未安装依赖，未在 95 建立项目或保存视频。原有 .materials.json 修改未纳入提交。
+
 ## 当前修订：取消本地发布对Fleet门禁的依赖
 
 - 机主明确说明该前置门禁不是需求，授权移除。本轮只取消auto-parse三处verifyDouyinDispatch调用与helper，不修改Fleet自身隔离表/代理/其他浏览器；下方不绕过隔离的历史要求不再限制本地工作流。保留实际账号、上传完成、内容检测、AI声明、独占意图及真实回执检查。

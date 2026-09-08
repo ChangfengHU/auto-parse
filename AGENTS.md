@@ -11,6 +11,7 @@
 - 95 退役副本已归并到已推送的 Git 历史，84 原 `task-recovery/auto-parse-95-20260908` 恢复目录已核对后删除。通过 Git 恢复源码，禁止继续双副本开发。
 - DOUYIN-PUBLISH 必须通过 Supabase 正式工作流执行，Fleet/MCP 仅作入口或登录来源。以真实作品 ID/创建回执验收，未知提交结果不重试。机主2026-09-08明确取消本地发布对Fleet调度门禁的依赖：不得因dispatchHeld、缺少FLEET_NODE_ID或Fleet不可用阻塞本地工作流；保留任务独立浏览器、账号/上传/AI声明/防重复发布检查，不修改Fleet自身隔离机制。
 - `.data/douyin-publications` 保存发布意图与回执，不是临时产物；迁移服务必须保全，丢失或未知状态时先人工核对作品，不得换 requestId 盲目重发。它不是跨机器的分布式去重服务。
+- 机主补充授权：84 的正式工作流可通过回环 SSH 隧道控制 95 已登录浏览器；显式 `useExistingBrowser` 模式不迁移/覆盖 Cookie，只建任务标签页，持有浏览器活动锁，结束仅关任务页并断开 CDP。文件用 `transferMode: buffer` 从 84 传输（上限 50 MiB），95 不保留媒体副本；不代表允许共用无锁浏览器或另建发布器。
 
 ## 项目定位
 `auto-parse` 是 Next.js 全栈自动化平台，包含视频解析/发布、浏览器自动化、工作流、Gemini 网页生图和批量任务。远端运行目录 `/root/auto-parse`，公网入口 `https://parse.vyibc.com`。

@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { chromium, type Browser, type Page } from 'playwright';
 import { getPersistentContext } from '@/lib/persistent-browser';
 import { shouldDeferNativePageBootstrap } from '@/lib/workflow/node-runtime';
-import { needsIsolatedDouyinBrowser } from '@/lib/workflow/douyin-runtime';
+import { needsIsolatedDouyinBrowser, remoteDouyinEndpoint, acquireRemoteDouyinBrowser } from '@/lib/workflow/douyin-runtime';
 import { runWorkflow } from '@/lib/workflow/engine';
 import {
   addTaskLog,
@@ -315,6 +315,7 @@ function mergeOutputsToFinalVars(
 async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
   let page: Page | null = null;
   let placeholderBrowser: Browser | null = null;
+  let releaseRemoteBrowser: (() => void) | null = null;
   const deferBootstrap = shouldDeferNativePageBootstrap(task.workflow);
   wfTaskDiag('run.start', {
     taskId,
@@ -325,7 +326,14 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
   });
   try {
     const isolatedDouyin = needsIsolatedDouyinBrowser(task.workflow);
-    if (isolatedDouyin || deferBootstrap) {
+    const remoteEndpoint = remoteDouyinEndpoint(task.workflow, process.env.WORKFLOW_REMOTE_CDP_URL);
+    if (remoteEndpoint) {
+      releaseRemoteBrowser = acquireRemoteDouyinBrowser(remoteEndpoint);
+      placeholderBrowser = await chromium.connectOverCDP(remoteEndpoint, { timeout: 15000 });
+      const context = placeholderBrowser.contexts()[0];
+      if (!context) throw new Error('remote_browser_context_missing');
+      page = await context.newPage();
+    } else if (isolatedDouyin || deferBootstrap) {
       placeholderBrowser = await chromium.launch({ headless: true });
       page = await placeholderBrowser.newPage();
     } else {
@@ -440,6 +448,7 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
     // Also close a task-owned browser if page creation failed before registration.
     if (placeholderBrowser) await placeholderBrowser.close().catch(() => {});
     clearTaskRuntime(taskId);
+    releaseRemoteBrowser?.();
   }
 }
 

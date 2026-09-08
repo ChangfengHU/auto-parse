@@ -8,6 +8,14 @@
 
 本地发布不依赖Fleet调度状态，不要求FLEET_NODE_ID；机主已明确取消这项新增前置条件。以实际账号、上传权限和真实创建回执验收；不得把历史Fleet隔离记录重新解释为本地执行禁令。Fleet自身调度机制不在此次修改范围内。
 
+### 远程原浏览器验证方式
+
+机主授权 84 工作流使用 95 已登录 browser-3，不再以跨机器迁移 Cookie 为前提。服务端显式设置 `WORKFLOW_REMOTE_CDP_URL`，只允许运营方建立的 `127.0.0.1` HTTP/WS 端点；不从工作流接受任意 CDP 主机。既有 `credential_login` 节点配置 `platform: douyin`、`verifyDouyinCreator: true`、`useExistingBrowser: true`、经确认的 `expectedAccountId`；删除无用的 credentialId 输入。`file_upload` 使用 `transferMode: buffer`，最大 50 MiB，传输时限 180 秒。
+
+从 95 建立到 84 的反向 SSH 隧道（`-R 127.0.0.1:19224:127.0.0.1:9224`），外层持有 `/run/linux-browser-vnc/activity-9224.lock`，直到任务结束及任务页关闭。服务进程内另有远程端点互斥；不是跨进程/跨机器租约，生产池化调度尚未实现。任务只创建并关闭自己的标签页，结束断开 CDP，不关闭原始会话或覆盖 Cookie。浏览器仍可能被不遵守活动锁的外部操作重启：检查 `systemctl show linux-browser-vnc-browser@3` 和对应 journal 后再判断故障，不把 Fleet 登录标签或历史 Cookie 当作实际创作者会话证明。
+
+验证仍须 POST `/api/workflows/tasks` 执行 Supabase 正式候选，不从脚本直接调用发布器；保留原 requestId 和 `.data/douyin-publications`。临时 Next dev 仅作源码验收，不等于生产部署；用完停服务并核实清理 `.next/dev`，保留唯一任务证据。
+
 本文件的唯一职责:**零上下文的新 agent 如何从一无所有到接管本项目**。
 它不是进度报告、不是任务清单。任务看 `TASKS.md`;发生过什么看 `dev-log/`;
 踩坑经验看 `experience/`(**接手前必读**,它就是本项目的 wiki 前身)。

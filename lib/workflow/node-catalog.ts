@@ -566,6 +566,12 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
         required: true,
         example: '{{videoUrl}} 或 https://example.com/video.mp4',
       },
+      transferMode: {
+        label: '文件传输方式',
+        desc: '默认 path 用于本地浏览器；远程 CDP 填 buffer，通过连接传输文件内容（最大 50 MiB），不传本地路径。',
+        type: 'string',
+        example: 'buffer',
+      },
     },
   },
 
@@ -1310,6 +1316,11 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       verifyDouyinCreator: {
         label: '抖音发布前检查',
         desc: '注入凭证后验证创作者账号与视频上传控件。必须填写目标账号UID；失败即停止，不跳过、不要求重新扫码。默认关闭，保留旧流程。',
+        type: 'boolean',
+      },
+      useExistingBrowser: {
+        label: '使用已登录远程浏览器',
+        desc: '仅适用于抖音发布前检查。连接服务端 WORKFLOW_REMOTE_CDP_URL 回环隧道，在独立任务页验证账号，不读取或覆盖 Cookie；远程文件上传须用 buffer。',
         type: 'boolean',
       },
       expectedAccountId: {

@@ -76,19 +76,23 @@ export async function executeCredentialLogin(
   if (params.verifyDouyinCreator === true) {
     try {
       const expectedAccountId = String(params.expectedAccountId ?? '').trim();
-      if (platform !== 'douyin' || !/^dy_[A-Za-z0-9_-]+$/.test(credentialId) ||
+      if (platform !== 'douyin' || (params.useExistingBrowser !== true && !/^dy_[A-Za-z0-9_-]+$/.test(credentialId)) ||
           !/^\d{5,30}$/.test(expectedAccountId)) {
         throw new DouyinCredentialError('creator_verification_input_invalid');
       }
-      const cookieStr = await fetchCookieStr('douyin', credentialId);
-      if (!cookieStr) throw new DouyinCredentialError('credential_not_found');
-      const parsed = parseCookieStr(cookieStr, '.douyin.com');
-      if (!parsed.length) throw new DouyinCredentialError('credential_cookie_invalid');
-      await page.context().addCookies(parsed);
+      let cookieCount = 0;
+      if (params.useExistingBrowser !== true) {
+        const cookieStr = await fetchCookieStr('douyin', credentialId);
+        if (!cookieStr) throw new DouyinCredentialError('credential_not_found');
+        const parsed = parseCookieStr(cookieStr, '.douyin.com');
+        if (!parsed.length) throw new DouyinCredentialError('credential_cookie_invalid');
+        await page.context().addCookies(parsed);
+        cookieCount = parsed.length;
+      }
       const account = await verifyDouyinCreator(page, expectedAccountId);
       const message = '✅ 已验证目标抖音账号与创作者上传权限（无需扫码）';
       ctx.emit?.('log', message);
-      return { success: true, log: [message], output: { platform, cookieCount: parsed.length, ...account } };
+      return { success: true, log: [message], output: { platform, cookieCount, ...account } };
     } catch (error) {
       const code = error instanceof DouyinCredentialError ? error.code : 'credential_preflight_failed';
       const message = `❌ 抖音发布前检查失败：${code}`;

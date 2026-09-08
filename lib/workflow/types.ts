@@ -189,6 +189,7 @@ export interface ScrollParams {
 export interface FileUploadParams {
   selector: string  // input[type=file] 的选择器
   url: string       // 视频/文件 URL，支持 {{变量}}
+  transferMode?: 'path' | 'buffer' // 远程 CDP 必须传二进制，不能传本机路径；上限 50 MiB
 }
 
 export interface WaitConditionParams {
@@ -392,6 +393,7 @@ export interface CredentialLoginParams {
   strict?: boolean
   outputCookieVar?: string
   verifyDouyinCreator?: boolean
+  useExistingBrowser?: boolean // 复用服务端指定的远程会话，不查询或注入 Cookie
   expectedAccountId?: string
 }
 

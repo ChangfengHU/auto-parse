@@ -12,6 +12,16 @@ const uid = '53017623213';
 const credential = 'dy_test_only_not_real';
 const cookie = 'sessionid=synthetic-test-value';
 
+test('existing browser verifies live account without fetching or overwriting any cookie', async () => {
+  const fixture = setup({ storeError: true });
+  const result = await fixture.run({ useExistingBrowser: true, credentialId: '' });
+  assert.equal(result.success, true);
+  assert.equal(result.output.accountId, uid);
+  assert.equal(result.output.cookieCount, 0);
+  assert.equal(fixture.injected.length, 0);
+  assert.ok(!fixture.calls.includes('store'));
+});
+
 function setup({ status = 200, data = { status_code: 0, user: { uid, nickname: 'test' } },
   location, pageError, apiError, missingInput, storedCookie = cookie, storeError } = {}) {
   const events = [], injected = [], vars = {}, calls = [];

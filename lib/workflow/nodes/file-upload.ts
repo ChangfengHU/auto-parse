@@ -49,7 +49,17 @@ export async function executeFileUpload(
     log.push(`📤 注入文件到上传控件：${params.selector}`);
     const input = page.locator(params.selector).first();
     await input.waitFor({ state: 'attached', timeout: 15_000 });
-    await input.setInputFiles(tmpFile);
+    if (params.transferMode === 'buffer') {
+      const size = (await fs.promises.stat(tmpFile)).size;
+      if (size > 50 * 1024 * 1024) throw new Error('remote_upload_file_too_large');
+      await input.setInputFiles({
+        name: path.basename(tmpFile),
+        mimeType: path.extname(tmpFile).toLowerCase() === '.mp4' ? 'video/mp4' : 'application/octet-stream',
+        buffer: await fs.promises.readFile(tmpFile),
+      }, { timeout: 180000 });
+    } else {
+      await input.setInputFiles(tmpFile);
+    }
 
     if (new URL(page.url()).origin === 'https://creator.douyin.com') {
       ctx.emit?.('log', '等待抖音实际上传完成，完成前保留临时文件');

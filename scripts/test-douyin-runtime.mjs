@@ -26,7 +26,7 @@ test('failed workflow step persists its diagnostic screenshot', async () => {
 });
 
 test('isolation selection preserves legacy and disabled nodes; rejects shared browser switching', () => {
-  const sandbox = { Error }; vm.createContext(sandbox);
+  const sandbox = { Error, URL }; vm.createContext(sandbox);
   vm.runInContext(runtimeSource, sandbox);
   assert.equal(sandbox.needsIsolatedDouyinBrowser({ nodes: [{ type: 'material' }] }), false);
   assert.equal(sandbox.needsIsolatedDouyinBrowser({ nodes: [{ ...publish, disabled: true }] }), false);
@@ -44,7 +44,7 @@ for (const mode of ['isolated', 'legacy', 'held', 'unreachable', 'missing-node',
     }, close: async () => { events.push('browser-close'); } };
     const task = { workflowId: 'test', workflow: { nodes: mode === 'legacy' ? [{ type: 'material' }] : [publish] }, status: 'running', initialVars: {} };
     const sandbox = {
-      Error, console: { error: () => {} },
+      Error, URL, console: { error: () => {} },
       process: { env: mode === 'missing-env' ? {} : { FLEET_NODE_ID: 'host-84' } },
       fetch: async () => { throw new Error('local_workflow_must_not_call_fleet'); },
       shouldDeferNativePageBootstrap: () => false,
@@ -64,3 +64,36 @@ for (const mode of ['isolated', 'legacy', 'held', 'unreachable', 'missing-node',
     if (mode === 'page-error') assert.deepEqual(events, ['isolated-launch', 'error', 'browser-close']);
   });
 }
+
+const remoteLogin = { type: 'credential_login', params: { platform: 'douyin', verifyDouyinCreator: true, useExistingBrowser: true } };
+test('remote endpoint is server-owned, loopback-only and requires binary uploads', () => {
+  const sandbox = { URL, Error }; vm.createContext(sandbox); vm.runInContext(runtimeSource, sandbox);
+  const workflow = { nodes: [remoteLogin, publish] };
+  assert.equal(sandbox.remoteDouyinEndpoint(workflow, 'http://127.0.0.1:19224'), 'http://127.0.0.1:19224/');
+  for (const endpoint of [undefined, 'https://example.com', 'http://127.0.0.1:19224?token=x', 'http://user:secret@127.0.0.1:19224']) {
+    assert.throws(() => sandbox.remoteDouyinEndpoint(workflow, endpoint), /remote_browser_/);
+  }
+  assert.throws(() => sandbox.remoteDouyinEndpoint({ nodes: [remoteLogin, { type: 'file_upload', params: {} }] }, 'http://127.0.0.1:19224'), /workflow_invalid/);
+  const release = sandbox.acquireRemoteDouyinBrowser('http://127.0.0.1:19224');
+  assert.throws(() => sandbox.acquireRemoteDouyinBrowser('http://127.0.0.1:19224/'), /busy/);
+  release(); sandbox.acquireRemoteDouyinBrowser('http://127.0.0.1:19224')();
+});
+
+for (const failure of [false, true]) test('remote runtime owns only a new tab; releases lease on ' + (failure ? 'failure' : 'success'), async () => {
+  const events = [];
+  const page = { on: () => {}, isClosed: () => false, close: async () => events.push('task-tab-close') };
+  const original = { close: async () => { throw Error('must_not_close_user_tab'); } };
+  const browser = { contexts: () => [{ pages: () => [original], newPage: async () => { events.push('new-task-tab'); return page; } }], close: async () => events.push('disconnect') };
+  const task = { workflowId: 'remote-test', workflow: { nodes: [remoteLogin, publish] }, status: 'running', initialVars: {} };
+  const sandbox = { URL, Error, console: { error: () => {} }, process: { env: { WORKFLOW_REMOTE_CDP_URL: 'http://127.0.0.1:19224' } },
+    chromium: { connectOverCDP: async () => browser, launch: () => { throw Error('must_not_launch'); } },
+    shouldDeferNativePageBootstrap: () => false, wfTaskDiag: () => {}, getTask: () => task,
+    registerTaskRuntime: (_id, p, b) => { assert.equal(p, page); assert.equal(b, browser); },
+    closeTaskRuntimeNow: () => page.close(), clearTaskRuntime: () => {},
+    runWorkflow: async () => { if (failure) throw Error('test_failure'); return { success: true, outputs: {} }; },
+    setTaskFinalVars: () => {}, mergeOutputsToFinalVars: () => ({}), updateTaskStatus: (_id, state) => events.push(state) };
+  vm.createContext(sandbox); vm.runInContext(runtimeSource + '\n' + startSource, sandbox);
+  await sandbox.startWorkflowAsync('remote-task', task);
+  assert.deepEqual(events, ['new-task-tab', failure ? 'error' : 'done', 'task-tab-close', 'disconnect']);
+  sandbox.acquireRemoteDouyinBrowser('http://127.0.0.1:19224')();
+});
