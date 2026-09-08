@@ -9,7 +9,7 @@
   Owner: codex
   Scope: credential / workflow / publishing
   Updated: 2026-09-08
-  Commit: a00eae58 (已核对 GitHub main)
+  Commit: 0ca8b6b (远程原浏览器模式已推送并核对 GitHub main；未生产切换)
   Log: dev-log/2026-09-08-douyin-workflow-credential.md
   Next: 84 正式候选工作流已接入 95 原浏览器；扫码后账号核验通过，远程文件传入成功但等待上传时浏览器服务被重启。先确认浏览器稳定使用，再完成上传、AI 声明、真实回执验收；生产和 MCP 未切换，不改变原 requestId。见日志“远程原浏览器验证”。
 
