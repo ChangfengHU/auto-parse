@@ -6,6 +6,8 @@
 
 规范以 AGENTS.md 顶部最新约定为准，状态读 TASKS.md 与 dev-log/2026-09-08-douyin-workflow-credential.md。运行环境变量由 `/etc/auto-parse.env` 提供，只读变量名和引用位置，不回显值。机群登录由 Vault/Fleet 发现与同步，auto-parse 正式 Supabase 工作流执行发布。
 
+本地发布不依赖Fleet调度状态，不要求FLEET_NODE_ID；机主已明确取消这项新增前置条件。以实际账号、上传权限和真实创建回执验收；不得把历史Fleet隔离记录重新解释为本地执行禁令。Fleet自身调度机制不在此次修改范围内。
+
 本文件的唯一职责:**零上下文的新 agent 如何从一无所有到接管本项目**。
 它不是进度报告、不是任务清单。任务看 `TASKS.md`;发生过什么看 `dev-log/`;
 踩坑经验看 `experience/`(**接手前必读**,它就是本项目的 wiki 前身)。

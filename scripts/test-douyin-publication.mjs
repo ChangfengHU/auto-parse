@@ -55,13 +55,12 @@ for (const mode of ['success', 'ai-success', 'ai-control-missing', 'upload-faile
   test('actual workflow node: ' + mode, async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'douyin-publication-test-'));
     let clicks = 0, fleetCalls = 0, declarations = 0;
-    const success = mode === 'success' || mode === 'ai-success';
+    const success = ['success', 'ai-success', 'held', 'hold-before-submit'].includes(mode);
     const params = { requestId: 'request-test-01', expectedAccountId: uid, videoUrl, title: 'test', aiGenerated: mode.startsWith('ai-'), confirmPublish: true };
     const context = { vars: {}, outputs: { creatorVerified: true, accountId: uid, uploadedSourceUrl: videoUrl, title: 'test' }, emit: () => {} };
     if (mode === 'missing-preflight') context.outputs = {};
     const sandbox = { ...ledger, path, URL, AbortSignal, Error, process: { cwd: () => dir, env: { FLEET_NODE_ID: 'host-84' } },
-      fetch: async () => ({ ok: true, json: async () => ({ nodes: [{ id: 'host-84', reachable: true,
-        dispatchHeld: mode === 'held' || (mode === 'hold-before-submit' && ++fleetCalls > 1) }] }) }),
+      fetch: async () => { fleetCalls++; throw new Error('local_workflow_must_not_call_fleet'); },
     };
     vm.createContext(sandbox); vm.runInContext(runtimeSource + '\n' + nodeSource + '\n globalThis.execute = executeDouyinPublish;', sandbox);
     const locator = { count: async () => 1, fill: async () => {}, first() { return this; },
@@ -83,6 +82,7 @@ for (const mode of ['success', 'ai-success', 'ai-control-missing', 'upload-faile
     try {
       const result = await sandbox.execute(page, params, context);
       assert.equal(result.success, success);
+      assert.equal(fleetCalls, 0, 'local publication never depends on Fleet dispatch state');
       assert.equal(clicks, success || mode === 'unknown-receipt' ? 1 : 0);
       assert.equal(declarations, mode === 'ai-success' ? 1 : 0);
       if (success || mode === 'unknown-receipt') {

@@ -1,5 +1,12 @@
 # WORKFLOW-002 — auto-parse 抖音凭证发布前检查
 
+## 当前修订：取消本地发布对Fleet门禁的依赖
+
+- 机主明确说明该前置门禁不是需求，授权移除。本轮只取消auto-parse三处verifyDouyinDispatch调用与helper，不修改Fleet自身隔离表/代理/其他浏览器；下方不绕过隔离的历史要求不再限制本地工作流。保留实际账号、上传完成、内容检测、AI声明、独占意图及真实回执检查。
+- 上轮通过正式API建立候选douyin-publish-sunlight-20260908，保留旧douyin-publish未替换；素材库仅追加已校验的给小花找太阳视频，未覆盖旧素材。任务75ce4d51-8fa4-46ee-af09-9f5d1ed995fa在全部节点开始前报fleet_dispatch_unavailable，不能解读为抖音登录失败。失败证据保留在.data/douyin-workflow-check；临时服务停止，.next/dev约107MiB已清理，生产构建保留。
+- 本轮58/58回归通过，更新的测试明确禁止本地发布调用Fleet；账号不符、上传失败、AI声明缺失、未知回执及重复提交仍受保护。相关源码/测试ESLint与git diff --check通过。未新增依赖；准备复用84已有环境重跑同一素材、账号和稳定requestId。
+- 按vyibc-ops从Vault核对SSH、Supabase和GitHub配置，在84确认正式候选工作流存在、运行环境与金库Supabase配置一致、GitHub目标仓库和push权限。实际发布结果待下文追加，不把单元测试作为作品发布成功。
+
 ## 目标与边界
 
 执行归属是 auto-parse 正式 Supabase 工作流；Fleet 仅提供账号发现、凭证同步和 MCP 入口。

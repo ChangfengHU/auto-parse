@@ -2,7 +2,6 @@ import type { Page } from 'playwright';
 import path from 'node:path';
 import type { NodeResult, WorkflowContext } from '../types';
 import { publicationIdentity, publicationReceipt, readPublication, reservePublication, finishPublication } from '../douyin-publication-ledger';
-import { verifyDouyinDispatch } from '../douyin-runtime';
 
 type Params = {
   requestId: string; expectedAccountId: string; videoUrl: string; title: string;
@@ -26,7 +25,6 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
       throw new Error('publication_workflow_preflight_missing');
     }
 
-    await verifyDouyinDispatch();
     const url = new URL(page.url());
     if (url.origin !== 'https://creator.douyin.com' || !url.pathname.includes('/content/post')) throw new Error('publication_page_invalid');
     const verifyAccount = async () => {
@@ -39,7 +37,7 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
       if (accountId !== params.expectedAccountId) throw new Error('creator_account_mismatch');
     };
     await verifyAccount();
-    emit('已确认执行节点可调度和目标账号；等待视频真实上传完成');
+    emit('已确认目标账号；等待视频真实上传完成');
     await page.waitForFunction(() => {
       const text = document.body.innerText;
       return /上传失败|上传出错|文件损坏/.test(text) ||
@@ -68,7 +66,6 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
     if (/无法发布|检测失败|审核不通过/.test(await page.locator('body').innerText())) throw new Error('content_check_failed');
     const button = page.getByRole('button', { name: '发布', exact: true });
     if (await button.count() !== 1 || !await button.isEnabled()) throw new Error('publish_control_unconfirmed');
-    await verifyDouyinDispatch();
     await verifyAccount();
     await reservePublication(directory, key, fingerprint);
     emit('发布意图已持久化；只点击一次，结果不明时禁止自动重试');

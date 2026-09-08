@@ -19,23 +19,7 @@ test('isolation selection preserves legacy and disabled nodes; rejects shared br
   assert.throws(() => sandbox.needsIsolatedDouyinBrowser({ nodes: [publish, { type: 'navigate', params: { useAdsPower: true } }] }), /shared_browser_not_allowed/);
 });
 
-for (const mode of ['ok', 'held', 'unreachable', 'missing-node', 'missing-env', 'http-error', 'network-error']) {
-  test('dispatch check: ' + mode, async () => {
-    const sandbox = { Error, AbortSignal, process: { env: mode === 'missing-env' ? {} : { FLEET_NODE_ID: 'host-84' } },
-      fetch: async () => {
-        if (mode === 'network-error') throw new Error('network');
-        return { ok: mode !== 'http-error', json: async () => ({ nodes: mode === 'missing-node' ? [] : [
-          { id: 'host-84', reachable: mode !== 'unreachable', dispatchHeld: mode === 'held' },
-        ] }) };
-      },
-    };
-    vm.createContext(sandbox); vm.runInContext(runtimeSource, sandbox);
-    if (mode === 'ok') await sandbox.verifyDouyinDispatch();
-    else await assert.rejects(sandbox.verifyDouyinDispatch());
-  });
-}
-
-for (const mode of ['isolated', 'legacy', 'held', 'page-error']) {
+for (const mode of ['isolated', 'legacy', 'held', 'unreachable', 'missing-node', 'missing-env', 'http-error', 'network-error', 'page-error']) {
   test('actual task runner bootstrap: ' + mode, async () => {
     const events = [];
     const page = { on: () => {}, isClosed: () => false };
@@ -46,6 +30,8 @@ for (const mode of ['isolated', 'legacy', 'held', 'page-error']) {
     const task = { workflowId: 'test', workflow: { nodes: mode === 'legacy' ? [{ type: 'material' }] : [publish] }, status: 'running', initialVars: {} };
     const sandbox = {
       Error, console: { error: () => {} },
+      process: { env: mode === 'missing-env' ? {} : { FLEET_NODE_ID: 'host-84' } },
+      fetch: async () => { throw new Error('local_workflow_must_not_call_fleet'); },
       shouldDeferNativePageBootstrap: () => false,
       chromium: { launch: async () => { events.push('isolated-launch'); return browser; } },
       getPersistentContext: async () => { events.push('persistent-context'); return { newPage: async () => page }; },
@@ -56,12 +42,10 @@ for (const mode of ['isolated', 'legacy', 'held', 'page-error']) {
       updateTaskStatus: (_id, state) => { events.push(state); },
     };
     vm.createContext(sandbox); vm.runInContext(runtimeSource, sandbox);
-    sandbox.verifyDouyinDispatch = async () => { events.push('dispatch-check'); if (mode === 'held') throw new Error('fleet_dispatch_unavailable'); };
     vm.runInContext(startSource, sandbox);
     await sandbox.startWorkflowAsync('test-id', task);
-    if (mode === 'held') assert.deepEqual(events, ['dispatch-check', 'error']);
-    if (mode === 'isolated') assert.deepEqual(events, ['dispatch-check', 'isolated-launch', 'run', 'done', 'browser-close']);
+    if (!['legacy', 'page-error'].includes(mode)) assert.deepEqual(events, ['isolated-launch', 'run', 'done', 'browser-close']);
     if (mode === 'legacy') assert.deepEqual(events, ['persistent-context', 'run', 'done']);
-    if (mode === 'page-error') assert.deepEqual(events, ['dispatch-check', 'isolated-launch', 'error', 'browser-close']);
+    if (mode === 'page-error') assert.deepEqual(events, ['isolated-launch', 'error', 'browser-close']);
   });
 }
