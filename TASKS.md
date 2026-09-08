@@ -11,7 +11,7 @@
   Updated: 2026-09-08
   Commit: a00eae58 (已核对 GitHub main)
   Log: dev-log/2026-09-08-douyin-workflow-credential.md
-  Next: 仅在84开发；已按机主要求移除本地发布对Fleet门禁的依赖，58项节点/运行器回归通过。Supabase候选工作流已建，正在本机HTTP执行验收；待真实作品回执、生产切换及MCP接入。95副本和84恢复副本已删除。
+  Next: 本地Fleet门禁已移除并推送；正式候选HTTP工作流多次通过账号及上传。AI声明兼容未通过，最新上传中退回登录页；先核查已有登录来源，不盲目扫码或重复发布。待真实作品回执、生产切换及MCP接入，工作区仅84。
 
 - [API-001] 自建腾讯元宝扫码登录与视频号取流
   Status: In Progress

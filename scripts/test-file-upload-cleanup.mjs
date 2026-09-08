@@ -12,7 +12,7 @@ import { test } from 'node:test';
 const source = stripTypeScriptTypes(fs.readFileSync(new URL('../lib/workflow/nodes/file-upload.ts', import.meta.url), 'utf8'), { mode: 'transform' })
   .replace(/^import .*;\s*$/gm, '').replace(/^export /gm, '');
 
-for (const mode of ['success', 'http-failure', 'partial-download', 'input-failure', 'screenshot-failure', 'douyin-success', 'douyin-failed', 'douyin-timeout']) {
+for (const mode of ['success', 'http-failure', 'partial-download', 'input-failure', 'screenshot-failure', 'douyin-success', 'douyin-failed', 'douyin-timeout', 'douyin-login-lost']) {
   test('upload temp directory removed: ' + mode, async () => {
     const dirs = [];
     const server = http.createServer((_req, res) => {
@@ -42,7 +42,7 @@ for (const mode of ['success', 'http-failure', 'partial-download', 'input-failur
           'selected file must survive asynchronous browser upload');
         if (mode === 'douyin-timeout') throw Error('upload_timeout');
       },
-      locator: () => ({ innerText: async () => mode === 'douyin-failed' ? '上传失败，重新上传' : '上传成功 重新上传', first: () => ({
+      locator: () => ({ innerText: async () => mode === 'douyin-login-lost' ? '扫码登录 验证码登录' : mode === 'douyin-failed' ? '上传失败，重新上传' : '上传成功 重新上传', first: () => ({
         waitFor: async () => {},
         setInputFiles: async file => {
           assert.equal(fs.readFileSync(file, 'utf8'), 'test-video-bytes');
@@ -57,6 +57,7 @@ for (const mode of ['success', 'http-failure', 'partial-download', 'input-failur
         url: 'http://127.0.0.1:' + server.address().port + '/video.mp4', selector: 'input',
       }, { emit: () => {} });
       assert.equal(result.success, mode === 'success' || mode === 'douyin-success');
+      if (mode === 'douyin-login-lost') assert.equal(result.error, 'creator_login_lost_during_upload');
       if (mode === 'success' || mode === 'douyin-success') assert.equal(consumed, true);
       assert.equal(dirs.length, 1);
       for (const dir of dirs) assert.equal(fs.existsSync(dir), false, 'temporary directory leaked');

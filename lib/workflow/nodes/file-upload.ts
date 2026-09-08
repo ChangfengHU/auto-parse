@@ -55,10 +55,15 @@ export async function executeFileUpload(
       ctx.emit?.('log', '等待抖音实际上传完成，完成前保留临时文件');
       await page.waitForFunction(() => {
         const text = document.body.innerText;
-        return /上传失败|上传出错|文件损坏/.test(text) ||
+        return location.pathname.includes('/login') || (/扫码登录/.test(text) && /验证码登录/.test(text)) ||
+          /上传失败|上传出错|文件损坏/.test(text) ||
           (!/取消上传/.test(text) && /上传成功|重新上传/.test(text));
       }, null, { timeout: 600000 });
-      if (/上传失败|上传出错|文件损坏/.test(await page.locator('body').innerText())) {
+      const uploadText = await page.locator('body').innerText();
+      if (new URL(page.url()).pathname.includes('/login') || (/扫码登录/.test(uploadText) && /验证码登录/.test(uploadText))) {
+        throw new Error('creator_login_lost_during_upload');
+      }
+      if (/上传失败|上传出错|文件损坏/.test(uploadText)) {
         throw new Error('video_upload_failed');
       }
     }
