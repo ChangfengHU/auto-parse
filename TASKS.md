@@ -9,9 +9,9 @@
   Owner: codex
   Scope: credential / workflow / publishing
   Updated: 2026-09-08
-  Commit: 0ca8b6b (远程原浏览器模式已推送并核对 GitHub main；未生产切换)
+  Commit: 本轮回执与正式工作流 MCP 接口提交，见同日开发日志
   Log: dev-log/2026-09-08-douyin-workflow-credential.md
-  Next: 84 正式候选工作流已接入 95 原浏览器；扫码后账号核验通过，远程文件传入成功但等待上传时浏览器服务被重启。先确认浏览器稳定使用，再完成上传、AI 声明、真实回执验收；生产和 MCP 未切换，不改变原 requestId。见日志“远程原浏览器验证”。
+  Next: 已发布作品真实回查与基础字段不发布预览通过，正式 API 已切换。继续定位封面弹窗加载超时；原生话题实体选择未实现。原件冻结，仅授权副本 34f421be-f97c-498a-9c80-5214564abd1c 执行，未知结果不得重复发片。
 
 - [API-001] 自建腾讯元宝扫码登录与视频号取流
   Status: In Progress

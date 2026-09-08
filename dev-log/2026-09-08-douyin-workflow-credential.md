@@ -1,5 +1,16 @@
 # WORKFLOW-002 — auto-parse 抖音凭证发布前检查
 
+## 纠偏：使用用户已有 douyin-publish 与 84 创作者浏览器
+
+- 用户明确拒绝新增工作流替代自己的原流程；本次完整读取 Supabase `douyin-publish` 的 13 个节点，而不是依赖旧摘要。原导航 useAdsPower=false 未绑定已登录浏览器；原素材为“好时光都该被宝贝”，不是本任务的一分钟视频。之前自行建立候选并围绕它开发偏离了用户指定入口。
+- Vault 在 84 核验 Supabase 配置与原工作流身份后，把原工作流素材指向“给小花找太阳”，导航使用已有手动 CDP 参数 `http://127.0.0.1:9223`。保留所有原节点；验证期间暂禁第10–13步避免未核验就发布，结束已恢复这些节点原配置，读回深比较通过。修改前完整配置保留在 `.data/douyin-workflow-check/douyin-publish-before-browser84-20260908.json`，未写 Cookie 或密钥。
+- 84 browser-2 实际创作者接口 status_code=0，UID 53017623213 / 唯伊不可，上传控件存在。只创建及关闭诊断页，无 Cookie 注入，无需扫码。
+- 最小源码修复：navigate 手动 CDP 分支原来只有 adsProfileId 非空才向后续返回 newPage；改为有新浏览器就传递实际页面，跳过无关 AdsPower API 推导，只建任务页并在失败时清理。任务收尾只关手动模式自建页并断开 CDP，自动 AdsPower 分支保持旧生命周期。
+- 通过 POST 正式任务 API 执行的 workflowId 为 `douyin-publish`，任务 `6bfd8080-dc7c-4bd0-bf8b-9e092d205269`：素材成功、手动接入成功、扫码节点识别已登录并跳过、导航上传页成功；第5步 setInputFiles 报浏览器关闭。没有执行任何发布点击。
+- 84 journal 直接证据：2026-09-08 11:58:48 UTC，cdpguard 记录 instance 2 DevTools 9223 unreachable 并执行 restart browser@2。该脚本只进行两次各5秒 curl 探测，中间3秒，无任务占用判断；不能把本次关闭归因于登录失效、用户手动重启或工作流未接上。未擅改全机守护/代理/浏览器配置，上传时的短时无响应原因与守护兼容仍需继续处理。
+- 未把“发布保护”改造成新流程；本轮未部署或替换原发布节点，原有 AI 声明、防重复与真实回执需求仍须在最终发布前落实，不能凭前四步通过宣布完成。
+- 72/72 回归、相关 ESLint 和 diff-check 通过；未重跑全仓 tsc（已知历史错误仍待处理）。源码修复尚未生产构建切换，Supabase 浏览器配置即时生效。临时 auto-parse-douyin-check 已停，核实无人使用后删除 .next/dev，释放96000KiB（约94MiB），生产 BUILD_ID/服务不变；任务证据和账本保留，缓存可重建，无新增依赖。保护原 .materials.json 改动。
+
 ## 远程原浏览器验证（2026-09-08）
 
 - 收尾：实现提交 `0ca8b6b` 已立即推送并核对 GitHub main 完整哈希一致。停止本次临时 `auto-parse-douyin-check`，核实无文件使用者后删除 `/opt/auto-parse/.next/dev`，释放 101496 KiB（约 99 MiB）；保留生产 BUILD_ID、运行服务、任务 JSON/截图及发布账本。缓存可由现有依赖运行 Next dev 重建；无新增依赖或 95 媒体副本。
@@ -104,3 +115,14 @@
 - 只读排查：84的8792健康接口ok=true、version=0.15.1，而固定门禁要求0.15.8。宿主stage4结果只含通用失败码，缺少下载/传输/安装子步骤。目标相关配置文件mtime仍为此前日期，没有证据表明本轮已升级或改动代理配置。
 - 按执行器真实User-Agent、禁重定向及同一URL检查三个固定制品：HTTP200且SHA256一致；本地deployment_material校验通过；使用宿主known_hosts的SSH true和SFTP pwd通过。最初使用Python默认User-Agent的403不是执行器同条件证据，不能用它判定此次下载失败。
 - 仍缺具体失败原因，需要共享Fleet固定执行器补充分阶段脱敏诊断后再受控恢复；不能用上述当前只读成功冒称历史事务成功。自动发布、生产部署和MCP切换依旧未完成，视频未发布。
+# 本轮收尾：已发布回执与丰富字段（2026-09-08）
+
+- 原作品 https://www.douyin.com/video/7683141951113219337 已经发布。原任务 26d43efb-66c1-47bd-8c18-86f038336b86 的创建响应未被识别，错误历史保留；只读作品列表严格核验后补充 publication 回执，正式 API 返回 published。本轮没有重新点击发布，也未修改已发布文案。
+- 原生响应 parser 新增根 item_id 并在 JSON 解析前保留大整数字符串；实际作品列表 numeric item_id 精度丢失已观察到，但原始 create 响应未留存，不能断言它就是全部原始原因。
+- 用户原 douyin-publish 冻结。授权副本 34f421be-f97c-498a-9c80-5214564abd1c 继承原 13 节点，运行时只投影白名单字段；材料节点显式 URL/标题、私有视频分块传入浏览器、真实账号/上传/AI声明/防重复机制继续复用。未调整 cdpguard、代理或 Fleet 隔离表。
+- 新管理员 API 提供 capabilities、prepare、publish、get_task、reconcile；请求预留 wx、防重复账本、元数据指纹与未知结果禁止重试。旧任务终态证据按明确 ID、COPYFILE_EXCL 迁入正式 task store；不覆盖已有不同证据。
+- Slate fill 实测会追加旧内容，改键盘全选清空后填写并读回比对。基础预览 8ce83dd2-36c7-40c8-83e8-945fd83773de 完成，标题/独立描述/两个话题文本/AI声明通过，prepared=true、published=false。未测试新的真实发布以免重复发片。
+- 封面支持受限 HTTPS PNG/JPEG 图片输入、8MiB 内存上限，仍 experimental。v1 被本会话诊断误开弹窗干扰；v2 修正封面定位；v3 仍在封面加载/完成阶段 timeout，未发布。原生话题实体选择、视频时间点截帧封面未实现，不能宣称全部丰富能力验收通过。
+- 62 项定向测试通过（含预览不点击/不占发布账本），全仓 tsc --noEmit 通过；生产候选构建通过。正式服务已使用 NEXT_BUILD_DIR=.next-douyin-release，公网已验证 capabilities 200、原任务 published、新任务 prepared、未认证 401。原 .next 暂作短期回滚，运行依赖和防重证据保留。
+- Fleet 复用既有 vyibc-douyin 广场登记，7 个工具由 linux-clash 项目适配；跨机器配置已保存 Vault service:auto-parse-workflow，使用既有管理员令牌，未轮换凭据。
+- Fleet 公开 MCP 七工具、能力查询、published 与 prepared 回查均已实测通过；原件深比较未变。临时 11008/11009 服务已停止，清理本任务 `.next/dev` 124384 KiB（约121.5MiB），可由现有源码/锁文件重新生成；上传临时文件已自动清理。当前生产 `.next-douyin-release` 约156.4MiB 必须保留；旧 `.next` 约146.6MiB 暂供部署回滚，稳定验收后再清理。唯一工作流证据、发布防重账本与用户 `.materials.json` 修改保留。

@@ -8,13 +8,29 @@
 
 本地发布不依赖Fleet调度状态，不要求FLEET_NODE_ID；机主已明确取消这项新增前置条件。以实际账号、上传权限和真实创建回执验收；不得把历史Fleet隔离记录重新解释为本地执行禁令。Fleet自身调度机制不在此次修改范围内。
 
-### 远程原浏览器验证方式
+### 当前入口：用户原有工作流
+
+Fleet 的 `vyibc-douyin` 调用本服务 `POST /api/douyin/workflow`，不再由 standalone node publisher 执行新发布。调用配置通过 Vault `service:auto-parse-workflow` 取得；令牌仍是执行端 `/etc/auto-parse.env` 的既有 AUTO_PARSE_ADMIN_TOKEN，不回显。先 capabilities 核对账号与字段限制，prepare 只准备不发布；publish 另需显式 confirmPublish。固定 requestId 并通过 get_task 轮询，业务 publication 回执与原工作流执行历史分开返回。
+
+已提交但原响应未知时，先取得真实作品 ID，再 reconcile 按精确字符串 ID、账号、标题、时间及唯一作品列表项只读核实。不得把大整数 item_id 转为 JavaScript Number；不得以 toast、上传完成或审核进度当作品创建证据。任务与账本位于 `.data/workflow-tasks`、`.data/douyin-publications`、`.data/douyin-workflow-requests`，是防重和验收证据，不是可清理缓存。
+
+生产构建路径以 `systemctl cat auto-parse` 与 NEXT_BUILD_DIR 为准。使用现有依赖侧建 `NEXT_BUILD_DIR=.next-douyin-release npm run build`，独立端口验收，再确认无运行任务后切换 systemd；保留旧构建用于短期回滚，稳定后核实清理。封面须看 capabilities.verification，实验入口不代表 UI 验收通过；当前 # 话题是 caption_text，不承诺原生话题关联。
+
+先 GET `/api/workflows/douyin-publish` 读完整正式配置。原件冻结；机主最新授权确需修改时调用 POST `/api/workflows/douyin-publish/copy`，保留原结构，只改副本，执行前后深比较原件未变，不自行新建另一套候选替代。使用原导航节点已有 `useAdsPower: true` 与 `adsManualCdpUrl` 接口指向实际执行机器上的已登录浏览器；当前由机主选择 84 browser-2（9223）。手动 CDP 新实现跳过 AdsPower 探测、不依赖分身 ID，只新建任务页；原始登录页不关闭。旧配置的分身字段可保留兼容尚未部署的新实现，但不应当作当前登录身份。
+
+浏览器与执行器不同系统账号时，核验浏览器能否读取任务临时视频路径；不要放宽整个临时目录权限。副本的 file_upload 使用已有 `transferMode: buffer`，不依赖浏览器读执行器私有文件。发布点击可显式配置 `douyinPublication`，复用真实账号核验、上传完成、AI 声明与单次回执逻辑；普通 click 不受影响。抖音 Semi Radio 的真实选择状态可能在 `semi-radio-checked` 类而不是隐藏 input.checked；确认后同名声明可同时出现在字段与预览，不按唯一全文文本判断。
+
+若源码仅在临时服务验证，而生产仍不支持新发布参数，启动验证任务取得固定快照后，暂停副本后续发布节点，避免旧生产解释器忽略参数而裸点击发布。发布账本结果不明时不得重试；先核对目标账号作品。
+
+实际创作者身份用 `/web/api/media/user/info/` 与上传控件核验，不以普通抖音页面或 Fleet 标签代替。遇到 `Target page ... closed`，先核对 browser 服务的启动时间与 cdpguard journal；两次探测超时导致守护重启不同于用户退出登录。本任务尚未授权改造全机守护或关闭所有浏览器保护，先确定浏览器级作用范围。
+
+### 历史可选能力：远程原浏览器验证方式（不是当前任务路线）
 
 机主授权 84 工作流使用 95 已登录 browser-3，不再以跨机器迁移 Cookie 为前提。服务端显式设置 `WORKFLOW_REMOTE_CDP_URL`，只允许运营方建立的 `127.0.0.1` HTTP/WS 端点；不从工作流接受任意 CDP 主机。既有 `credential_login` 节点配置 `platform: douyin`、`verifyDouyinCreator: true`、`useExistingBrowser: true`、经确认的 `expectedAccountId`；删除无用的 credentialId 输入。`file_upload` 使用 `transferMode: buffer`，最大 50 MiB，传输时限 180 秒。
 
 从 95 建立到 84 的反向 SSH 隧道（`-R 127.0.0.1:19224:127.0.0.1:9224`），外层持有 `/run/linux-browser-vnc/activity-9224.lock`，直到任务结束及任务页关闭。服务进程内另有远程端点互斥；不是跨进程/跨机器租约，生产池化调度尚未实现。任务只创建并关闭自己的标签页，结束断开 CDP，不关闭原始会话或覆盖 Cookie。浏览器仍可能被不遵守活动锁的外部操作重启：检查 `systemctl show linux-browser-vnc-browser@3` 和对应 journal 后再判断故障，不把 Fleet 登录标签或历史 Cookie 当作实际创作者会话证明。
 
-验证仍须 POST `/api/workflows/tasks` 执行 Supabase 正式候选，不从脚本直接调用发布器；保留原 requestId 和 `.data/douyin-publications`。临时 Next dev 仅作源码验收，不等于生产部署；用完停服务并核实清理 `.next/dev`，保留唯一任务证据。
+验证须 POST `/api/workflows/tasks` 执行机主明确指定的 Supabase 工作流或获准的原件副本，不从脚本直接调用发布器或自行新建候选代替；保留原 requestId 和 `.data/douyin-publications`。临时 Next dev 仅作源码验收，不等于生产部署；用完停服务并核实清理 `.next/dev`，保留唯一任务证据。
 
 本文件的唯一职责:**零上下文的新 agent 如何从一无所有到接管本项目**。
 它不是进度报告、不是任务清单。任务看 `TASKS.md`;发生过什么看 `dev-log/`;

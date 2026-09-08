@@ -80,6 +80,9 @@ export interface NavigateParams {
 }
 
 export interface MaterialParams {
+  /** Explicit per-run media supplied by the authenticated workflow adapter. */
+  videoUrl?: string;
+  title?: string;
   materialId?: string
   outputVideoVar?: string
   outputTitleVar?: string
@@ -163,6 +166,13 @@ export interface PasteImageClipboardParams {
 }
 
 export interface ClickParams {
+  /** 仅用于显式启用保护的抖音发布副本，不改变普通点击。 */
+  douyinPublication?: {
+    requestId: string; expectedAccountId: string; videoUrl: string; title: string;
+    aiGenerated: boolean; confirmPublish: boolean;
+    prepareOnly?: boolean; description?: string; topics?: string[];
+    cover?: { verticalUrl?: string; horizontalUrl?: string };
+  }
   useSelector?: boolean
   selector?: string
   text?: string     // 按文字找按钮（优先于 selector）

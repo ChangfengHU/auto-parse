@@ -52,11 +52,31 @@ export async function executeFileUpload(
     if (params.transferMode === 'buffer') {
       const size = (await fs.promises.stat(tmpFile)).size;
       if (size > 50 * 1024 * 1024) throw new Error('remote_upload_file_too_large');
-      await input.setInputFiles({
-        name: path.basename(tmpFile),
-        mimeType: path.extname(tmpFile).toLowerCase() === '.mp4' ? 'video/mp4' : 'application/octet-stream',
-        buffer: await fs.promises.readFile(tmpFile),
-      }, { timeout: 180000 });
+      // A single large base64 CDP command can block DevTools long enough for
+      // the browser watchdog to restart it. Transfer bounded chunks instead.
+      const chunks = await page.evaluateHandle(() => [] as Uint8Array<ArrayBuffer>[]);
+      const deadline = Date.now() + 180000;
+      try {
+        for await (const chunk of fs.createReadStream(tmpFile, { highWaterMark: 256 * 1024 })) {
+          if (Date.now() > deadline) throw new Error('remote_upload_transfer_timeout');
+          await page.evaluate(({ chunks, data }) => {
+            chunks.push(Uint8Array.from(atob(data), c => c.charCodeAt(0)));
+          }, { chunks, data: (chunk as Buffer).toString('base64') });
+        }
+        await input.evaluate((element, { chunks, name, mimeType }) => {
+          if (!(element instanceof HTMLInputElement) || element.type !== 'file') throw new Error('upload_input_invalid');
+          const transfer = new DataTransfer();
+          transfer.items.add(new File(chunks, name, { type: mimeType }));
+          element.files = transfer.files;
+          element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+          element.dispatchEvent(new Event('change', { bubbles: true }));
+        }, {
+          chunks, name: path.basename(tmpFile),
+          mimeType: path.extname(tmpFile).toLowerCase() === '.mp4' ? 'video/mp4' : 'application/octet-stream',
+        });
+      } finally {
+        await chunks.dispose().catch(() => undefined);
+      }
     } else {
       await input.setInputFiles(tmpFile);
     }

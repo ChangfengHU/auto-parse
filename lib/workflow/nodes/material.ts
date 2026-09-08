@@ -10,6 +10,16 @@ export async function executeMaterial(
   const outputVideoVar = String(params.outputVideoVar ?? 'videoUrl').trim() || 'videoUrl';
   const outputTitleVar = String(params.outputTitleVar ?? 'title').trim() || 'title';
 
+  if (params.videoUrl !== undefined) {
+    const url = new URL(params.videoUrl);
+    if (url.protocol !== 'https:' || !params.title?.trim()) throw new Error('material_input_invalid');
+    ctx.vars[outputVideoVar] = params.videoUrl;
+    ctx.vars[outputTitleVar] = params.title;
+    return { success: true, log: ['已使用本次工作流显式传入的媒体与标题'], output: {
+      [outputVideoVar]: params.videoUrl, [outputTitleVar]: params.title,
+    } };
+  }
+
   if (!materialId) {
     return {
       success: false,

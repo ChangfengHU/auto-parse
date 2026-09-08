@@ -197,6 +197,7 @@ function buildResultHighlights(
 }
 
 export interface WorkflowTaskSummaryView {
+  publication?: WorkflowTask['publication'] | null;
   taskId: string;
   workflowId: string;
   status: WorkflowTask['status'];
@@ -327,6 +328,9 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
   try {
     const isolatedDouyin = needsIsolatedDouyinBrowser(task.workflow);
     const remoteEndpoint = remoteDouyinEndpoint(task.workflow, process.env.WORKFLOW_REMOTE_CDP_URL);
+    const guardedClick = task.workflow.nodes.some(n => !n.disabled && n.type === 'click' && n.params.douyinPublication);
+    const manualEndpoint = guardedClick && task.workflow.nodes.find(n => n.type === 'navigate' && n.params.adsManualCdpUrl)?.params.adsManualCdpUrl;
+    if (manualEndpoint && !remoteEndpoint) releaseRemoteBrowser = acquireRemoteDouyinBrowser(String(manualEndpoint));
     if (remoteEndpoint) {
       releaseRemoteBrowser = acquireRemoteDouyinBrowser(remoteEndpoint);
       placeholderBrowser = await chromium.connectOverCDP(remoteEndpoint, { timeout: 15000 });
@@ -372,8 +376,9 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
             Boolean((node.params as { useAdsPower?: boolean } | undefined)?.useAdsPower);
           if (usesAdsPower) {
             // AdsPower/CDP 属于外部会话，不在任务收尾时主动关闭，避免误关用户正在使用的 tab/浏览器。
-            runtimePatch.closePageOnFinish = false;
-            runtimePatch.closeBrowserOnFinish = false;
+            const ownsManualTab = Boolean(node.params.adsManualCdpUrl);
+            runtimePatch.closePageOnFinish = ownsManualTab;
+            runtimePatch.closeBrowserOnFinish = ownsManualTab; // CDP close disconnects, not browser shutdown.
           }
           updateTaskRuntime(taskId, runtimePatch);
         }
@@ -383,7 +388,7 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
             | { skipped?: boolean; skippedByFailFast?: boolean; failFastAction?: string }
             | undefined;
           const skipped =
-            Boolean(out?.skipped) ||
+            Boolean(result.stepSkipped) || Boolean(out?.skipped) ||
             (Boolean(out?.skippedByFailFast) && out?.failFastAction === 'skip_node');
           if (skipped) setTaskStepSkipped(taskId, stepIdx);
           else setTaskStepSuccess(taskId, stepIdx, result, dur);
@@ -526,6 +531,7 @@ export function getWorkflowTaskSummary(taskId: string): WorkflowTaskSummaryView 
     taskId: task.taskId,
     workflowId: task.workflowId,
     status: task.status,
+    publication: task.publication || null,
     progress: {
       currentStep: task.currentStep + 1,
       totalSteps: progress.totalSteps,

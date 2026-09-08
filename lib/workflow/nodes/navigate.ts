@@ -18,6 +18,9 @@ export async function executeNavigate(
     ctx.emit?.('log', msg);
   };
 
+  let ownedManualPage: Page | undefined;
+  let manualBrowser: Browser | undefined;
+
   try {
     let activePage = page;
     let newBrowser: Browser | undefined;
@@ -31,7 +34,7 @@ export async function executeNavigate(
     const explicitProxyServer = params.adsProxyServer?.trim() || process.env.ADS_FORCE_PROXY_SERVER?.trim() || '';
     let effectiveProxyServer = explicitProxyServer;
 
-    if (params.useAdsPower && !effectiveProxyServer) {
+    if (params.useAdsPower && !params.adsManualCdpUrl?.trim() && !effectiveProxyServer) {
       const profileId = (params.adsProfileId || '').trim();
       if (profileId) {
         for (const apiUrl of apiUrls) {
@@ -80,14 +83,16 @@ export async function executeNavigate(
       emit(`🚀 检测到手动 CDP 地址，正在跳过 API 探测进行直连...`);
       try {
         newBrowser = await chromium.connectOverCDP(manualCdpUrl);
+        manualBrowser = newBrowser;
         emit(`🔄 手动直连成功，已接管浏览器实例`);
         
         await new Promise(r => setTimeout(r, 1000));
         const contexts = newBrowser.contexts();
         if (contexts.length === 0) throw new Error('浏览器环境未就绪');
         
-        const pgs = contexts[0].pages();
-        activePage = pgs.length > 0 ? pgs[0] : await contexts[0].newPage();
+        // Manual CDP is not tied to an AdsPower profile; never hijack a user's tab.
+        ownedManualPage = await contexts[0].newPage();
+        activePage = ownedManualPage;
         
         // 标记后续导航逻辑使用此 activePage
         params.useAdsPower = true; // 确保向下执行逻辑正确
@@ -394,7 +399,7 @@ export async function executeNavigate(
           success: true,
           log,
           screenshot: postClickScreenshot,
-          newPage: (params.useAdsPower && params.adsProfileId) ? activePage : undefined,
+          newPage: newBrowser ? activePage : undefined,
           newBrowser
         };
       } else {
@@ -406,10 +411,12 @@ export async function executeNavigate(
       success: true,
       log,
       screenshot,
-      newPage: (params.useAdsPower && params.adsProfileId) ? activePage : undefined,
+      newPage: newBrowser ? activePage : undefined,
       newBrowser
     };
   } catch (e) {
+    await ownedManualPage?.close().catch(() => {});
+    await manualBrowser?.close().catch(() => {});
     const error = e instanceof Error ? e.message : String(e);
     emit(`❌ 导航失败: ${error}`);
     const screenshot = await captureScreenshot(page).catch(() => undefined);

@@ -10,7 +10,7 @@ import path from 'path';
 const LOG_PREFIX = '[wf-task]';
 
 /** 与 task-store 中 WorkflowTask 一致，独立声明避免与 task-store 循环依赖 */
-type PersistedTask = Record<string, unknown> & { taskId: string; startedAt: number };
+type PersistedTask = { taskId: string; startedAt: number };
 
 function persistEnabled(): boolean {
   const v = process.env.WORKFLOW_TASK_PERSIST ?? process.env.WORKFLOW_TASK_SQLITE;

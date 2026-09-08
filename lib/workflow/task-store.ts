@@ -5,6 +5,7 @@
  */
 
 import type { WorkflowDef, NodeResult, NodeDef } from './types';
+import type { PublicationReceipt } from './douyin-publication-ledger';
 import { parseWorkflowStepErrorMessage } from './step-error-meta';
 import {
   deleteWorkflowTaskRecord,
@@ -68,6 +69,8 @@ export interface WorkflowTaskStep {
 }
 
 export interface WorkflowTask {
+  /** Independent verified publication outcome; original execution errors remain auditable. */
+  publication?: PublicationReceipt;
   taskId: string;
   workflowId: string;
   workflow: WorkflowDef;
@@ -91,6 +94,13 @@ export interface WorkflowTask {
   stoppedAt?: number;
 
   totalDuration?: number;  // ms
+}
+
+export function setTaskPublicationReceipt(taskId: string, receipt: PublicationReceipt): void {
+  const task = getTask(taskId);
+  if (!task || task.status === 'running') throw new Error('publication_task_not_terminal');
+  task.publication = receipt;
+  persistWorkflowTask(task);
 }
 
 // 内存存储：taskId -> Task（挂 globalThis，避免 Next dev 热重载清空 Map 导致「刚创建的任务立刻查不到」）

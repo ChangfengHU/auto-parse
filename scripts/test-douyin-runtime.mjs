@@ -34,7 +34,7 @@ test('isolation selection preserves legacy and disabled nodes; rejects shared br
   assert.throws(() => sandbox.needsIsolatedDouyinBrowser({ nodes: [publish, { type: 'navigate', params: { useAdsPower: true } }] }), /shared_browser_not_allowed/);
 });
 
-for (const mode of ['isolated', 'legacy', 'held', 'unreachable', 'missing-node', 'missing-env', 'http-error', 'network-error', 'page-error']) {
+for (const mode of ['isolated', 'legacy', 'held', 'unreachable', 'missing-node', 'missing-env', 'http-error', 'network-error', 'page-error', 'disabled-step']) {
   test('actual task runner bootstrap: ' + mode, async () => {
     const events = [];
     const page = { on: () => {}, isClosed: () => false };
@@ -52,14 +52,21 @@ for (const mode of ['isolated', 'legacy', 'held', 'unreachable', 'missing-node',
       getPersistentContext: async () => { events.push('persistent-context'); return { newPage: async () => page }; },
       wfTaskDiag: () => {}, getTask: () => task,
       registerTaskRuntime: () => {}, closeTaskRuntimeNow: async () => {}, clearTaskRuntime: () => {},
-      runWorkflow: async () => { events.push('run'); return { success: true, outputs: {} }; },
+      runWorkflow: async options => {
+        events.push('run');
+        if (mode === 'disabled-step') options.afterStep(0, {}, { success: true, stepSkipped: true });
+        return { success: true, outputs: {} };
+      },
+      setTaskStepSkipped: () => events.push('step-skipped'),
+      setTaskStepSuccess: () => events.push('step-success'),
       setTaskFinalVars: () => {}, mergeOutputsToFinalVars: () => ({}),
       updateTaskStatus: (_id, state) => { events.push(state); },
     };
     vm.createContext(sandbox); vm.runInContext(runtimeSource, sandbox);
     vm.runInContext(startSource, sandbox);
     await sandbox.startWorkflowAsync('test-id', task);
-    if (!['legacy', 'page-error'].includes(mode)) assert.deepEqual(events, ['isolated-launch', 'run', 'done', 'browser-close']);
+    if (!['legacy', 'page-error', 'disabled-step'].includes(mode)) assert.deepEqual(events, ['isolated-launch', 'run', 'done', 'browser-close']);
+    if (mode === 'disabled-step') assert.deepEqual(events, ['isolated-launch', 'run', 'step-skipped', 'done', 'browser-close']);
     if (mode === 'legacy') assert.deepEqual(events, ['persistent-context', 'run', 'done']);
     if (mode === 'page-error') assert.deepEqual(events, ['isolated-launch', 'error', 'browser-close']);
   });

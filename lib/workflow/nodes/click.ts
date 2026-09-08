@@ -2,6 +2,7 @@ import type { Locator, Page } from 'playwright';
 import type { ClickParams, NodeResult, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
 import { humanMouseMove } from '../human-mouse';
+import { executeDouyinPublish } from './douyin-publish';
 
 function isLikelySendActionTarget(input: { selector?: string; text?: string }) {
   const text = String(input.text || '').toLowerCase();
@@ -231,6 +232,12 @@ export async function executeClick(
   params: ClickParams,
   ctx: WorkflowContext
 ): Promise<NodeResult> {
+  if (params.douyinPublication) {
+    if (params.text !== '发布' || params.elements?.length || params.selector) {
+      return { success: false, log: [], error: 'publication_click_config_invalid' };
+    }
+    return executeDouyinPublish(page, { ...params.douyinPublication, verifyCurrentSession: true }, ctx);
+  }
   const log: string[] = [];
   const useHumanMouse = ctx.humanOptions?.humanMouse ?? false;
 
