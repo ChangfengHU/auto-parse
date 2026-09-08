@@ -70,3 +70,12 @@
 - 84恢复副本清单无独有文件；凭证运行时代码仅注释差异，历史材料文件无修改，4ad4f43含原分支及远端提交。确认lsof无使用后精确删除 `/home/claude/task-recovery/auto-parse-95-20260908`，约8.1MiB；约1264KiB唯一制作记录保留。95已确认清理项未重新创建。
 - 仍未构建/重启生产服务，未修改Supabase工作流，未接通Fleet MCP，未上传/发布本次视频；需要FLEET_NODE_ID配置及后续整链验收。84新鲜proxy.fresh_exit检查仍失败，修复需沿正常Fleet流程，不能解除隔离绕行。
 - 收尾复验：60/60再次通过，ESLint和diff-check通过；`tsc --noEmit --incremental false`只有原task-store.ts的11项历史错误，无新增诊断。Vault-first在84核对GitHub身份/仓库push权限后提交 `a00eae58ecd8adf77f61d2a06913dde79e474a18`，立即push并以ls-remote核对同一哈希；原.materials.json哈希仍为481b54a148b0f606457836ebee98d6ff21819a33a5d8d7050257dd37b756f6a6。07:49 UTC只读复查84仍dispatchHeld=true，95已确认删除路径仍不存在，磁盘约17GiB可用。
+
+## Fleet正常恢复尝试（08:10 UTC之后）
+
+- 机主确认按现有Fleet流程修复并复验84；范围明确保留现有线路、账号、预期出口与浏览器，不轮换凭据、不绕过隔离。Vault先核对ssh:host-84-8-217-45登记，再通过原incident的retry API请求第5轮，没有另建故障或修改隔离表。
+- 故障 inc-dfc8b5926989c3851bfdb7b1；Signal后缀opened.v5；复用Task T-intake-19a1242874c28daa，新批次b-intake-75094177868a1642。限制已通过operator_retry_reason原样进入任务事实。
+- 执行器实际调用fleet_onboard_start/report/status。新事务onb-45e970db-6a09-4270-8149-513ee6ec9e32的阶段1–3健康复用；08:14 UTC阶段4 resource-snapshot返回dependency-unavailable/needs-user，can_resume=false，报告尚未生成。执行者task_block，未进入阶段5代理恢复，不重发同一失败动作。
+- 只读排查：84的8792健康接口ok=true、version=0.15.1，而固定门禁要求0.15.8。宿主stage4结果只含通用失败码，缺少下载/传输/安装子步骤。目标相关配置文件mtime仍为此前日期，没有证据表明本轮已升级或改动代理配置。
+- 按执行器真实User-Agent、禁重定向及同一URL检查三个固定制品：HTTP200且SHA256一致；本地deployment_material校验通过；使用宿主known_hosts的SSH true和SFTP pwd通过。最初使用Python默认User-Agent的403不是执行器同条件证据，不能用它判定此次下载失败。
+- 仍缺具体失败原因，需要共享Fleet固定执行器补充分阶段脱敏诊断后再受控恢复；不能用上述当前只读成功冒称历史事务成功。自动发布、生产部署和MCP切换依旧未完成，视频未发布。

@@ -7,5 +7,5 @@
 - Supabase 正式工作流和 Fleet 发布 MCP 尚未切换；视频未发布、无作品 ID。
 - 本任务视频恢复地址：https://resource.vyibc.com/sunlight-minute-final-20260906.mp4；SHA-256 ef5e45df9e0f5f446ceffdca7948d4df031711feb8b0bd294dba81bdb289fa5a。
 - 原95恢复副本已归并推送至Git（4ad4f43），核对无独有文件/活动引用后删除，约8.1MiB。唯一制作记录仍保留在 task-recovery/video-story-records-20260908（约1.2MiB）；媒体可从已校验R2恢复。
-- 包含发布节点的任务在启动浏览器前检查Fleet调度状态，使用独立临时浏览器并在结束后关闭；发布前再次核对调度和账号。部署需要配置FLEET_NODE_ID=host-84。Fleet当前proxy.fresh_exit失败并隔离，不绕过；代理修复等待机主确认。
+- 包含发布节点的任务在启动浏览器前检查Fleet调度状态，使用独立临时浏览器并在结束后关闭；发布前再次核对调度和账号。部署需要配置FLEET_NODE_ID=host-84。机主已确认正常Fleet代理修复、不换线路/账号/不绕过隔离；第5轮原故障重派后，新事务在第4阶段resource-snapshot以dependency-unavailable阻塞，未进入代理修复。84执行服务实测0.15.1、门禁要求0.15.8；具体失败子步骤未被执行器记录，详见开发日志。
 - 全仓 task-store.ts 存在历史类型错误。保留既有 .materials.json 修改；不得绕过工作流直发、不得绕过机群隔离、不得重复提交未知结果。
