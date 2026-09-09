@@ -96,3 +96,7 @@
   Commit: `d1b496a`
   Log: dev-log/2026-07-13-auto-parse-systemd-ownership.md
   Result: 清理遗留 SSH 进程，systemd 单一接管 1007，切换 production build，真实抖音解析通过。
+
+## XHS MCP foundation — 2026-09-09
+
+- Production foundation implemented and verified; source committed locally only due public repository. Six-tool Fleet integration and existing95 session refresh passed. See dev-log/2026-09-09-xhs-mcp-foundation.md.

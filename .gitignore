@@ -77,3 +77,6 @@ blueprint_viewer_*.html
 # local experiments
 test-upload.js
 lib/analysis/xhs-downloader-bridge.ts
+
+# Isolated XHS release builds
+.next-xhs*/
