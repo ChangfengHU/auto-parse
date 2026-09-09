@@ -4,6 +4,12 @@
 
 ## In Progress
 
+- [RUNTIME-003] 初始化84小红书锁定Python依赖并复测导入凭证
+  Status: In Progress
+  Owner: codex
+  Log: dev-log/2026-09-09-xhs-python-runtime.md
+  Next: 生产修复和实际接口验证完成；本地提交保存。仓库核验为公开，运维记录尚未推送。
+
 - [WORKFLOW-002] 抖音凭证预检与正式工作流自动发布
   Status: In Progress
   Owner: codex

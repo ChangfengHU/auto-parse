@@ -37,3 +37,9 @@
 - 脚本会用 `uv` 自动创建 `python/.venv`，并按 `python/vendors/xiaohongshu_cli/uv.lock` 同步依赖
 - 如需切换目标版本，可传 `XHS_CLI_PYTHON_VERSION=3.12 ./python/scripts/setup-xhs-cli.sh`
 - 如需显式指定已有解释器，可传 `XHS_CLI_BOOTSTRAP_PYTHON=/path/to/python3.12 ./python/scripts/setup-xhs-cli.sh`
+
+
+## 84 production XHS runtime (2026-09-09)
+A successful Next.js build does not install Python dependencies. Before enabling XHS routes, run `python/scripts/setup-xhs-cli.sh` with uv in PATH and `XHS_CLI_BOOTSTRAP_PYTHON=/usr/bin/python3` when Python3.12 is already present. It installs frozen `python/vendors/xiaohongshu_cli/uv.lock` into `python/.venv`. Keep this environment across deployments.
+
+Check `python/.venv/bin/python -c 'import httpx, xhshow'`, restart `auto-parse.service`, then verify `/api/analysis/xhs/cookie/test` and a real `/api/analysis/xhs/search` request. Missing modules indicate runtime setup failure; do not label the browser credential expired from that error. Never emit cookies or raw request errors in deployment logs.
