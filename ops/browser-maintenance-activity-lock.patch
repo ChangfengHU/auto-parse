@@ -1,0 +1,119 @@
+--- a/usr/local/lib/chatgpt-image-service/server/chatgpt-image-http.mjs
++++ b/usr/local/lib/chatgpt-image-service/server/chatgpt-image-http.mjs
+@@ -1195,16 +1195,14 @@
+ 
+     const previous = lastRestart.get(instance) || 0;
+     if (Date.now() - previous < RESTART_COOLDOWN_MS) continue;
+-    lastRestart.set(instance, Date.now());
+-
+     const worker = siblings[0];
+     if (!worker) continue;
+-    console.log(JSON.stringify({
+-      event: 'memory_watchdog_restart', instance, port,
+-      usedMb: memory.usedMb, highMb: memory.highMb, pressure: memory.pressure,
+-      at: new Date().toISOString(),
+-    }));
+-    await restartBrowser(worker, `idle watchdog: memory ${memory.pressure}% of MemoryHigh`);
++    if (await restartBrowser(worker, `idle watchdog: memory ${memory.pressure}% of MemoryHigh`)) {
++      lastRestart.set(instance, Date.now());
++      console.log(JSON.stringify({ event: 'memory_watchdog_restart', instance, port,
++        usedMb: memory.usedMb, highMb: memory.highMb, pressure: memory.pressure,
++        at: new Date().toISOString() }));
++    }
+   }
+ }
+ 
+@@ -1830,25 +1828,33 @@
+ // of them is mid-job; an image half-generated is worth more than a few hundred
+ // megabytes.
+ async function restartBrowser(worker, reason) {
+-if (videoService.held(worker.port) || browserReservations.has(String(worker.port)) || loginProbeHeld(worker.port)) { worker.recycleError = 'restart deferred: browser task active'; return; }
++if (videoService.held(worker.port) || browserReservations.has(String(worker.port)) || loginProbeHeld(worker.port)) { worker.recycleError = 'restart deferred: browser task active'; return false; }
+   const instance = instanceOfPort(worker.port);
+   const siblings = workers.filter((w) => String(w.port) === String(worker.port));
+   if (siblings.some((w) => w.active && w !== worker)) {
+     worker.recycleError = "restart deferred: another engine is mid-job on this browser";
+-    return;
++    return false;
+   }
++  // A publication workflow is a different process: local busy maps cannot see it.
++  // Hold the stable activity lock through restart AND CDP readiness delay.
++  let unlock;
++  try { unlock = await acquireBrowserActivity(worker.port); }
++  catch { worker.recycleError = 'restart deferred: activity lock unavailable'; return false; }
++  if (!unlock) { worker.recycleError = 'restart deferred: external browser task active'; return false; }
++  try {
+   const unit = config.browserUnit.replace("%d", String(instance));
+-  await new Promise((done) => {
++  const restarted = await new Promise((done) => {
+     const child = spawn("systemctl", ["restart", unit], { stdio: "ignore" });
+     child.on("exit", (code) => {
+       worker.recycleError = code === 0 ? null : `systemctl restart ${unit} exited ${code}`;
+-      done();
++      done(code === 0);
+     });
+     child.on("error", (error) => {
+       worker.recycleError = String(error.message).slice(0, 200);
+-      done();
++      done(false);
+     });
+   });
++  if (!restarted) return false;
+   // The browser needs a moment to bind its DevTools port again; the login check
+   // that follows would otherwise read a socket that is not listening yet.
+   await new Promise((r) => setTimeout(r, 12000));
+@@ -1860,11 +1866,19 @@
+     sibling.recycledAt = new Date().toISOString();
+   }
+   console.log(JSON.stringify({ event: "browser_restarted", unit, reason, at: new Date().toISOString() }));
++  return true;
++  } finally { await unlock(); }
+ }
+ 
+ async function softRecycleWorker(worker, reason) {
+-  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${worker.port}`);
++  // Soft recycling closes other tabs too, so it must obey the same exclusion.
++  let unlock;
++  try { unlock = await acquireBrowserActivity(worker.port); }
++  catch { worker.recycleError = 'soft recycle deferred: activity lock unavailable'; return; }
++  if (!unlock) { worker.recycleError = 'soft recycle deferred: external browser task active'; return; }
++  let browser;
+   try {
++    browser = await chromium.connectOverCDP(`http://127.0.0.1:${worker.port}`);
+     const context = browser.contexts()[0];
+     if (!context) throw new Error("No browser context found");
+     const pages = context.pages();
+@@ -1907,7 +1921,8 @@
+       error: error.message,
+     }) + "\n");
+   } finally {
+-    await browser.close().catch(() => {});
++    if (browser) await browser.close().catch(() => {});
++    await unlock();
+   }
+ }
+ 
+--- a/usr/local/lib/linux-browser-vnc/scripts/browser_cdpguard.sh
++++ b/usr/local/lib/linux-browser-vnc/scripts/browser_cdpguard.sh
+@@ -51,11 +51,18 @@
+   [[ "$i" =~ ^[0-9]+$ ]] || continue
+   is_skippable_unit "$i" && continue
+   port=$(( base + i - 1 ))
+-  probe "$port" && continue
++  (
++  # Do not infer idle from a hung CDP port. Publication/upload owns the same flock.
++  lock="/run/linux-browser-vnc/activity-${port}.lock"
++  [[ -f "$lock" ]] || exit 0
++  exec 9< "$lock" || exit 0
++  flock -n 9 || exit 0
++  probe "$port" && exit 0
+   sleep 3
+-  probe "$port" && continue
+-  is_skippable_unit "$i" && continue
++  probe "$port" && exit 0
++  is_skippable_unit "$i" && exit 0
+   logger -t cdpguard "instance ${i} DevTools ${port} unreachable; restarting browser@${i}"
+   systemctl reset-failed "linux-browser-vnc-browser@${i}.service" 2>/dev/null || true
+   systemctl restart "linux-browser-vnc-browser@${i}.service"
++  )
+ done

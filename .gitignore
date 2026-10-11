@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /.next-douyin-release/
+/.next-publication-lock-20261011/
 /out/
 
 # production

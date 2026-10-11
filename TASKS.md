@@ -79,6 +79,13 @@
 
 ## Done
 
+- [RUNTIME-004] 发布任务与浏览器维护共享活动锁
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-11
+  Log: dev-log/2026-10-11-publication-browser-lock.md
+  Result: 84生产已部署；97项回归、类型检查与构建通过；真实预览 prepared=true/published=false，活动锁获取和释放已证实，浏览器PID保留。
+
 - [API-002] 抖音解析兼容行为系统返回的正式视频链接
   Status: Done
   Owner: codex

@@ -3,6 +3,7 @@ import { chromium, type Browser, type Page } from 'playwright';
 import { getPersistentContext } from '@/lib/persistent-browser';
 import { shouldDeferNativePageBootstrap } from '@/lib/workflow/node-runtime';
 import { needsIsolatedDouyinBrowser, remoteDouyinEndpoint, acquireRemoteDouyinBrowser } from '@/lib/workflow/douyin-runtime';
+import { acquireManagedBrowserActivity } from '@/lib/workflow/browser-activity';
 import { runWorkflow } from '@/lib/workflow/engine';
 import {
   addTaskLog,
@@ -317,6 +318,7 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
   let page: Page | null = null;
   let placeholderBrowser: Browser | null = null;
   let releaseRemoteBrowser: (() => void) | null = null;
+  let releaseManagedBrowser: (() => Promise<void>) | null = null;
   const deferBootstrap = shouldDeferNativePageBootstrap(task.workflow);
   wfTaskDiag('run.start', {
     taskId,
@@ -330,7 +332,12 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
     const remoteEndpoint = remoteDouyinEndpoint(task.workflow, process.env.WORKFLOW_REMOTE_CDP_URL);
     const guardedClick = task.workflow.nodes.some(n => !n.disabled && n.type === 'click' && n.params.douyinPublication);
     const manualEndpoint = guardedClick && task.workflow.nodes.find(n => n.type === 'navigate' && n.params.adsManualCdpUrl)?.params.adsManualCdpUrl;
-    if (manualEndpoint && !remoteEndpoint) releaseRemoteBrowser = acquireRemoteDouyinBrowser(String(manualEndpoint));
+    if (manualEndpoint && !remoteEndpoint) {
+      releaseRemoteBrowser = acquireRemoteDouyinBrowser(String(manualEndpoint));
+      // Acquire before any page/CDP operation, retain through upload, submit and cleanup.
+      releaseManagedBrowser = await acquireManagedBrowserActivity(String(manualEndpoint));
+      wfTaskDiag('browser.activity.acquired', { taskId });
+    }
     if (remoteEndpoint) {
       releaseRemoteBrowser = acquireRemoteDouyinBrowser(remoteEndpoint);
       placeholderBrowser = await chromium.connectOverCDP(remoteEndpoint, { timeout: 15000 });
@@ -453,6 +460,10 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
     // Also close a task-owned browser if page creation failed before registration.
     if (placeholderBrowser) await placeholderBrowser.close().catch(() => {});
     clearTaskRuntime(taskId);
+    if (releaseManagedBrowser) {
+      await releaseManagedBrowser();
+      wfTaskDiag('browser.activity.released', { taskId });
+    }
     releaseRemoteBrowser?.();
   }
 }
