@@ -67,3 +67,4 @@
 - 真实 MCP initialize、tools/list=11、audio_capabilities 调用成功；没有发起任何付费请求，也没有修改用户客户端全局配置。
 - Fleet clean-main 守卫55e4187正式发布并精确读回，45项绑定/settings保留。线上友好域名管理员12项、workers.dev访客9项均通过：安装入口/命令复制、已有服务Token自动填充、DOM遮掩、桌面/手机及真实只读MCP连接。原应用 /audio-library、/parse 均HTTP200。
 - 发布回执保留95的 /home/claude/.local/state/audio-mcp-install-20261015-publish/receipt.json；本机浏览器证据在 .data/audio-studio-verification/marketplace-install-admin-fleet.vyibc.com.json 与对应截图。
+- 保存文档时另一会话推送 Fleet 控制台布局2d4cc8f，本次文档经 rebase 保留双方修改，Fleet 最终文档5788e8e已推送。普通 live-sync 对当前源码报告 CONSOLE_HTML 差异（固定发布编译器复查亦报告），不能宣称整个 Fleet 最新main与生产无差异；本次55e4187发布已有精确字节回执和独立功能验收，未为消除该报告再次部署其他会话的控制台改动。
