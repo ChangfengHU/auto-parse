@@ -1,0 +1,12 @@
+import {createInterface} from 'node:readline';
+import {spawn} from 'node:child_process';
+const rl=createInterface({input:process.stdin});
+const credentials=await new Promise(resolve=>rl.once('line',line=>{rl.close();resolve(JSON.parse(line));}));
+const headers={Authorization:`Bearer ${credentials.token}`,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};
+const identity=await fetch('https://api.github.com/user',{headers}).then(r=>r.json());
+const response=await fetch('https://api.github.com/repos/ChangfengHU/auto-parse',{headers});const repo=await response.json();
+console.log(JSON.stringify({identity:identity.login,target:repo.full_name,canPush:repo.permissions?.push,status:response.status}));
+if(!identity.login||repo.full_name!=='ChangfengHU/auto-parse'||!repo.permissions?.push)throw new Error('GitHub identity/target/permission check failed');
+if(process.argv[2]!=='push')process.exit(0);
+const child=spawn('git',['-c','credential.helper=','-c','credential.username=x-access-token','push','origin','main'],{cwd:'../..',env:{...process.env,GIT_TERMINAL_PROMPT:'0',GIT_ASKPASS:new URL('./git-askpass.sh',import.meta.url).pathname,AUDIO_GITHUB_TOKEN:credentials.token},stdio:['ignore','inherit','inherit']});
+await new Promise((resolve,reject)=>{child.on('exit',code=>code===0?resolve():reject(new Error(`git push failed: ${code}`)));child.on('error',reject);});

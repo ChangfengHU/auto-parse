@@ -42,9 +42,14 @@
     ".next-publication-lock-20261011/types/**/*.ts",
     ".next-publication-lock-20261011/dev/types/**/*.ts",
     ".next-audio-library-20261015/types/**/*.ts",
-    ".next-audio-library-20261015/dev/types/**/*.ts"
+    ".next-audio-library-20261015/dev/types/**/*.ts",
+    ".next-audio-studio-20261015/types/**/*.ts",
+    ".next-audio-studio-20261015/dev/types/**/*.ts",
+    ".next-audio-studio-20261015-r2/types/**/*.ts",
+    ".next-audio-studio-20261015-r2/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "cloudflare/audio-worker"
   ]
 }

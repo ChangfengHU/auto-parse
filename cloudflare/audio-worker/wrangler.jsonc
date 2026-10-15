@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "auto-parse-audio",
+  "main": "src/index.ts",
+  "account_id": "059feb047348e153b65f5efde638acf4",
+  "compatibility_date": "2026-10-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+  "limits": { "cpu_ms": 30000 },
+  "vars": {
+    "DAILY_BUDGET_USD": "1.00",
+    "MINIMAX_ENABLED": "false",
+    "ALLOWED_ORIGIN": "https://auto-parse-v2.vyibc.com",
+    "SFX_COST_USD": ""
+  },
+  "ai": { "binding": "AI" },
+  "d1_databases": [{
+    "binding": "DB", "database_name": "auto-parse-audio", "database_id": "71995b4c-04df-489b-8e3e-ad3a831b14b3",
+    "migrations_dir": "migrations"
+  }],
+  "r2_buckets": [{ "binding": "AUDIO", "bucket_name": "auto-parse-audio-private" }],
+  "workflows": [{ "binding": "JOBS", "name": "auto-parse-audio-jobs", "class_name": "AudioJob" }]
+}

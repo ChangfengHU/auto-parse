@@ -4,6 +4,13 @@
 
 ## In Progress
 
+- [AUDIO-002] 音频工作室闭环、Cloudflare MCP 与能力发布
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-10-15
+  Log: dev-log/2026-10-15-audio-studio.md
+  Next: 页面、私有 R2、CF 音乐生成、11 个 MCP 工具已上线；Fleet/Harness 发布已 received/active。完成最终保存后，待补独立音效密钥、核对 MiniMax 未知请求及启用原始素材 API；未开放线路不标为可用。
+
 - [RUNTIME-003] 初始化84小红书锁定Python依赖并复测导入凭证
   Status: In Progress
   Owner: codex

@@ -106,14 +106,14 @@ export async function GET(request: NextRequest) {
   if (length && ['shortest', 'short', 'medium', 'long'].includes(length)) {
     upstream.searchParams.set('length', length);
   }
-  if (license === 'commercial') upstream.searchParams.set('license_type', 'commercial');
+  if (license === 'commercial') upstream.searchParams.set('license', 'cc0,pdm,by,by-sa');
   if (license === 'cc0') upstream.searchParams.set('license', 'cc0,pdm');
 
   try {
     const response = await fetch(upstream, {
       headers: { Accept: 'application/json', 'User-Agent': 'auto-parse-audio/1.0' },
       next: { revalidate: 300 },
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(30_000),
     });
     const data = await response.json() as OpenverseResponse;
 
