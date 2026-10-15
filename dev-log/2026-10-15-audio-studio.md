@@ -57,3 +57,13 @@
 - 最终 CF Worker 部署版本 `22e6334a-465c-4471-8987-668a8967c00f`；页面最终构建 r2，`/audio-library` 与原 `/parse` 均为 HTTP 200，systemd active。
 - 实现提交 `c2240ec` 已推送 origin/main。最终工作树仅保留用户原有 `.materials.json` 修改。
 - 已删除两份本地音频测试下载副本，R2 原件、SHA256、任务意图、回执和浏览器截图保留；副本可经鉴权从 R2 恢复。11008 预发进程已停止，旧生产构建保留回退。
+
+## MCP 安装与配置补齐
+
+- 用户指出广场安装入口缺命令。核对发现手动发布的 vault-reference 未接入广场已知服务认证，Codex 分页亦没有 mcp add 原生命令。
+- 在 Fleet 所属私有仓库的95干净main副本修复：登记本服务原有 Vault accessToken、能力行直达「安装与配置」、独立可复制的 Codex Bash 命令及登记检查；关闭窗口恢复原批量选择。未改音频服务鉴权，不公开文件，不创建新 Token。
+- 本仓库补客户端安装/配置/排错/卸载说明，以及只读浏览器/MCP验证脚本 verify-marketplace.mjs。参数依据官方 MCP 文档与本机 CLI 帮助核对，真实密钥不在命令参数或公开说明中。
+- Fleet 实现55e4187已推送私有main；26项基础与38项相关安装/鉴权测试通过，候选页面9项通过。扩展Hub回归1502/1507：两项缺历史Flow压缩包夹具、两项旧归属/Token预期已过时，另一个无关云App执行器测试4分钟不退出被终止；不宣称全仓测试通过。
+- 真实 MCP initialize、tools/list=11、audio_capabilities 调用成功；没有发起任何付费请求，也没有修改用户客户端全局配置。
+- Fleet clean-main 守卫55e4187正式发布并精确读回，45项绑定/settings保留。线上友好域名管理员12项、workers.dev访客9项均通过：安装入口/命令复制、已有服务Token自动填充、DOM遮掩、桌面/手机及真实只读MCP连接。原应用 /audio-library、/parse 均HTTP200。
+- 发布回执保留95的 /home/claude/.local/state/audio-mcp-install-20261015-publish/receipt.json；本机浏览器证据在 .data/audio-studio-verification/marketplace-install-admin-fleet.vyibc.com.json 与对应截图。

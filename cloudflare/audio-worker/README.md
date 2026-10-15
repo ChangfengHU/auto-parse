@@ -12,6 +12,51 @@
 - 入库前必须人工试听和核对当前用途授权。生成音乐库仅内部使用，不允许因发布 MCP 而公开分发文件。
 - 没有自动混音、对口型、配音或视频渲染。
 
+## MCP 安装与配置
+
+名称：`auto-parse-audio`。这是远程 Streamable HTTP MCP，不需要在客户端部署 Worker 或安装音频模型。
+
+能力广场：https://fleet.vyibc.com/#/hub?view=capabilities 。搜索 `auto-parse-audio`，点击条目上的「安装与配置」，选择 Codex、Claude Code 或 Cursor。Fleet 管理员登录后复用金库内本服务的已有 Token；未登录只提供占位预览。不要使用 CF Token 或金库管理员主 Token。
+
+已安装 Codex CLI 时，在 Bash 中执行：
+
+```bash
+read -r -s -p '音频服务 Token（输入不回显）: ' MCP_AUTO_PARSE_AUDIO_TOKEN
+printf '\n'
+export MCP_AUTO_PARSE_AUDIO_TOKEN
+codex mcp add auto-parse-audio --url https://auto-parse-audio.2513120790.workers.dev/mcp --bearer-token-env-var MCP_AUTO_PARSE_AUDIO_TOKEN
+codex mcp get auto-parse-audio
+codex
+```
+
+Token 为 Vault `service:auto-parse-audio` 的 `accessToken` 原值（不含 `Bearer `）。命令只保存环境变量名；在同一终端启动 Codex，新终端需要重新提供环境变量。`mcp get` 只能证明配置已登记；进入 Codex 后用 `/mcp` 检查连接，先调用 `audio_capabilities` 验证，不进行付费生成。
+
+也可将下列内容合并进 Codex 配置（不要覆盖其他 MCP）：
+
+```toml
+[mcp_servers.auto-parse-audio]
+url = "https://auto-parse-audio.2513120790.workers.dev/mcp"
+bearer_token_env_var = "MCP_AUTO_PARSE_AUDIO_TOKEN"
+```
+
+其他支持 HTTP MCP 的客户端配置预览：
+
+```json
+{
+  "mcpServers": {
+    "auto-parse-audio": {
+      "type": "http",
+      "url": "https://auto-parse-audio.2513120790.workers.dev/mcp",
+      "headers": {"Authorization": "Bearer <YOUR_AUDIO_SERVICE_TOKEN>"}
+    }
+  }
+}
+```
+
+将占位符替换为服务 Token，私密保存，不提交 Git。Cursor 的配置省略 `type`；以广场对应客户端生成的配置为准。本服务没有 OAuth 登录流程，不要用 `codex mcp login` 代替 Token。401 通常表示 Token 缺失/错误或启动客户端的进程没有继承变量。移除 Codex 登记：`codex mcp remove auto-parse-audio`，不会删除云端素材。
+
+命令依据：[OpenAI MCP 文档](https://developers.openai.com/codex/mcp)及本机 `codex mcp add --help` 核对。安装不等于艺术质量验收，也不会自动生成、付费或公开声音库。
+
 ## 部署
 
 唯一应用主机：84.8.217.45 `/opt/auto-parse`。Cloudflare 使用金库 `service:cloudflare` 中 forwarding 账户。
