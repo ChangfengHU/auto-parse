@@ -117,6 +117,15 @@ const NAV = [
     ),
   },
   {
+    href: '/audio-library',
+    label: '音频素材',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 18V5l10-2v13M9 9l10-2M6 21a3 3 0 100-6 3 3 0 000 6zm10-2a3 3 0 100-6 3 3 0 000 6z" />
+      </svg>
+    ),
+  },
+  {
     href: '/settings/backends',
     label: '后端配置',
     icon: (

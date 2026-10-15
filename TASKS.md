@@ -79,6 +79,13 @@
 
 ## Done
 
+- [AUDIO-001] 音频素材搜索页面与统一检索接口
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-15
+  Log: dev-log/2026-10-15-audio-library.md
+  Result: 新增背景音乐/音效检索、时长与授权筛选、试听和授权详情；统一 API 已在 84 生产部署，音乐、音效及原解析页回归通过。
+
 - [RUNTIME-004] 发布任务与浏览器维护共享活动锁
   Status: Done
   Owner: codex

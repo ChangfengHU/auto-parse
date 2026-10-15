@@ -17,6 +17,7 @@
 /.next/
 /.next-douyin-release/
 /.next-publication-lock-20261011/
+/.next-audio-library-*/
 /out/
 
 # production
