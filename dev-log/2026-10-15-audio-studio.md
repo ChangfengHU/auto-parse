@@ -53,3 +53,7 @@
 - GitHub 已用 Vault 凭据在 84 只读核对身份 ChangfengHU、目标 ChangfengHU/auto-parse 与 push 权限；本任务提交排除 `.materials.json`。
 - 最终浏览器 14/14 检查通过，两份真实音频均实际播放推进时钟；CF 实测 25/25，新增超时映射后单元测试 9 项。
 - 独立素材搜索补测：Wikimedia rain 5 条、约 1.2 秒；Openverse footsteps 12 条、约 26.5 秒；cinematic 冷查询超过 30 秒。已加公共元数据 5 分钟缓存与明确 504 提示，不将来源超时混淆为付费任务未知态。不能承诺聚合检索始终稳定，用户可切换 Wikimedia。
+- 修复后最终线上搜索复测 3/3：Openverse cinematic 12 条（563 ms）、footsteps 12 条（605 ms）、Wikimedia rain 5 条（743 ms）。这是本次响应时间，不代表冷查询保证。
+- 最终 CF Worker 部署版本 `22e6334a-465c-4471-8987-668a8967c00f`；页面最终构建 r2，`/audio-library` 与原 `/parse` 均为 HTTP 200，systemd active。
+- 实现提交 `c2240ec` 已推送 origin/main。最终工作树仅保留用户原有 `.materials.json` 修改。
+- 已删除两份本地音频测试下载副本，R2 原件、SHA256、任务意图、回执和浏览器截图保留；副本可经鉴权从 R2 恢复。11008 预发进程已停止，旧生产构建保留回退。
