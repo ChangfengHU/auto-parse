@@ -7,6 +7,16 @@ import type { WorkflowSession } from './types';
 
 declare global {
   var __workflowSessions: Map<string, WorkflowSession> | undefined;
+  var __workflowSessionOperations: Set<string> | undefined;
+}
+
+/** One writer per live session, shared by UI and MCP. Acquire before any await. */
+export function acquireSessionOperation(id: string): (() => void) | null {
+  const locks = global.__workflowSessionOperations ??= new Set<string>();
+  if (locks.has(id)) return null;
+  locks.add(id);
+  let released = false;
+  return () => { if (!released) { released = true; locks.delete(id); } };
 }
 
 function store(): Map<string, WorkflowSession> {
@@ -50,7 +60,7 @@ export function deleteSession(id: string): boolean {
 }
 
 export function listSessions(): WorkflowSession[] {
-  return Array.from(store().values()).map(s => ({ ...s, _page: undefined, _browser: undefined }));
+  return Array.from(store().values()).filter(s => !s._managedByMcp).map(s => ({ ...s, _page: undefined, _browser: undefined, _idleSim: undefined }));
 }
 
 export function listLiveSessions(): WorkflowSession[] {

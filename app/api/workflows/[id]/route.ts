@@ -5,8 +5,10 @@
  */
 import { NextResponse } from 'next/server';
 import { getWorkflow, updateWorkflow, deleteWorkflow, copyWorkflow } from '@/lib/workflow/workflow-db';
+import { WorkflowInputError, WorkflowConflictError } from '@/lib/workflow/validation';
 
 type Ctx = { params: Promise<{ id: string }> };
+const errorStatus = (error: unknown) => error instanceof WorkflowInputError || error instanceof WorkflowConflictError ? error.status : 500;
 
 export async function GET(_req: Request, { params }: Ctx) {
   const { id } = await params;
@@ -15,7 +17,7 @@ export async function GET(_req: Request, { params }: Ctx) {
     if (!def) return NextResponse.json({ error: '未找到' }, { status: 404 });
     return NextResponse.json(def);
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return NextResponse.json({ error: String(e) }, { status: errorStatus(e) });
   }
 }
 
@@ -32,10 +34,10 @@ export async function PUT(req: Request, { params }: Ctx) {
       description: body.description,
       nodes: body.nodes,
       vars: body.vars,
-    });
+    }, typeof body.expectedUpdatedAt === 'string' ? body.expectedUpdatedAt : undefined);
     return NextResponse.json(def);
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return NextResponse.json({ error: String(e) }, { status: errorStatus(e) });
   }
 }
 
@@ -45,7 +47,7 @@ export async function DELETE(_req: Request, { params }: Ctx) {
     await deleteWorkflow(id);
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return NextResponse.json({ error: String(e) }, { status: errorStatus(e) });
   }
 }
 
@@ -57,7 +59,7 @@ export async function POST(req: Request, { params }: Ctx) {
       const copy = await copyWorkflow(id);
       return NextResponse.json(copy, { status: 201 });
     } catch (e) {
-      return NextResponse.json({ error: String(e) }, { status: 500 });
+      return NextResponse.json({ error: String(e) }, { status: errorStatus(e) });
     }
   }
   return NextResponse.json({ error: 'Not found' }, { status: 404 });

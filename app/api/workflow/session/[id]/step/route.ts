@@ -18,7 +18,7 @@
  *   lastExecutedStep + 1 === stepIndex → relay = true（相邻，浏览器状态接力）
  *   否则                              → relay = false（非相邻，独立执行）
  */
-import { getSession, updateSession } from '@/lib/workflow/session-store';
+import { getSession, updateSession, acquireSessionOperation } from '@/lib/workflow/session-store';
 import { executeNode } from '@/lib/workflow/engine';
 import { getPersistentContext } from '@/lib/persistent-browser';
 import { nodeRequiresBrowser } from '@/lib/workflow/node-runtime';
@@ -58,6 +58,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     node?: Partial<NodeDef>;
   };
 
+  const existing = getSession(sessionId);
+  if (!existing) return Response.json({ error: 'session not found' }, { status: 404 });
+  if (existing._managedByMcp) return Response.json({ error: 'managed session: use authenticated workflow MCP' }, { status: 409 });
+  if (body.stepIndex !== undefined && (!Number.isInteger(body.stepIndex) || body.stepIndex < 0 || body.stepIndex >= existing.workflow.nodes.length)) {
+    return Response.json({ error: 'invalid stepIndex' }, { status: 400 });
+  }
+  const releaseOperation = acquireSessionOperation(sessionId);
+  if (!releaseOperation) return Response.json({ error: 'session busy' }, { status: 409 });
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -294,8 +302,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
+        updateSession(sessionId, { status: 'error' });
         send('error', msg);
       } finally {
+        releaseOperation();
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         try { controller.close(); } catch { /* ignore */ }
       }

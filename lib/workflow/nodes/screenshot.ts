@@ -8,5 +8,6 @@ export async function executeScreenshot(
   _ctx: WorkflowContext
 ): Promise<NodeResult> {
   const screenshot = await captureScreenshot(page);
+  if (!screenshot) return { success: false, log: ['截图失败'], error: 'screenshot_failed' };
   return { success: true, log: ['📸 截图完成'], screenshot };
 }

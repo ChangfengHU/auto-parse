@@ -497,6 +497,7 @@ export interface AgentReactParams {
 
 export interface WorkflowDef {
   id: string
+  updatedAt?: string      // Supabase revision, used for compare-and-set writes
   name: string
   description?: string
   vars: string[]          // 需要的变量名列表（如 ['videoUrl', 'title']）
@@ -556,4 +557,5 @@ export interface WorkflowSession {
   _page?: import('playwright').Page
   _browser?: import('playwright').Browser
   _idleSim?: import('./idle-simulator').IdleSimulator
+  _managedByMcp?: boolean
 }

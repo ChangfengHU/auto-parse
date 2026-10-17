@@ -2365,6 +2365,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   // ── 工作流编辑 ─────────────────────────────────────────────────────────────
   const [nodes, setNodes] = useState<NodeDef[]>(initialWorkflow.nodes);
   const [workflowName, setWorkflowName] = useState(initialWorkflow.name);
+  const [savedRevision, setSavedRevision] = useState(initialWorkflow.updatedAt);
   const [isDirty, setIsDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -2676,9 +2677,11 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
       const res = await fetch(`/api/workflows/${initialWorkflow.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: workflowName, nodes, vars: initialWorkflow.vars, description: initialWorkflow.description }),
+        body: JSON.stringify({ name: workflowName, nodes, vars: initialWorkflow.vars, description: initialWorkflow.description, expectedUpdatedAt: savedRevision }),
       });
       if (!res.ok) throw new Error(await res.text());
+      const saved = await res.json() as WorkflowDef;
+      setSavedRevision(saved.updatedAt);
       setIsDirty(false);
     } catch (e) { alert(`保存失败: ${e}`); }
     finally { setSaving(false); }
@@ -2690,7 +2693,9 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
   }
   function copyNode(idx: number) {
     const next = [...nodes];
-    next.splice(idx + 1, 0, JSON.parse(JSON.stringify(nodes[idx])));
+    const copy = JSON.parse(JSON.stringify(nodes[idx])) as NodeDef;
+    if (copy.id) copy.id = crypto.randomUUID();
+    next.splice(idx + 1, 0, copy);
     updateNodes(next);
   }
   function deleteNode(idx: number) {

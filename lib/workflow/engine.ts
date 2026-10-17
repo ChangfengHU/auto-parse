@@ -11,6 +11,7 @@ import type { NodeDef, NodeResult, NodeType, WorkflowContext, WorkflowDef } from
 import { resolveParams } from './resolver';
 import { captureScreenshot } from './utils';
 import { getCatalogItem } from './node-catalog';
+import { checkWaitAfter } from './wait-after';
 
 import { executeMaterial } from './nodes/material';
 import { executeNavigate } from './nodes/navigate';
@@ -145,45 +146,13 @@ export async function executeNode(
 
   // ── 节点后置等待（waitAfter 启用时）────────────────────────────────────────
   if (result.success && node.waitAfter?.enabled) {
-    const wa = node.waitAfter;
-    const waitAction = wa.action ?? (wa.selector ? 'appeared' : undefined);
-    const delaySeconds = Math.max(0, wa.delaySeconds ?? 0);
-    const timeout = wa.timeout ?? 15_000;
-    if (delaySeconds > 0) {
-      ctx.emit?.('log', `⏱️ 延迟 ${delaySeconds}s 后开始判断后置条件...`);
-      await resultPage.waitForTimeout(delaySeconds * 1000);
+    try {
+      const checked = await checkWaitAfter(resultPage, resolveParams({ ...node.waitAfter }, ctx.vars), message => ctx.emit?.('log', message));
+      if (!checked.success) result = { ...result, ...checked };
+    } catch (error) {
+      result = { ...result, success: false, error: `后置检测异常：${error instanceof Error ? error.message : String(error)}` };
     }
-    const start = Date.now();
-    ctx.emit?.('log', `⏳ 等待后置条件（最多 ${timeout / 1000}s）...`);
-
-    while (Date.now() - start < timeout) {
-      const url = resultPage.url();
-
-      if (wa.urlContains && url.includes(wa.urlContains)) {
-        ctx.emit?.('log', `✅ 后置条件满足：URL 包含 "${wa.urlContains}"`);
-        break;
-      }
-
-      if (wa.selector) {
-        const visible = await resultPage.locator(wa.selector).first().isVisible().catch(() => false);
-        if (waitAction === 'appeared' && visible) { ctx.emit?.('log', `✅ 后置元素出现`); break; }
-        if (waitAction === 'disappeared' && !visible) { ctx.emit?.('log', `✅ 后置元素消失`); break; }
-      }
-
-      if (wa.successKeywords?.length || wa.failKeywords?.length) {
-        const text = await resultPage.evaluate(() => document.body.innerText).catch(() => '');
-        const failWord = wa.failKeywords?.find(k => text.includes(k));
-        if (failWord) {
-          result = { ...result, success: false, error: `后置检测失败：页面含"${failWord}"` };
-          ctx.emit?.('log', `❌ 后置检测失败：${failWord}`);
-          break;
-        }
-        const successWord = wa.successKeywords?.find(k => text.includes(k));
-        if (successWord) { ctx.emit?.('log', `✅ 后置关键词满足："${successWord}"`); break; }
-      }
-
-      await resultPage.waitForTimeout(500);
-    }
+    if (!result.success) ctx.emit?.('log', `❌ ${result.error}`);
   }
 
   // ── 自动截图及耗时收尾 ────────────────────────────────────────────────

@@ -1,8 +1,9 @@
 /**
- * Workflow CRUD — Supabase REST API（不可用时回退 lib/rpa/workflows/<id>.json）
+ * Workflow CRUD — Supabase is the sole source; no local JSON fallback.
  */
 import type { WorkflowDef } from './types';
 import { normalizeDouyinPublishWorkflow } from './workflows/douyin-publish';
+import { assertWorkflowShape, assertWorkflowMutable, WorkflowConflictError } from './validation';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_KEY =
@@ -325,6 +326,7 @@ function rowToDef(row: WorkflowRow): WorkflowDef {
       normalizeGeminiAutoEnterWorkflow(
         normalizeDouyinPublishWorkflow({
           id: row.id,
+          updatedAt: row.updated_at,
           name: row.name,
           description: row.description,
           nodes: row.nodes,
@@ -341,8 +343,36 @@ function parseContentRangeTotal(value: string | null): number | null { const tot
 export async function listWorkflows(): Promise<WorkflowRow[]> { assertSupabaseEnabled(); const res = await fetch(SUPABASE_URL + '/rest/v1/' + TABLE + '?select=*&order=created_at.asc', { headers: headers() }); if (!res.ok) throw new Error(await res.text()); return await res.json() as WorkflowRow[]; }
 export async function listWorkflowsPage(options: ListWorkflowsPageOptions = {}): Promise<ListWorkflowsPageResult> { assertSupabaseEnabled(); const limit = clampLimit(options.limit); const page = clampPage(options.page); const url = new URL(SUPABASE_URL + '/rest/v1/' + TABLE); url.searchParams.set('select', 'id,name,description,nodes,created_at,updated_at'); url.searchParams.set('order', 'updated_at.desc'); url.searchParams.set('limit', String(limit)); url.searchParams.set('offset', String((page - 1) * limit)); if (options.cursor?.trim()) url.searchParams.set('updated_at', 'lt.' + options.cursor.trim()); if (options.q?.trim()) { const q = options.q.trim().replace(/[%_,]/g, (m) => '\\' + m); url.searchParams.set('or', '(id.ilike.*' + q + '*,name.ilike.*' + q + '*,description.ilike.*' + q + '*)'); } const res = await fetch(url, { headers: headers({ Prefer: 'count=exact,return=representation' }) }); if (!res.ok) throw new Error(await res.text()); const items = await res.json() as WorkflowRow[]; const total = parseContentRangeTotal(res.headers.get('content-range')) ?? items.length; return { source: 'supabase', items, nextCursor: items.at(-1)?.updated_at || null, page, totalPages: Math.max(1, Math.ceil(total / limit)), total }; }
 export async function getWorkflow(id: string): Promise<WorkflowDef | null> { assertSupabaseEnabled(); const res = await fetch(SUPABASE_URL + '/rest/v1/' + TABLE + '?id=eq.' + encodeURIComponent(id) + '&select=*&limit=1', { headers: headers() }); if (!res.ok) throw new Error(await res.text()); const rows = await res.json() as WorkflowRow[]; return rows[0] ? rowToDef(rows[0]) : null; }
-export async function createWorkflow(def: Omit<WorkflowDef, 'id'> & { id?: string }): Promise<WorkflowDef> { assertSupabaseEnabled(); const payload = { id: def.id ?? crypto.randomUUID(), name: def.name, description: def.description ?? '', nodes: def.nodes, vars: def.vars ?? [] }; const res = await fetch(SUPABASE_URL + '/rest/v1/' + TABLE, { method: 'POST', headers: headers(), body: JSON.stringify(payload) }); if (!res.ok) throw new Error(await res.text()); const rows = await res.json() as WorkflowRow[]; if (!rows[0]) throw new Error('Supabase 创建工作流后未返回记录'); return rowToDef(rows[0]); }
-export async function updateWorkflow(id: string, patch: Partial<Omit<WorkflowDef, 'id'>>): Promise<WorkflowDef> { assertSupabaseEnabled(); const res = await fetch(SUPABASE_URL + '/rest/v1/' + TABLE + '?id=eq.' + encodeURIComponent(id), { method: 'PATCH', headers: headers(), body: JSON.stringify({ ...patch, updated_at: new Date().toISOString() }) }); if (!res.ok) throw new Error(await res.text()); const rows = await res.json() as WorkflowRow[]; if (!rows[0]) throw new Error('Supabase 中不存在工作流 ' + id); return rowToDef(rows[0]); }
-export async function deleteWorkflow(id: string): Promise<void> { assertSupabaseEnabled(); const res = await fetch(SUPABASE_URL + '/rest/v1/' + TABLE + '?id=eq.' + encodeURIComponent(id), { method: 'DELETE', headers: headers() }); if (!res.ok) throw new Error(await res.text()); }
+export async function createWorkflow(def: Omit<WorkflowDef, 'id'> & { id?: string }): Promise<WorkflowDef> {
+  assertSupabaseEnabled();
+  const payload = { id: def.id ?? crypto.randomUUID(), name: def.name, description: def.description ?? '', nodes: def.nodes, vars: def.vars ?? [] };
+  assertWorkflowMutable(payload.id);
+  assertWorkflowShape(payload);
+  const res = await fetch(SUPABASE_URL + '/rest/v1/' + TABLE, { method: 'POST', headers: headers(), body: JSON.stringify(payload) });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json() as WorkflowRow[];
+  if (!rows[0]) throw new Error('Supabase 创建工作流后未返回记录');
+  return rowToDef(rows[0]);
+}
+export async function updateWorkflow(id: string, patch: Partial<Omit<WorkflowDef, 'id'>>, expectedUpdatedAt?: string): Promise<WorkflowDef> {
+  assertSupabaseEnabled(); assertWorkflowMutable(id);
+  const current = await getWorkflow(id);
+  if (!current) throw new WorkflowConflictError('workflow_not_found');
+  const clean = Object.fromEntries(Object.entries(patch).filter(([key, value]) => ['name', 'description', 'nodes', 'vars'].includes(key) && value !== undefined));
+  assertWorkflowShape({ ...current, ...clean });
+  const url = new URL(SUPABASE_URL + '/rest/v1/' + TABLE);
+  url.searchParams.set('id', 'eq.' + id);
+  if (expectedUpdatedAt) url.searchParams.set('updated_at', 'eq.' + expectedUpdatedAt);
+  const res = await fetch(url, { method: 'PATCH', headers: headers(), body: JSON.stringify({ ...clean, updated_at: new Date().toISOString() }) });
+  if (!res.ok) throw new Error(await res.text());
+  const rows = await res.json() as WorkflowRow[];
+  if (!rows[0]) throw new WorkflowConflictError('workflow_revision_conflict_read_again');
+  return rowToDef(rows[0]);
+}
+export async function deleteWorkflow(id: string): Promise<void> {
+  assertSupabaseEnabled(); assertWorkflowMutable(id);
+  const res = await fetch(SUPABASE_URL + '/rest/v1/' + TABLE + '?id=eq.' + encodeURIComponent(id), { method: 'DELETE', headers: headers() });
+  if (!res.ok) throw new Error(await res.text());
+}
 export async function copyWorkflow(id: string): Promise<WorkflowDef> { const src = await getWorkflow(id); if (!src) throw new Error('工作流 ' + id + ' 不存在'); return createWorkflow({ ...src, id: crypto.randomUUID(), name: src.name + ' (副本)' }); }
 export async function ensureTable(): Promise<void> { assertSupabaseEnabled(); }

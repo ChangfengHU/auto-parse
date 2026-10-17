@@ -114,7 +114,7 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
       waitUntil: 'domcontentloaded',
       useAdsPower: false,
       adsProfileId: 'k1aomp3q',
-      adsApiKey: '74f06f7e8e8e83ccafd060d7942cb9530087279d8cf923d4',
+      adsApiKey: '',
       adsApiUrl: 'http://local.adspower.net:50325',
       adsManualCdpUrl: '',
       adsProxyServer: '',

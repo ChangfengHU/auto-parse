@@ -18,7 +18,7 @@
 import { NextResponse } from 'next/server';
 import type { Page } from 'playwright';
 import { getDebugScratchPage } from '@/lib/persistent-browser';
-import { getSession } from '@/lib/workflow/session-store';
+import { getSession, acquireSessionOperation } from '@/lib/workflow/session-store';
 
 type InteractAction = 'click' | 'type' | 'scroll' | 'key' | 'screenshot';
 
@@ -42,6 +42,11 @@ export async function POST(req: Request) {
   };
 
   const { sessionId, action, x, y, text, key, deltaY } = body;
+  if (sessionId && getSession(sessionId)?._managedByMcp) return NextResponse.json({ error: 'managed session: use authenticated workflow MCP' }, { status: 409 });
+  if (!['click', 'type', 'scroll', 'key', 'screenshot'].includes(action)) return NextResponse.json({ error: 'unknown action' }, { status: 400 });
+  if (['click', 'scroll'].includes(action) && (!Number.isFinite(x) || !Number.isFinite(y) || Number(x) < 0 || Number(y) < 0)) return NextResponse.json({ error: 'invalid coordinates' }, { status: 400 });
+  const releaseOperation = acquireSessionOperation(sessionId || '__scratch__');
+  if (!releaseOperation) return NextResponse.json({ error: 'session busy' }, { status: 409 });
 
   try {
     const page = await getPage(sessionId);
@@ -89,5 +94,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, screenshot, url: currentUrl });
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 500 });
+  } finally {
+    releaseOperation();
   }
 }

@@ -3,13 +3,15 @@
  * DELETE /api/workflow/session/:id  — 关闭 Session（关闭 Tab）
  */
 import { NextResponse } from 'next/server';
-import { getSession, deleteSession } from '@/lib/workflow/session-store';
+import { getSession, deleteSession, acquireSessionOperation } from '@/lib/workflow/session-store';
 import { captureScreenshot } from '@/lib/workflow/utils';
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const session = getSession(id);
   if (!session) return NextResponse.json({ error: 'session not found' }, { status: 404 });
+
+  if (session._managedByMcp) return NextResponse.json({ error: 'managed session: use authenticated workflow MCP' }, { status: 401 });
 
   const page = session._page;
   const screenshot = page ? await captureScreenshot(page) : undefined;
@@ -45,6 +47,11 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   if (!session) return NextResponse.json({ error: 'session not found' }, { status: 404 });
 
   const reqUrl = new URL(_req.url);
+  if (session._managedByMcp) return NextResponse.json({ error: 'managed session: use authenticated workflow MCP' }, { status: 409 });
+  const releaseOperation = acquireSessionOperation(id);
+  if (!releaseOperation) return NextResponse.json({ error: 'session busy' }, { status: 409 });
+  try {
+  session._idleSim?.stop();
   let keepPage = reqUrl.searchParams.get('keepPage') === '1' || process.env.KEEP_BROWSER_OPEN === 'true';
   let keptLastTab = false;
 
@@ -69,6 +76,9 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
     }
   }
   deleteSession(id);
+  // CDP close disconnects this client; it does not shut down the user's browser.
+  await session._browser?.close().catch(() => {});
 
   return NextResponse.json({ ok: true, keepPage, keptLastTab, message: `Session ${id} 已关闭` });
+  } finally { releaseOperation(); }
 }
