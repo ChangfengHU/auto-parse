@@ -12,6 +12,7 @@ import { resolveParams } from './resolver';
 import { captureScreenshot } from './utils';
 import { getCatalogItem } from './node-catalog';
 import { checkWaitAfter } from './wait-after';
+import { shouldExecuteNode } from './condition';
 
 import { executeMaterial } from './nodes/material';
 import { executeNavigate } from './nodes/navigate';
@@ -93,6 +94,15 @@ export async function executeNode(
     };
   }
 
+  try {
+    if (!shouldExecuteNode(node, ctx.vars)) {
+      const msg = `⏭️ 条件不满足，跳过：${node.runIf!.variable} != ${node.runIf!.equals}`;
+      ctx.emit?.('log', msg);
+      return { success: true, stepSkipped: true, log: [msg] };
+    }
+  } catch {
+    return { success: false, log: [], error: 'condition_variable_must_be_true_or_false' };
+  }
   const startTime = performance.now();
   const executor = NODE_REGISTRY[node.type];
   if (!executor) {

@@ -52,6 +52,7 @@ export interface NodeDef {
   params: Record<string, unknown>    // 节点参数（支持 {{变量}} 模板）
   continueOnError?: boolean          // 失败时是否继续（默认 false）
   disabled?: boolean                 // 节点是否禁用（禁用时会跳过执行，默认 false）
+  runIf?: { variable: string; equals: boolean } // 严格布尔条件；缺省值 false
   url?: string                       // 执行前自动导航到此 URL（空则不导航）
   waitAfter?: WaitAfterConfig        // 执行后等待条件
   autoScreenshot?: boolean           // 执行后自动截图（默认 true）
@@ -166,6 +167,11 @@ export interface PasteImageClipboardParams {
 }
 
 export interface ClickParams {
+  skipIfMissing?: boolean // 仅单选择器可选提示，短时未出现直接跳过
+  xhsPublication?: {
+    requestId: string; expectedAccountId: string; videoUrl: string;
+    title: string; description: string; aiGenerated: boolean | string;
+  }
   /** Optional CSS host selector for one exact-text button inside a closed shadow root. */
   shadowHostSelector?: string
   /** 仅用于显式启用保护的抖音发布副本，不改变普通点击。 */
@@ -526,6 +532,7 @@ export interface NodeResult {
 }
 
 export interface WorkflowContext {
+  managedPublicationAuthorized?: boolean // 只能由持有浏览器锁的认证执行器设置，不来自 vars
   vars: Record<string, string>              // 输入变量（{{title}} 等）
   outputs: Record<string, unknown>          // 累积的节点输出
   emit?: (type: string, payload: string) => void  // SSE 推送（可选）

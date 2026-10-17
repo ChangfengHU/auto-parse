@@ -29,6 +29,9 @@ export function validateWorkflow(value: unknown): { valid: boolean; errors: stri
       for (const key of ['disabled', 'continueOnError', 'autoScreenshot']) if (node[key] !== undefined && typeof node[key] !== 'boolean') errors.push(`${label}.${key} must be boolean`);
       for (const key of ['id', 'label', 'url']) if (node[key] !== undefined && typeof node[key] !== 'string') errors.push(`${label}.${key} must be a string`);
       if (typeof node.id === 'string') { if (ids.has(node.id)) errors.push(`${label}.id is duplicated`); ids.add(node.id); }
+      if (node.runIf !== undefined && (!isRecord(node.runIf) || typeof node.runIf.variable !== 'string' ||
+          !/^[A-Za-z][A-Za-z0-9_]*$/.test(node.runIf.variable) || typeof node.runIf.equals !== 'boolean' ||
+          Object.keys(node.runIf).some(k => !['variable', 'equals'].includes(k)))) errors.push(`${label}.runIf must contain variable and boolean equals`);
       if (node.waitAfter !== undefined) {
         if (!isRecord(node.waitAfter)) errors.push(`${label}.waitAfter must be an object`);
         else {

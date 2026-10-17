@@ -173,3 +173,23 @@ test('saving excludes edits and execution, and closing defers lease cleanup unti
   complete(); await saving;
   assert.equal(released, 1);
 });
+
+test('completed prefix tolerates JSON object key order but rejects actual edits', async () => {
+  const page = { close: async () => {}, isClosed: () => false };
+  const load = loader({
+    playwright: { chromium: { connectOverCDP: async () => ({ contexts: () => [{ newPage: async () => page }], close: async () => {} }) } },
+    'lib/workflow/workflow-db.ts': { getWorkflow: async () => base() },
+    'lib/workflow/browser-activity.ts': { acquireManagedBrowserActivity: async () => async () => {} },
+    'lib/workflow/engine.ts': { executeNode: async () => ({ success: true, log: [] }) },
+  });
+  const service = load('lib/workflow/mcp-service.ts');
+  const opened = await service.callWorkflowTool('workflow_open_session', { workflowId: 'draft', browserInstance: 1, confirmBrowserControl: true });
+  await service.callWorkflowTool('workflow_run_step', { sessionId: opened.sessionId, expectedRevision: 0, requestId: 'ordered-prefix', confirmExecution: true });
+  await delay(10);
+  const state = await service.callWorkflowTool('workflow_get_session', {sessionId:opened.sessionId,includeScreenshot:false}).catch(()=>null);
+  // The page mock intentionally has no DOM observation; runtime revision is one after completion.
+  const nodes = [{params:{},type:'screenshot',id:'one'},{id:'next',type:'screenshot',params:{}}];
+  const changed = await service.callWorkflowTool('workflow_set_session_nodes', {sessionId:opened.sessionId,expectedRevision:state?.sessionRevision ?? 1,nodes});
+  await assert.rejects(service.callWorkflowTool('workflow_set_session_nodes', {sessionId:opened.sessionId,expectedRevision:changed.sessionRevision,nodes:[{...nodes[0],label:'tampered'},nodes[1]]}),/completed_nodes_are_frozen/);
+  await service.callWorkflowTool('workflow_close_session',{sessionId:opened.sessionId});
+});

@@ -4,6 +4,8 @@ import { captureScreenshot } from '../utils';
 import { humanMouseMove } from '../human-mouse';
 import { executeDouyinPublish } from './douyin-publish';
 import { executeShadowButtonClick } from './shadow-button';
+import { executeXhsPublish } from './xhs-publish';
+import { optionalClickPreflight } from './optional-click';
 
 function isLikelySendActionTarget(input: { selector?: string; text?: string }) {
   const text = String(input.text || '').toLowerCase();
@@ -233,6 +235,16 @@ export async function executeClick(
   params: ClickParams,
   ctx: WorkflowContext
 ): Promise<NodeResult> {
+  if (params.skipIfMissing) {
+    const optional = await optionalClickPreflight(page, params);
+    if (optional) return optional;
+  }
+  if (params.xhsPublication) {
+    if (params.text !== '发布' || params.elements?.length || params.selector || params.shadowHostSelector || params.douyinPublication) {
+      return { success: false, log: [], error: 'xhs_guarded_click_requires_exact_publish_target' };
+    }
+    return executeXhsPublish(page, params.xhsPublication, ctx);
+  }
   if (params.douyinPublication) {
     if (params.text !== '发布' || params.elements?.length || params.selector || params.shadowHostSelector) {
       return { success: false, log: [], error: 'publication_click_config_invalid' };

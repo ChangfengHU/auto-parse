@@ -4,6 +4,13 @@
 
 ## In Progress
 
+- [WORKFLOW-004] 小红书浏览器一键发布与条件节点
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-10-17
+  Log: dev-log/2026-10-17-xhs-one-click-publish.md
+  Next: 已部署 directPublish 分支与工作台一键执行；浏览器1已真实发布并回查作品，167项回归通过。最终提交与推送中，未知结果不得重试。
+
 - [AUDIO-002] 音频工作室闭环、Cloudflare MCP 与能力发布
   Status: In Progress
   Owner: codex

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { chromium, type Browser, type Page } from 'playwright';
 import { NODE_CATALOG } from './node-catalog';
 import { createWorkflow, copyWorkflow, getWorkflow, listWorkflowsPage, updateWorkflow } from './workflow-db';
@@ -8,6 +9,7 @@ import { acquireManagedBrowserActivity } from './browser-activity';
 import { executeNode } from './engine';
 import { captureScreenshot } from './utils';
 import { DEFAULT_HUMAN_OPTIONS } from './human-options';
+import { booleanVariable } from './condition';
 import type { NodeDef, WorkflowSession } from './types';
 
 const DEBUG_TYPES = new Set(['material', 'navigate', 'click', 'text_input', 'press_hotkey', 'scroll', 'file_upload', 'wait_condition', 'screenshot', 'qrcode']);
@@ -92,6 +94,7 @@ async function startOperation(input: Record<string, unknown>, runAll: boolean) {
   const start = session.currentStep;
   if (start >= session.workflow.nodes.length) fail('no_pending_nodes');
   const selected = runAll ? session.workflow.nodes.slice(start) : [session.workflow.nodes[start]];
+  for (const node of selected) if (node.runIf) booleanVariable(session.vars[node.runIf.variable]);
   selected.forEach(assertExecutable);
   const release = acquireSessionOperation(id);
   if (!release) fail('session_busy');
@@ -107,7 +110,7 @@ async function startOperation(input: Record<string, unknown>, runAll: boolean) {
         const original = current.workflow.nodes[index];
         // Bind every node to the session's task-owned page; no second CDP/AdsPower browser.
         const node = original.type === 'navigate' ? { ...original, params: { ...original.params, useAdsPower: false, adsManualCdpUrl: '', postClickEnabled: original.params.postClickEnabled ?? false } } : original;
-        const context = { vars: { ...current.vars }, outputs: Object.assign({}, ...current.history.map(h => h.result.output ?? {})) };
+        const context = { vars: { ...current.vars }, outputs: Object.assign({}, ...current.history.filter(h => h.result.success).map(h => h.result.output ?? {})), managedPublicationAuthorized: true };
         const result = await executeNode(current._page!, node, context);
         const failed = !result.success && !node.continueOnError;
         const nextStep = failed ? index : index + 1;
@@ -137,6 +140,8 @@ export async function callWorkflowTool(name: string, input: Record<string, unkno
     owner: 'auto-parse', source: 'supabase', editor: '/workflows', debugSupportedNodes: [...DEBUG_TYPES],
     managedBrowserInstances: [1, 2], sessionIdleMinutes: 20, sessionSurvivesRestart: false,
     execution: 'task-owned tab, cross-process activity lock, async step/run and screenshot polling',
+    conditionalNodes: { field: 'runIf', shape: { variable: 'directPublish', equals: true }, missingValue: false, acceptedValues: ['true', 'false'], invalidValue: 'fail before execution' },
+    xhsPublication: 'click.params.xhsPublication: authenticated browser only; directPublish=true, workflow upload proof, matching account/title/body, AI declaration, durable source-URL deduplication and creation receipt. No blind retries.',
     publication: 'No implicit approval. Confirm execution only for user-authorized effects. Use the dedicated guarded Douyin API for Douyin publication.',
   };
   if (name === 'workflow_node_catalog') return NODE_CATALOG.filter(n => !input.type || n.type === input.type).map(n => ({ ...n, debugSupported: DEBUG_TYPES.has(n.type) }));
@@ -193,7 +198,7 @@ export async function callWorkflowTool(name: string, input: Record<string, unkno
     editable(id, input.expectedRevision);
     const next = { ...session.workflow, nodes: input.nodes };
     assertWorkflowShape(next);
-    if (JSON.stringify(next.nodes.slice(0, session.currentStep)) !== JSON.stringify(session.workflow.nodes.slice(0, session.currentStep))) fail('completed_nodes_are_frozen_open_new_session_to_retest');
+    if (!isDeepStrictEqual(next.nodes.slice(0, session.currentStep), session.workflow.nodes.slice(0, session.currentStep))) fail('completed_nodes_are_frozen_open_new_session_to_retest');
     if (JSON.stringify(redactWorkflowData(next.nodes)) !== JSON.stringify(next.nodes)) fail('inline_credentials_not_allowed');
     updateSession(id, { workflow: next, vars: input.vars === undefined ? session.vars : { ...session.vars, ...vars(input.vars) } });
     runtime.revision++;

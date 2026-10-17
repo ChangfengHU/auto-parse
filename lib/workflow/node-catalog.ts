@@ -188,8 +188,13 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
     icon: '👆',
     category: 'basic',
     desc: '点击页面上的按钮或链接。优先用 text（文字定位），其次用 selector',
-    defaultParams: { text: '', selector: '', useSelector: false, elements: [] },
+    defaultParams: { text: '', selector: '', useSelector: false, elements: [], shadowHostSelector: '', skipIfMissing: false },
     paramMeta: {
+      xhsPublication: {
+        label: '小红书受保护发布参数（JSON）', type: 'string',
+        desc: '仅认证、持锁浏览器会话可执行，要求 directPublish=true、上传证据、账号/标题/正文核对及 AI 声明；持久化意图与作品回执，未知结果禁止重试。对象字段：requestId、expectedAccountId、videoUrl、title、description、aiGenerated。',
+      },
+      skipIfMissing: { label: '缺少时跳过（可选提示）', type: 'boolean', desc: '仅单 selector 模式，最多等待5秒；控件缺少时标记跳过，不走强制点击兜底。不能用于受保护发布节点。' },
       shadowHostSelector: {
         label: '封闭组件宿主（可选）',
         desc: '只在普通定位无法进入的 Shadow DOM 中使用：填写唯一宿主 CSS 和精确按钮文字。不与选择器、多候选混用；不唯一、禁用或遮挡时失败，不猜坐标。',

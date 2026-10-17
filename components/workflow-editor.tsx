@@ -7,6 +7,7 @@ import { DEFAULT_HUMAN_OPTIONS } from '@/lib/workflow/human-options';
 import { NODE_CATALOG, getCatalogItem, WORKFLOW_VARS_META, NODE_LEVEL_PARAM_META } from '@/lib/workflow/node-catalog';
 import { VERTEX_CAPABILITY_META, getDefaultVertexPrompt, getVertexModelMeta, getVertexModelsForCapability, isBuiltInVertexPrompt } from '@/lib/workflow/vertex-ai-meta';
 import { resolveParams } from '@/lib/workflow/resolver';
+import { WorkflowManagedRun } from '@/components/workflow-managed-run';
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
@@ -686,7 +687,7 @@ function ParamEditor({
     if (raw === 'true') val = true;
     else if (raw === 'false') val = false;
     else if (/^\d+$/.test(raw) && raw.length < 10) val = Number(raw);
-    else if (raw.startsWith('[')) { try { val = JSON.parse(raw); } catch { val = raw; } }
+    else if (raw.startsWith('[') || raw.startsWith('{')) { try { val = JSON.parse(raw); } catch { val = raw; } }
     onChange({ ...params, [key]: val });
   }
 
@@ -749,7 +750,7 @@ function ParamEditor({
             </div>
             {isElements ? (
               <ElementsEditor
-                value={v as any}
+                value={v as Array<{text?: string; selector?: string; useSelector?: boolean}>}
                 onChange={next => onChange({ ...params, [k]: next })}
               />
             ) : isBoolean ? (
@@ -1939,6 +1940,15 @@ function NodeDetailPanel({
         {/* 左侧：参数配置（可滚动） */}
         <div className="w-[52%] border-r border-border overflow-y-auto p-4 space-y-4 flex-shrink-0">
 
+          <section className="space-y-2">
+            <label className="flex gap-2 text-xs"><input type="checkbox" checked={!!node.runIf}
+              onChange={e=>onChange({runIf:e.target.checked ? {variable:'directPublish',equals:true} : undefined})}/>按运行变量控制此节点</label>
+            {node.runIf ? <div className="flex gap-2">
+              <input aria-label="条件变量" value={node.runIf.variable} onChange={e=>onChange({runIf:{...node.runIf!,variable:e.target.value}})} className="w-1/2 rounded border bg-background px-2"/>
+              <select aria-label="条件值" value={String(node.runIf.equals)} onChange={e=>onChange({runIf:{...node.runIf!,equals:e.target.value==='true'}})} className="rounded border bg-background"><option value="true">等于 true</option><option value="false">等于 false</option></select>
+            </div> : null}
+            <p className="text-[10px] text-muted-foreground">缺省变量按 false；只接受 true/false。不满足时标记跳过，不删除节点。</p>
+          </section>
           {/* 前置导航 URL */}
           {node.type !== 'material' && node.type !== 'navigate' && (
           <section>
@@ -3022,6 +3032,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                       <span className={`text-[9px] px-1 py-0.5 rounded-full shrink-0 ${STATUS_STYLE[status]}`}>{STATUS_LABEL[status]}</span>
                     </div>
 
+                    {node.runIf ? <div className="pl-7 mt-0.5 text-[9px] text-primary">条件：{node.runIf.variable} = {String(node.runIf.equals)}</div> : null}
                     {/* URL 前置提示 */}
                     {node.url && (
                       <div className="pl-7 mt-0.5">
@@ -3119,6 +3130,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
             />
           </label>
 
+          <WorkflowManagedRun workflowId={initialWorkflow.id} vars={currentSessionVars} dirty={isDirty} disabled={running || !!sessionId}/>
           {/* Session 按钮 */}
           {!sessionId ? (
             <div className="space-y-1.5">
