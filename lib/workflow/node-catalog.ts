@@ -190,6 +190,12 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
     desc: '点击页面上的按钮或链接。优先用 text（文字定位），其次用 selector',
     defaultParams: { text: '', selector: '', useSelector: false, elements: [] },
     paramMeta: {
+      shadowHostSelector: {
+        label: '封闭组件宿主（可选）',
+        desc: '只在普通定位无法进入的 Shadow DOM 中使用：填写唯一宿主 CSS 和精确按钮文字。不与选择器、多候选混用；不唯一、禁用或遮挡时失败，不猜坐标。',
+        type: 'string',
+        example: 'xhs-publish-btn[save-disabled="false"]',
+      },
       useSelector: {
         label: '使用选择器模式',
         desc: '关闭时按按钮文字点击；开启后按 selector 选择器点击元素',

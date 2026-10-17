@@ -3,6 +3,7 @@ import type { ClickParams, NodeResult, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
 import { humanMouseMove } from '../human-mouse';
 import { executeDouyinPublish } from './douyin-publish';
+import { executeShadowButtonClick } from './shadow-button';
 
 function isLikelySendActionTarget(input: { selector?: string; text?: string }) {
   const text = String(input.text || '').toLowerCase();
@@ -233,11 +234,12 @@ export async function executeClick(
   ctx: WorkflowContext
 ): Promise<NodeResult> {
   if (params.douyinPublication) {
-    if (params.text !== '发布' || params.elements?.length || params.selector) {
+    if (params.text !== '发布' || params.elements?.length || params.selector || params.shadowHostSelector) {
       return { success: false, log: [], error: 'publication_click_config_invalid' };
     }
     return executeDouyinPublish(page, { ...params.douyinPublication, verifyCurrentSession: true }, ctx);
   }
+  if (params.shadowHostSelector) return executeShadowButtonClick(page, params);
   const log: string[] = [];
   const useHumanMouse = ctx.humanOptions?.humanMouse ?? false;
 

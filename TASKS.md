@@ -4,13 +4,6 @@
 
 ## In Progress
 
-- [WORKFLOW-003] Workflow authoring MCP and shared runtime correctness
-  Status: In Progress
-  Owner: codex
-  Updated: 2026-10-17
-  Log: dev-log/2026-10-17-workflow-authoring-mcp.md
-  Next: MCP implementation, 17 focused tests, 101 selected regression tests and authenticated loopback/Supabase acceptance passed. Production/browser acceptance is held pending authorization and repair of shared browser-maintenance locking (2 installed-runtime regression failures). No upload or publication performed; preserve existing production workflows.
-
 - [AUDIO-002] 音频工作室闭环、Cloudflare MCP 与能力发布
   Status: In Progress
   Owner: codex
@@ -92,6 +85,13 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+
+- [WORKFLOW-003] Workflow authoring MCP and shared runtime correctness
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-17
+  Log: dev-log/2026-10-17-workflow-authoring-mcp.md
+  Result: 84生产/MCP专用Vault配置上线；131项回归与构建/类型检查通过。浏览器1实传视频一次、暂存草稿并经新MCP会话5步回查通过；保存9节点工作流，无公开发布。修复共享维护锁及封闭组件按钮定位。当前浏览器MP4解码不支持，本地草稿不能当云端发布回执。
 
 - [AUDIO-001] 音频素材搜索页面与统一检索接口
   Status: Done

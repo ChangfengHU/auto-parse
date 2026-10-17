@@ -166,6 +166,8 @@ export interface PasteImageClipboardParams {
 }
 
 export interface ClickParams {
+  /** Optional CSS host selector for one exact-text button inside a closed shadow root. */
+  shadowHostSelector?: string
   /** 仅用于显式启用保护的抖音发布副本，不改变普通点击。 */
   douyinPublication?: {
     requestId: string; expectedAccountId: string; videoUrl: string; title: string;

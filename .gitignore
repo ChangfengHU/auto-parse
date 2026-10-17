@@ -83,3 +83,7 @@ lib/analysis/xhs-downloader-bridge.ts
 
 # Isolated XHS release builds
 .next-xhs*/
+
+# Active / rollback workflow MCP release builds (never source)
+.next-workflow-mcp-20261017/
+.next-workflow-mcp-shadow-20261017/

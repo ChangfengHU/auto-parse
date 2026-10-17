@@ -2,14 +2,14 @@
 
 Server: `auto-parse-workflow` (trusted owner/operator access, not a public anonymous service).
 
-Release status (2026-10-17): source and authenticated loopback CRUD acceptance verified; production rollout and real browser/upload acceptance are pending a shared browser-maintenance locking repair. The public endpoint and new Vault connection are not yet provisioned.
+Release status (2026-10-17): production endpoint, authenticated CRUD, real browser upload and saved-draft round-trip verified on host84/browser1. The endpoint-scoped connection is in Vault `service:auto-parse-workflow-mcp`. Public Xiaohongshu publication and local MP4 playback are not verified/supported by this acceptance.
 
 Streamable HTTP endpoint: `https://auto-parse-v2.vyibc.com/api/workflows/mcp`.
 This exposes the same Supabase workflow definitions as `/workflows`; no second script store is introduced.
 
 ## Installation and credentials
 
-Retrieve the endpoint-scoped connection from Vault `service:auto-parse-workflow-mcp` after deployment verification. Do not use a Fleet administrator or Vault credential in the MCP client. Do not embed tokens in URLs or workflows.
+Retrieve the endpoint-scoped connection from Vault `service:auto-parse-workflow-mcp`. Do not use a Fleet administrator or Vault credential in the MCP client. Do not embed tokens in URLs or workflows.
 
 For a client supporting remote HTTP MCP and environment-sourced bearer authentication:
 
@@ -49,10 +49,21 @@ The server uses `WORKFLOW_MCP_TOKEN` when configured, otherwise an endpoint-spec
 - The first release executes the basic browser, upload, material, wait and QR nodes listed by capabilities. Other catalog nodes can be inspected/saved but are not falsely advertised as supported managed-debug execution.
 - MCP-managed sessions cannot be controlled or read through the older unauthenticated debug routes.
 - Public marketplace registration and installation into every AI client are separate from hosting a verified MCP endpoint.
+- For a closed Shadow DOM button, the shared `click` node accepts `shadowHostSelector` plus exact `text`. It requires one host and one actionable, unobscured matching button and sends a native browser mouse click. It does not guess fixed coordinates, fall back to another action, or mix with selector/multi-target/publication-adapter modes. Main-DOM observation still does not enumerate closed-shadow internals or iframe fields automatically.
+
+## Verified Xiaohongshu example
+
+Workflow: `/workflows/6105efc6-7e54-4c85-acfe-1a37e0d5093f`, using the existing host84 browser1 login. Inputs: `videoUrl`, `title`, `description`. Nine saved nodes navigate, open upload, transfer the file, dismiss an optional first-use guide, fill title/body, verify upload completion, save a draft and read it back. No public-publish node is present.
+
+The provided approximately 50-second MP4 was uploaded once through production MCP. A normal text click could not see Xiaohongshu's closed `xhs-publish-btn`; the new shared node first preserved that existing upload as a draft. After rollout, a fresh production MCP session reopened, edited, saved and reread the same draft: 5/5 steps, one draft, no second upload. The final nine-node definition incorporates the tested nodes and stronger readiness guards; it was not replayed from upload to create a duplicate.
+
+Xiaohongshu explicitly reports these drafts as local to the current browser; clearing browser data removes them. This is not a published note, server-side draft guarantee or publication receipt. The installed browser returns unsupported for this H.264/AAC MP4 and reports `DEMUXER_ERROR_NO_SUPPORTED_STREAMS`; local playback remains unverified. The source is 720p and the site recommends 1080p, without blocking upload.
 
 ## Verification
 
 `node --test scripts/test-workflow-authoring-mcp.mjs`
+
+Closed-shadow targeting regression: `node --test scripts/test-shadow-button.mjs`. The selected combined workflow, upload, maintenance-lock and Douyin suite passed 131/131 after this repair; independent TypeScript, focused ESLint and production build passed.
 
 `node scripts/verify-workflow-mcp.mjs` accepts loopback endpoint plus `adminToken` or endpoint `token` via JSON on stdin (never command arguments). It tests real Supabase CRUD on empty disposable drafts, removes only those drafts, and verifies protected definitions did not change. It never opens a browser.
 
