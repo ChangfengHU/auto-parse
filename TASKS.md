@@ -4,13 +4,6 @@
 
 ## In Progress
 
-- [WORKFLOW-004] 小红书浏览器一键发布与条件节点
-  Status: In Progress
-  Owner: codex
-  Updated: 2026-10-17
-  Log: dev-log/2026-10-17-xhs-one-click-publish.md
-  Next: 已部署 directPublish 分支与工作台一键执行；浏览器1已真实发布并回查作品，167项回归通过。最终提交与推送中，未知结果不得重试。
-
 - [AUDIO-002] 音频工作室闭环、Cloudflare MCP 与能力发布
   Status: In Progress
   Owner: codex
@@ -92,6 +85,14 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+
+- [WORKFLOW-004] 小红书浏览器一键发布与条件节点
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-17
+  Commit: 9d54356（已推送 main）
+  Log: dev-log/2026-10-17-xhs-one-click-publish.md
+  Result: directPublish 分支与真实浏览器工作台入口已上线；浏览器1实际发布作品6ad37843000000001301bb1b并在已发布分页回查。实测回执格式差异已修复并核对落库，无重复发布；167项回归及构建/类型检查通过，原抖音工作流不变。
 
 - [WORKFLOW-003] Workflow authoring MCP and shared runtime correctness
   Status: Done

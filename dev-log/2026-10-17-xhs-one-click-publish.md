@@ -1,12 +1,12 @@
 # WORKFLOW-004: Xiaohongshu one-click publication
 
-Status: In Progress
+Status: Done
 
 The owner requires the full browser publication path, not draft-only acceptance. Add a strict directPublish switch controlling draft/publication branches in the same Supabase workflow. The provided rain-last-order video is authorized for actual publication on host84 browser1. Do not modify the protected Douyin definitions or browser2.
 
 Initial audit: the existing editor debug entry uses a separate persistent context, not the authenticated MCP browser binding; Fleet collections is an observational dashboard, not this execution UI. Only small editor corrections were previously shipped. No claim of complete Fleet integration.
 
-Implement shared conditional execution, an authenticated browser-bound one-click entry and guarded XHS receipt handling. Never repeat unknown submissions. Preserve unrelated materials/parser/R2/audio/tsconfig changes. Implementation, verification and deployment are complete; commit/push in progress.
+Implemented shared conditional execution, an authenticated browser-bound one-click entry and guarded XHS receipt handling. Never repeat unknown submissions. Unrelated materials/parser/R2/audio/tsconfig changes are preserved. Implementation, verification, deployment and feature commit/push are complete.
 
 ## Implementation and pre-production verification
 
@@ -37,4 +37,5 @@ Implement shared conditional execution, an authenticated browser-bound one-click
 - The public workbench restored the actual directPublish=true state, displayed the real note receipt and browser screenshot, and closed the task through its own UI. Screenshot: /tmp/xhs-workflow-acceptance-BZuD8j/oneclick-receipt-reuse.png. Both protected Douyin definition digests match the originals. Browser PIDs3512914/3491468 are unchanged, and both activity locks are free.
 - Initial publication's conservative receipt-parser stop remains recorded above. This is a real published-and-reconciled result plus corrected-runtime verification, not a claim that the first full run completed uninterrupted or that another video was published after the parser fix.
 - Workbench/Supabase guidance kept the existing formal workflow as the sole definition source; React review kept credential state in memory and restored task controls from the actual runtime snapshot. Fleet's observational collections UI and the legacy debug runtime were not replaced.
-- GitHub identity and repository push permission were verified with minimal read-only requests. Only task-owned paths will be committed; unrelated dirty files and build artifacts remain untouched.
+- GitHub identity and repository push permission were verified with minimal read-only requests. Feature commit9d543562d131ed94e05632a34c4adc9018e98f69 was pushed to main, and remote HEAD was verified equal. Only eighteen task-owned paths were committed; unrelated dirty files and build artifacts remain untouched.
+- Final read-only checks confirm both real publication/reuse sessions are closed, both browser activity locks are free, existing browser PIDs remain unchanged, and unauthenticated public MCP requests return401. This documentation follow-up records the completed delivery without changing the deployed runtime.
