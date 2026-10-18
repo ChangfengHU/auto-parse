@@ -12,7 +12,7 @@ import { DEFAULT_HUMAN_OPTIONS } from './human-options';
 import { booleanVariable } from './condition';
 import type { NodeDef, WorkflowSession } from './types';
 
-const DEBUG_TYPES = new Set(['material', 'navigate', 'click', 'text_input', 'press_hotkey', 'scroll', 'file_upload', 'wait_condition', 'screenshot', 'qrcode']);
+const DEBUG_TYPES = new Set(['material', 'navigate', 'click', 'text_input', 'press_hotkey', 'scroll', 'file_upload', 'image_upload', 'image_text_publish', 'wait_condition', 'screenshot', 'qrcode']);
 const IDLE_MS = 20 * 60 * 1000;
 type Operation = { id: string; fingerprint: string; status: 'running' | 'done' | 'error' | 'stopped'; error?: string };
 type ManagedSession = { browser: Browser; release: () => Promise<void>; port: number; revision: number; expiresAt: number; timer?: ReturnType<typeof setTimeout>; stopped: boolean; closing: boolean; saving?: boolean; operation?: Operation; requests: Map<string, Operation> };
@@ -142,7 +142,8 @@ export async function callWorkflowTool(name: string, input: Record<string, unkno
     execution: 'task-owned tab, cross-process activity lock, async step/run and screenshot polling',
     conditionalNodes: { field: 'runIf', shape: { variable: 'directPublish', equals: true }, missingValue: false, acceptedValues: ['true', 'false'], invalidValue: 'fail before execution' },
     xhsPublication: 'click.params.xhsPublication: authenticated browser only; directPublish=true, workflow upload proof, matching account/title/body, AI declaration, durable source-URL deduplication and creation receipt. No blind retries.',
-    publication: 'No implicit approval. Confirm execution only for user-authorized effects. Use the dedicated guarded Douyin API for Douyin publication.',
+    imageTextPublication: { platforms: ['xhs','douyin'], nodes: ['image_upload','image_text_publish'], maxImages: 9, maxImageMiB: 10, maxTotalMiB: 50, maxTitleCharacters: 20, sourceHosts: ['resource.vyibc.com','cdn.vyibc.com'], extensions: ['png','jpg','jpeg','webp'], preparation: 'Leaves the task tab prepared; not a promise of saved cloud draft.', publication: 'Explicit directPublish=true; stable account, upload/preparation proof, order, metadata and AI checks; durable deduplication; creation receipt required. Platform public submission still requires acceptance with user-approved content.' },
+    publication: 'No implicit approval. Confirm execution only for user-authorized effects. Douyin video uses the dedicated guarded API; image-text uses the authenticated image_text_publish workflow node.',
   };
   if (name === 'workflow_node_catalog') return NODE_CATALOG.filter(n => !input.type || n.type === input.type).map(n => ({ ...n, debugSupported: DEBUG_TYPES.has(n.type) }));
   if (name === 'workflow_list') {

@@ -96,7 +96,7 @@ export function WorkflowManagedRun({ workflowId, vars, dirty, disabled }: {
         </select>
       </label>
       <label className="flex gap-2"><input type="checkbox" checked={directPublish} onChange={e=>setDirectPublish(e.target.checked)} disabled={busy || !!sessionId}/>直接发布（directPublish=true）</label>
-      <p>{directPublish ? '将执行发布节点，产生真实公开提交；审核结果另行回查。' : '默认 false：跳过发布节点，执行已配置的草稿分支。'}</p>
+      <p>{directPublish ? '将执行发布节点，产生真实公开提交；审核结果另行回查。' : '默认 false：跳过发布节点。按工作流配置保存草稿或停留在准备完成页；准备完成不等于草稿已保存。'}</p>
       <p className="text-muted-foreground">此开关仅控制配置了 directPublish 条件的节点；其他节点照常执行。</p>
       {!sessionId ? <button type="button" onClick={()=>void run()} disabled={!token || busy || dirty || disabled} className="w-full rounded bg-primary py-2 text-white disabled:opacity-40">一键执行完整流程</button> :
         <div className="flex gap-2"><button type="button" onClick={()=>void refresh()} disabled={!token || busy}>刷新同一任务</button><button type="button" onClick={()=>void close()} disabled={!token}>停止/关闭任务页</button></div>}
@@ -104,7 +104,7 @@ export function WorkflowManagedRun({ workflowId, vars, dirty, disabled }: {
       <div aria-live="polite">{busy ? '执行/核对中…' : snapshot ? snapshot.status : ''}</div>
       {error ? <p role="alert" className="text-red-400 break-words">{error}</p> : null}
       {snapshot?.history ? <ol className="space-y-1">{snapshot.history.map((h,i)=><li key={i}>{h.stepIndex+1}. {h.label}：{h.result.stepSkipped ? '按条件跳过' : h.result.success ? '成功' : '失败：'+h.result.error}</li>)}</ol> : null}
-      {receipt ? <p className="break-all">已取得作品回执：{String(receipt.noteId)}（{String(receipt.moderation)}）</p> : null}
+      {receipt ? <p className="break-all">已取得作品回执：{String(receipt.postId ?? receipt.noteId ?? receipt.awemeId)}（{String(receipt.moderation)}）</p> : null}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       {shot ? <img src={shot} alt="当前任务浏览器截图" className="w-full rounded border"/> : null}
       <p className="text-muted-foreground">会话不跨服务重启保存；已有发布意图/回执会保留。未知结果不得更换请求重试。</p>

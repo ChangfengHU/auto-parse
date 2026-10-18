@@ -52,6 +52,24 @@ const TIMEOUT_META: ParamMeta = {
 // ── 节点目录 ──────────────────────────────────────────────────────────────────
 
 export const NODE_CATALOG: NodeCatalogItem[] = [
+  ...(['image_upload','image_text_publish'] as const).map(type => ({
+    type, label: type === 'image_upload' ? '图文：有序多图上传' : '图文：准备 / 安全发布',
+    icon: '🖼️', category: 'advanced' as const,
+    desc: '小红书/抖音图文，仅认证托管浏览器；1–9张PNG/JPEG/WebP，单张10MiB/合计50MiB。准备不等于已保存草稿；发布必须明确授权。',
+    defaultParams: { platform: 'xhs', expectedAccountId: '{{expectedAccountId}}', imageUrls: '{{imageUrls}}',
+      title: '{{title}}', description: '{{description}}', aiGenerated: '{{aiGenerated}}', requestId: '{{requestId}}',
+      ...(type === 'image_text_publish' ? {mode:'prepare'} : {}) },
+    paramMeta: {
+      platform: { label:'平台', type:'select', required:true, desc:'新图文流程，不修改已有视频流程。', options:[{label:'小红书',value:'xhs'},{label:'抖音',value:'douyin'}] },
+      expectedAccountId: { label:'目标稳定用户ID', type:'template', required:true, desc:'小红书24位userId（非可变小红书号）；抖音数字UID。与浏览器当前登录账号严格一致。' },
+      imageUrls: { label:'有序图片地址', type:'template', required:true, desc:'JSON数组或每行一个HTTPS地址；resource.vyibc.com/cdn.vyibc.com；1–9张，首张为第一张展示图片。' },
+      title: { label:'标题', type:'template', required:true, desc:'最多20字。' },
+      description: { label:'正文', type:'template', required:true, desc:'最多900字符；话题作为正文文本，不保证转为平台结构化话题。' },
+      aiGenerated: { label:'是否AI生成', type:'template', required:true, desc:'必须明确传true或false；true会选择平台AI声明并验证。' },
+      requestId: { label:'稳定请求ID', type:'template', required:true, desc:'同一发布意图复用；不得失败后换编号盲重试。' },
+      ...(type === 'image_text_publish' ? {mode:{label:'执行模式',type:'select' as const,required:true,desc:'prepare只填写核对；publish需先完成prepare且directPublish=true。',options:[{label:'仅准备',value:'prepare'},{label:'直接发布',value:'publish'}]}} : {}),
+    } as Record<string,ParamMeta>,
+  })),
   {
     type: 'douyin_publish', label: '抖音发布与真实回执', icon: '📤', category: 'advanced',
     desc: '接在凭证与上传节点后，等待真实上传/检测完成、选择AI声明、只提交一次并持久化作品ID；结果不明禁止重试。',

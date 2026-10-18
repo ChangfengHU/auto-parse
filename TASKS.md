@@ -4,6 +4,13 @@
 
 ## In Progress
 
+- [WORKFLOW-005] 小红书与抖音新增图文工作流
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-10-18
+  Log: dev-log/2026-10-18-image-text-workflows.md
+  Next: 两个六节点图文工作流、MCP节点及工作台已上线；202项回归和两平台真实浏览器非发布测试通过，原有三个视频定义未改。仅剩用户提供正式图文并授权后做公开发布/回执验收；尚不标记实发已验证。
+
 - [AUDIO-002] 音频工作室闭环、Cloudflare MCP 与能力发布
   Status: In Progress
   Owner: codex

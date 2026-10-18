@@ -23,6 +23,8 @@ import { executeClick } from './nodes/click';
 import { executeScroll } from './nodes/scroll';
 import { executeScreenshot } from './nodes/screenshot';
 import { executeFileUpload } from './nodes/file-upload';
+import { executeImageUpload } from './nodes/image-upload';
+import { executeImageTextPublish } from './nodes/image-text-publish';
 import { executeWaitCondition } from './nodes/wait-condition';
 import { executeQRCode } from './nodes/qrcode';
 import { executeHumanPause } from './nodes/human-pause';
@@ -56,6 +58,8 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   scroll:                executeScroll,
   screenshot:            executeScreenshot,
   file_upload:           executeFileUpload,
+  image_upload:          executeImageUpload,
+  image_text_publish:    executeImageTextPublish,
   wait_condition:        executeWaitCondition,
   qrcode:                executeQRCode,
   human_pause:           executeHumanPause,

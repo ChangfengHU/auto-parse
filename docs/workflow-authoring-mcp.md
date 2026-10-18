@@ -1,5 +1,7 @@
 # Workflow authoring MCP
 
+Image-text workflows for Xiaohongshu and Douyin: [usage and verification boundary](image-text-workflows.md). They share this MCP endpoint; no additional MCP installation is required.
+
 Server: `auto-parse-workflow` (trusted owner/operator access, not a public anonymous service).
 
 Release status (2026-10-17): authenticated CRUD, real browser upload/draft and actual Xiaohongshu publication verified on host84/browser1. The endpoint-scoped connection is in Vault `service:auto-parse-workflow-mcp`. Local MP4 playback is still not supported by this browser's codecs. See the one-click acceptance below for the receipt-format issue found and reconciled during the real run.
