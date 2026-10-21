@@ -25,6 +25,8 @@
 - 最终公网脚本 `scripts/verify-reliability.mjs` **39/39**：11工具逐个调用、搜索/空列表/停用来源、登录、私有媒体实际播放、报价门禁、任务页、移动端、HTML502友好提示/保留结果、同词重试、筛选等。证据 `.data/audio-reliability-20261021/results.json`。
 - /parse、/workflows、/audio-library 公网均200。未声称解析/发布业务完整流程已回归。
 - 能力广场工具schema已更新为0.1.1，release `caprel-6e4147bb-6b80-4782-a580-ed21dbe09aba` / distribution `capdist-4a7055ce-f395-4baf-9788-ec68e15ce9f5`；首次读回状态delivering，不能提前宣称Harness已激活。发布适配器仅上传允许的name/description/inputSchema/outputSchema，不上传SDK annotations等额外字段。
+- 后续只读回查已确认Harness `received` / `active: true`，时间2026-10-21T18:12:03.724Z。
+- 实现提交 `80bf87e` 已推送 origin/main。仅提交本任务文件，用户既有改动保留；本地11008候选进程已停止，当前生产构建与回退构建保留。
 
 ## 验收边界与安全待办
 - 线上generate/import仅原参数重放已有completed任务，确认reused=true，不创建新的付费或导入任务。update/review/use线上测不存在ID的拒绝路径；成功写入路径仅在隔离SQLite测试，未编辑或代为验收用户资产。

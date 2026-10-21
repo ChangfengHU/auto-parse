@@ -93,7 +93,8 @@ try {
   await page.getByText('● 私有工作室已连接',{exact:true}).waitFor();await page.locator('article audio').first().waitFor();record('private library visible',true);
   const playback=await page.locator('article audio').first().evaluate(async a=>{await Promise.race([a.play(),new Promise((_,reject)=>setTimeout(()=>reject(Error('play timeout')),10000))]);await new Promise(r=>setTimeout(r,1200));a.pause();return {currentTime:a.currentTime,duration:a.duration};});record('private audio playback',playback.currentTime>0,playback);
   await page.getByRole('button',{name:'按需生成',exact:true}).first().click();await page.getByRole('button',{name:'检查是否有上次未确认的提交'}).click();await page.getByRole('button',{name:'获取报价（不扣费）'}).click();await page.getByText(/本次预估/).waitFor();record('quote and paid confirmation gate',await page.getByRole('button',{name:'确认付费生成'}).isDisabled());
-  await page.getByRole('button',{name:'任务记录',exact:true}).click();await page.getByRole('heading',{name:'任务与费用记录'}).waitFor();record('task page',true);
+  await page.getByRole('button',{name:'任务记录',exact:true}).click();await page.getByRole('heading',{name:'任务与费用记录'}).waitFor();
+  await page.locator('article').first().waitFor();record('task page renders actual records',await page.locator('article').count()>0);
   record('no browser runtime errors',errors.length===0,{errors});
   await page.screenshot({path:new URL('browser.png',dir).pathname,fullPage:true});
 }catch(e){record('browser suite',false,{error:e.message.split('\n')[0].replaceAll(input.accessToken,'[REDACTED]'),alerts:await activePage?.getByRole('alert').allTextContents()});}finally{await activePage?.unrouteAll({behavior:'wait'});await browser.close();}
