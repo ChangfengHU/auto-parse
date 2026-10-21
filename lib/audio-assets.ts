@@ -1,6 +1,8 @@
 export type AudioAssetKind = 'music' | 'sound_effect';
 
 export interface AudioAsset {
+  provider?: 'openverse' | 'wikimedia';
+  fileNote?: string;
   id: string;
   kind: AudioAssetKind;
   title: string;
@@ -23,6 +25,8 @@ export interface AudioSearchResponse {
   page: number;
   pageSize: number;
   hasNext: boolean;
-  provider: 'openverse';
+  provider: 'openverse' | 'wikimedia';
+  notice?: string;
+  totalExact?: boolean;
   query: string;
 }

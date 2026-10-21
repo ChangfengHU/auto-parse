@@ -57,7 +57,7 @@ export async function audioUpstream(
     headers: { ...options.headers, Authorization: `Bearer ${token}` },
     redirect: "error",
     cache: "no-store",
-    signal: AbortSignal.timeout(45000),
+    signal: AbortSignal.timeout(path.startsWith('/v1/media/') ? 45000 : 15000),
   });
 }
 export function audioProxyError() {

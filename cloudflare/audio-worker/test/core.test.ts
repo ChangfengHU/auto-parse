@@ -21,6 +21,26 @@ function fixture(){
     DAILY_BUDGET_USD:'1',MINIMAX_ENABLED:'false',SFX_COST_USD:'',AUDIO_ACCESS_TOKEN:'test-only',ALLOWED_ORIGIN:'https://example.com'} as unknown as AudioEnv;
   return {db,env,created};
 }
+test('all eleven shared operations: success paths in isolated DB with no provider charges',async()=>{
+  const {env,db}=fixture();const id=crypto.randomUUID(), now=new Date().toISOString();
+  const imported=await execute(env,'import',{requestId:id,provider:'wikimedia',sourceId:'File:Test.ogg',kind:'music',rightsAcknowledged:true}) as {job:{id:string}};
+  assert.equal(imported.job.id,id);
+  db.prepare(`INSERT INTO assets(id,job_id,kind,title,source,source_url,creator,license,license_url,attribution,object_key,sha256,mime,bytes,duration_ms,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(id,id,'music','Fixture','test','https://example.com','test','CC0','','test','private/key','abcd','audio/mpeg',12,1000,now);
+  const caps=await execute(env,'capabilities',{}) as {providers:{id:string;ready:boolean}[]};
+  assert.equal(caps.providers.find(p=>p.id==='openverse')?.ready,false);
+  const old=globalThis.fetch;globalThis.fetch=async()=>Response.json({batchcomplete:true});
+  try {assert.deepEqual((await execute(env,'search',{q:'test',kind:'music'}) as {items:unknown[]}).items,[])}finally{globalThis.fetch=old}
+  assert.equal((await execute(env,'library',{}) as {total:number}).total,1);
+  assert.equal((await execute(env,'get_asset',{id}) as {id:string}).id,id);
+  assert.equal((await execute(env,'quote',input) as {estimatedUsd:number}).estimatedUsd,0.025);
+  await execute(env,'generate',{...input,requestId:crypto.randomUUID(),confirmPaid:true,maxCostUsd:0.025});
+  assert.equal((await execute(env,'jobs',{}) as {jobs:unknown[]}).jobs.length,2);
+  const updated=await execute(env,'update_asset',{id,title:'Changed',tags:['rain','rain'],scene:'test'}) as {title:string;tags:string[]};
+  assert.equal(updated.title,'Changed');assert.deepEqual(updated.tags,['rain']);
+  await execute(env,'review_asset',{id,decision:'approved',qualityConfirmed:true,rightsConfirmed:true});
+  const used=await execute(env,'use_asset',{id,requestId:crypto.randomUUID(),purpose:'isolated fixture test'}) as {asset:{uses:number}};
+  assert.equal(used.asset.uses,1);
+});
 const input={model:'elevenlabs/music-v2',title:'Test piano',prompt:'Warm piano instrumental for a short scene',seconds:10,tags:['warm'],loop:false};
 test('published quote, missing SFX key, disabled MiniMax, music loop unsupported',()=>{
   const {env}=fixture();assert.equal(quote(generation.parse(input),env).estimatedUsd,0.025);
@@ -79,6 +99,6 @@ test('approval requires rights and quality, candidates cannot be reused',async()
 test('source timeout is explicit 504, not a paid generation error',async()=>{
   const original=globalThis.fetch;
   globalThis.fetch=async()=>{throw new DOMException('timeout','TimeoutError');};
-  try{await assert.rejects(searchSources({provider:'openverse',q:'test',kind:'music',page:1}),(error:unknown)=>!!error&&typeof error==='object'&&'status' in error&&error.status===504&&String(error).includes('未扣费'));}
+  try{await assert.rejects(searchSources({provider:'wikimedia',q:'test',kind:'music',page:1}),(error:unknown)=>!!error&&typeof error==='object'&&'status' in error&&error.status===504&&String(error).includes('未扣费'));}
   finally{globalThis.fetch=original;}
 });

@@ -70,9 +70,11 @@ export async function studioApi<T>(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
-    signal,
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20000)]) : AbortSignal.timeout(20000),
   });
-  const data = await response.json();
+  const data = await response.json().catch(() => {
+    throw new StudioError('音频服务返回异常，请稍后重试；写入任务请保留原请求 ID 并先查询任务', response.status || 502);
+  });
   if (!response.ok)
     throw new StudioError(data.error || "音频请求失败", response.status);
   return data as T;

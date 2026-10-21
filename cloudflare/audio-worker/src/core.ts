@@ -8,6 +8,7 @@ import {
   type Operation,
 } from "./schema";
 import { searchSources } from "./sources";
+import { AudioSourceError } from "../../../lib/audio-source-search";
 
 export interface Job {
   id: string;
@@ -158,8 +159,8 @@ export async function execute(
         {
           id: "openverse",
           name: "Openverse 聚合素材",
-          ready: true,
-          note: "含 Freesound / Jamendo 索引；试听版本，需核对授权",
+          ready: false,
+          note: "搜索因上游持续超时暂时停用，请使用 Wikimedia；已有私有素材不受影响",
         },
         {
           id: "wikimedia",
@@ -350,7 +351,7 @@ export function errorResponse(error: unknown) {
       },
       { status: 400 },
     );
-  if (error instanceof AudioError)
+  if (error instanceof AudioError || error instanceof AudioSourceError)
     return Response.json({ error: error.message }, { status: error.status });
   // Never return upstream URLs, credentials, stack traces or provider response bodies.
   return Response.json(

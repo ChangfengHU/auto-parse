@@ -54,13 +54,6 @@ export default function AudioLibraryPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<StudioAsset | null>(null);
-  const [source, setSource] = useState<"openverse" | "wikimedia">("openverse");
-  const [wikiQuery, setWikiQuery] = useState("rain");
-  const [wikiKind, setWikiKind] = useState<"music" | "sound_effect">(
-    "sound_effect",
-  );
-  const [wikiResults, setWikiResults] = useState<SourceResult[]>([]);
-  const [wikiLoading, setWikiLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const importLock = useRef(false);
   const [importChoice, setImportChoice] = useState<{
@@ -225,24 +218,6 @@ export default function AudioLibraryPage() {
     } finally {
       importLock.current = false;
       setImporting(false);
-    }
-  }
-  async function wikiSearch(e: FormEvent) {
-    e.preventDefault();
-    setWikiLoading(true);
-    setError("");
-    try {
-      const data = await studioApi<{ items: SourceResult[] }>("search", {
-        q: wikiQuery,
-        kind: wikiKind,
-        provider: "wikimedia",
-        page: 1,
-      });
-      setWikiResults(data.items);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "搜索失败");
-    } finally {
-      setWikiLoading(false);
     }
   }
   async function reuse(asset: StudioAsset) {
@@ -582,93 +557,7 @@ export default function AudioLibraryPage() {
           </>
         ) : null}
         {tab === "explore" ? (
-          <>
-            <div className="mb-5 flex flex-wrap gap-3">
-              <button
-                className={button}
-                aria-pressed={source === "openverse"}
-                onClick={() => setSource("openverse")}
-              >
-                Openverse · Freesound / Jamendo 索引
-              </button>
-              <button
-                className={button}
-                aria-pressed={source === "wikimedia"}
-                onClick={() => setSource("wikimedia")}
-              >
-                Wikimedia 原始音频
-              </button>
-            </div>
-            {source === "openverse" ? (
-              <SourceSearch
-                onImport={(asset) => chooseImport(asset, "openverse")}
-              />
-            ) : !authenticated ? (
-              <p className="rounded-xl bg-white p-6 text-sm">
-                Wikimedia 检索与入库需要先连接工作室。
-              </p>
-            ) : (
-              <section className="rounded-2xl border border-slate-200 bg-white p-6">
-                <h2 className="text-xl font-bold">Wikimedia Commons</h2>
-                <p className="mt-2 text-sm text-slate-500">
-                  声音范围较广，可能包含发音或不相关录音，需逐条试听核对。
-                </p>
-                <form
-                  onSubmit={wikiSearch}
-                  className="mt-5 flex flex-wrap gap-3"
-                >
-                  <input
-                    aria-label="Wikimedia 搜索词"
-                    className={`${input} w-full min-w-0 basis-full sm:w-auto sm:flex-1 sm:basis-auto`}
-                    value={wikiQuery}
-                    onChange={(e) => setWikiQuery(e.target.value)}
-                    required
-                  />
-                  <select
-                    aria-label="Wikimedia 素材用途"
-                    value={wikiKind}
-                    onChange={(e) =>
-                      setWikiKind(e.target.value as "music" | "sound_effect")
-                    }
-                    className={input}
-                  >
-                    <option value="sound_effect">音效</option>
-                    <option value="music">背景音乐</option>
-                  </select>
-                  <button className={button} disabled={wikiLoading}>
-                    {wikiLoading ? "检索中…" : "检索"}
-                  </button>
-                </form>
-                <div className="mt-6 grid gap-4 md:grid-cols-2">
-                  {wikiResults.map((asset) => (
-                    <article
-                      key={asset.id}
-                      className="min-w-0 rounded-xl border p-4"
-                    >
-                      <h3 className="break-words text-sm font-semibold">
-                        {asset.title}
-                      </h3>
-                      <audio
-                        controls
-                        preload="none"
-                        src={asset.previewUrl}
-                        className="mt-4 w-full"
-                      />
-                      <p className="mt-3 text-xs text-slate-500">
-                        {asset.license}
-                      </p>
-                      <button
-                        onClick={() => chooseImport(asset, "wikimedia")}
-                        className="mt-3 text-sm font-semibold text-pink-700"
-                      >
-                        核对授权并导入
-                      </button>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            )}
-          </>
+          <SourceSearch onImport={(asset) => chooseImport(asset, asset.provider || "wikimedia")} />
         ) : null}
         {authenticated && tab === "generate" && caps ? (
           <Generator capabilities={caps} onSubmitted={submitted} />

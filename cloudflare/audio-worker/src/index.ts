@@ -9,7 +9,7 @@ const descriptions: Record<Operation, string> = {
   capabilities:
     "查看真实已配置来源、生成模型、今日预算与内部使用限制。先查此工具，不假定所有模型可用。",
   search:
-    "搜索 Openverse 或 Wikimedia 开放音频。只检索试听，不计费，不保证无人声、循环性或适用授权。",
+    "搜索 Wikimedia 开放音频，支持中文常用词、时长/授权筛选和分页。Openverse 搜索暂时停用。只检索试听，不计费，不保证无人声、循环性或适用授权。",
   library:
     "优先搜索自己的私有 BGM / 音效库，可按标签、场景、类型、验收状态筛选。",
   get_asset:

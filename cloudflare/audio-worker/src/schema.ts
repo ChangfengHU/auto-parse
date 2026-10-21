@@ -28,8 +28,11 @@ export const inputs = {
   search: z.object({
     q: z.string().trim().min(1).max(200),
     kind,
-    provider: z.enum(["openverse", "wikimedia"]).default("openverse"),
+    provider: z.enum(["openverse", "wikimedia"]).default("wikimedia"),
     page: z.number().int().min(1).max(20).default(1),
+    pageSize: z.number().int().min(1).max(24).default(12),
+    length: z.enum(["", "shortest", "short", "medium", "long"]).default(""),
+    license: z.enum(["", "commercial", "cc0"]).default("commercial"),
   }),
   library: z.object({
     q: z.string().max(200).default(""),

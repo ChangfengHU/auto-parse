@@ -4,6 +4,13 @@
 
 ## In Progress
 
+- [AUDIO-003] 音频搜索稳定性与页面/MCP完整回归
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-10-21
+  Log: dev-log/2026-10-21-audio-reliability.md
+  Next: 搜索修复已上线，18项单元与39项公网回归通过；11工具按只读/安全重放/错误路径逐个调用。待凭据轮换确认，以及新生成/导入/真实写入的专项验收，不把隔离库成功路径冒充线上全闭环。
+
 - [WORKFLOW-005] 小红书与抖音新增图文工作流
   Status: In Progress
   Owner: codex

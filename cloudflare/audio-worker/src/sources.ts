@@ -1,4 +1,5 @@
 import { AudioError, allowedAudioUrl } from "./schema";
+import { searchAudioSources, type SourceQuery } from "../../../lib/audio-source-search";
 
 export interface SourceAsset {
   id: string;
@@ -92,56 +93,15 @@ function wikimedia(page: RecordValue, kind: string): SourceAsset | null {
     fileNote: "Wikimedia 提供的原始文件；授权以来源页为准",
   };
 }
-export async function searchSources(input: {
-  q: string;
-  kind: string;
-  provider: string;
-  page: number;
-}) {
-  if (input.provider === "openverse") {
-    const u = new URL("https://api.openverse.org/v1/audio/");
-    u.search = new URLSearchParams({
-      q: input.q,
-      page: String(input.page),
-      page_size: "12",
-      license: "cc0,pdm,by,by-sa",
-      mature: "false",
-      ...(input.kind === "music"
-        ? { category: "music" }
-        : { source: "freesound" }),
-    }).toString();
-    const data = await json(u);
-    const items = ((data.results || []) as RecordValue[])
-      .map((x) => openverse(x, input.kind))
-      .filter((x) => x.id && x.previewUrl && !/\bNC\b|\bND\b/i.test(x.license));
-    return {
-      items,
-      total: Number(data.result_count) || items.length,
-      page: input.page,
-      provider: input.provider,
-    };
-  }
-  const u = new URL("https://commons.wikimedia.org/w/api.php");
-  u.search = new URLSearchParams({
-    action: "query",
-    format: "json",
-    generator: "search",
-    gsrsearch: `${input.q} filetype:audio`,
-    gsrnamespace: "6",
-    gsrlimit: "12",
-    gsroffset: String((input.page - 1) * 12),
-    prop: "imageinfo",
-    iiprop: "url|mime|extmetadata",
-    formatversion: "2",
-  }).toString();
-  const data = await json(u);
-  const pages = ((data.query as RecordValue | undefined)?.pages ||
-    []) as RecordValue[];
-  return {
-    items: pages.map((x) => wikimedia(x, input.kind)).filter(Boolean),
-    page: input.page,
-    provider: input.provider,
-  };
+export async function searchSources(input: SourceQuery) {
+  const cache = typeof caches === "undefined" ? undefined : caches.default;
+  const key = new Request(`https://audio-search-cache.internal/v2?q=${encodeURIComponent(JSON.stringify(input))}`);
+  const cached = await cache?.match(key);
+  if (cached) return cached.json();
+  const result = await searchAudioSources(input);
+  // Cache only bounded, parsed public results, never private data or upstream errors.
+  if (cache) await cache.put(key, Response.json(result, {headers:{"Cache-Control":"public, max-age=300"}})).catch(() => {});
+  return result;
 }
 export async function sourceById(
   provider: string,

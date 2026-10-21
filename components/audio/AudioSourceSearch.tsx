@@ -16,6 +16,7 @@ import type { AudioAsset, AudioAssetKind, AudioSearchResponse } from '@/lib/audi
 
 const PRESETS: Record<AudioAssetKind, Array<{ label: string; query: string }>> = {
   music: [
+    { label: '钢琴', query: 'piano' },
     { label: '电影感', query: 'cinematic' },
     { label: '轻松', query: 'relaxing' },
     { label: '温暖', query: 'warm acoustic' },
@@ -58,8 +59,13 @@ function ResultSkeleton() {
 }
 export default function AudioSourceSearch({ onImport }: { onImport: (asset: AudioAsset) => void }) {
   const [kind, setKind] = useState<AudioAssetKind>('music');
-  const [input, setInput] = useState('cinematic');
-  const [query, setQuery] = useState('cinematic');
+  const [input, setInput] = useState('piano');
+  const [query, setQuery] = useState('piano');
+  const [page, setPage] = useState(1);
+  const [hasNext, setHasNext] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [notice, setNotice] = useState('Openverse 搜索暂时停用，当前使用 Wikimedia。');
+  const [resultQuery, setResultQuery] = useState('');
   const [length, setLength] = useState('');
   const [license, setLicense] = useState('commercial');
   const [items, setItems] = useState<AudioAsset[]>([]);
@@ -75,29 +81,36 @@ export default function AudioSourceSearch({ onImport }: { onImport: (asset: Audi
     setLoading(true);
     setError('');
     try {
-      const params = new URLSearchParams({ kind, q: query, pageSize: '12' });
+      const params = new URLSearchParams({ kind, q: query, pageSize: '12', page: String(page), provider: 'wikimedia', license });
       if (length) params.set('length', length);
       if (license) params.set('license', license);
-      const response = await fetch(`/api/audio/search?${params}`, { signal });
-      const data = await response.json() as AudioSearchResponse & { error?: string };
+      const timeout = AbortSignal.timeout(12000);
+      const response = await fetch(`/api/audio/search?${params}`, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+      const data = await response.json().catch(() => { throw new Error('搜索服务暂时不可用，请稍后重试（返回格式异常）'); }) as AudioSearchResponse & { error?: string };
       if (!response.ok) throw new Error(data.error || '搜索失败');
+      if (!Array.isArray(data.items)) throw new Error('搜索结果格式异常，请重试');
+      if (signal?.aborted) return;
       setItems(data.items);
       setTotal(data.total);
+      setHasNext(data.hasNext);
+      setNotice(data.notice || '');
+      setResultQuery(query);
     } catch (searchError) {
-      if (searchError instanceof Error && searchError.name === 'AbortError') return;
-      setItems([]);
-      setTotal(0);
-      setError(searchError instanceof Error ? searchError.message : '搜索失败，请稍后重试');
+      if (signal?.aborted) return;
+      setHasNext(false);
+      setError(searchError instanceof Error && ['TimeoutError', 'AbortError'].includes(searchError.name)
+        ? '搜索等待超时，请重试或更换关键词。保留上次结果。'
+        : `${searchError instanceof Error ? searchError.message : '搜索失败，请稍后重试'}。保留上次结果。`);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [kind, query, length, license]);
+  }, [kind, query, length, license, page]);
 
   useEffect(() => {
     const controller = new AbortController();
     search(controller.signal);
     return () => controller.abort();
-  }, [search]);
+  }, [search, revision]);
 
   useEffect(() => () => {
     audioRef.current?.pause();
@@ -107,7 +120,8 @@ export default function AudioSourceSearch({ onImport }: { onImport: (asset: Audi
     audioRef.current?.pause();
     setPlayingId(null);
     setKind(nextKind);
-    const nextQuery = nextKind === 'music' ? 'cinematic' : 'footsteps';
+    const nextQuery = nextKind === 'music' ? 'piano' : 'footsteps';
+    setPage(1);
     setInput(nextQuery);
     setQuery(nextQuery);
   }
@@ -115,12 +129,14 @@ export default function AudioSourceSearch({ onImport }: { onImport: (asset: Audi
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     const nextQuery = input.trim();
-    if (nextQuery) setQuery(nextQuery);
+    if (nextQuery) { setQuery(nextQuery); setPage(1); setRevision(r => r + 1); }
   }
 
   function applyPreset(preset: { label: string; query: string }) {
     setInput(preset.label);
     setQuery(preset.query);
+    setPage(1);
+    setRevision(r => r + 1);
   }
 
   async function togglePreview(asset: AudioAsset) {
@@ -147,9 +163,11 @@ export default function AudioSourceSearch({ onImport }: { onImport: (asset: Audi
 
   async function copyPreviewUrl() {
     if (!selected) return;
-    await navigator.clipboard.writeText(selected.previewUrl);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+    try {
+      await navigator.clipboard.writeText(selected.previewUrl);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch { setError('复制失败，请打开素材原页获取链接'); }
   }
 
   return (
@@ -165,8 +183,8 @@ export default function AudioSourceSearch({ onImport }: { onImport: (asset: Audi
               <p className="mt-3 max-w-xl text-sm leading-6 text-slate-500 sm:text-base">检索背景音乐与音效，在线试听并核对来源。合适的素材可导入私有候选库，验收后重复使用。</p>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:flex">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3"><p className="text-xs text-slate-400">当前结果</p><p className="mt-1 text-xl font-semibold">{loading ? '—' : total.toLocaleString()}</p></div>
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3"><p className="text-xs text-slate-400">素材来源</p><p className="mt-1 text-sm font-semibold">Openverse</p></div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3"><p className="text-xs text-slate-400">本页匹配</p><p className="mt-1 text-xl font-semibold">{loading ? '—' : total.toLocaleString()}</p></div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3"><p className="text-xs text-slate-400">素材来源</p><p className="mt-1 text-sm font-semibold">Wikimedia</p></div>
             </div>
           </div>
 
@@ -184,6 +202,7 @@ export default function AudioSourceSearch({ onImport }: { onImport: (asset: Audi
       </section>
 
       <main className="mx-auto max-w-7xl px-5 py-8 lg:px-10">
+        <p role="status" className="mb-4 text-sm text-amber-800">{notice}</p>
         <form onSubmit={submitSearch} className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
           <div className="flex flex-col gap-3 sm:flex-row">
             <label className="relative flex-1">
@@ -200,18 +219,18 @@ export default function AudioSourceSearch({ onImport }: { onImport: (asset: Audi
         </form>
 
         <div className="mt-6 flex flex-col justify-between gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-center">
-          <div><h2 className="text-lg font-semibold">“{input || query}” 的搜索结果</h2><p className="mt-1 text-xs text-slate-400">点击播放试听；使用前请再次核对素材原页授权范围</p></div>
+          <div><h2 className="text-lg font-semibold">“{resultQuery || query}” 的搜索结果</h2><p className="mt-1 text-xs text-slate-400">点击播放试听；使用前请再次核对素材原页授权范围</p></div>
           <div className="flex gap-2">
-            <select aria-label="时长筛选" value={length} onChange={(event) => setLength(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-pink-400">
+            <select aria-label="时长筛选" value={length} onChange={(event) => { setLength(event.target.value); setPage(1); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-pink-400">
               <option value="">全部时长</option><option value="shortest">小于 30 秒</option><option value="short">30 秒–4 分钟</option><option value="medium">4–10 分钟</option><option value="long">10 分钟以上</option>
             </select>
-            <select aria-label="授权筛选" value={license} onChange={(event) => setLicense(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-pink-400">
+            <select aria-label="授权筛选" value={license} onChange={(event) => { setLicense(event.target.value); setPage(1); }} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 outline-none focus:border-pink-400">
               <option value="">全部授权</option><option value="commercial">允许商业使用</option><option value="cc0">CC0 / 公共领域</option>
             </select>
           </div>
         </div>
 
-        {error ? <div role="alert" className="mt-6 flex items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><span>{error}</span><button type="button" onClick={() => search()} className="font-semibold">重试</button></div> : null}
+        {error ? <div role="alert" className="mt-6 flex items-center justify-between rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"><span>{error}</span><button type="button" onClick={() => setRevision(r => r + 1)} className="font-semibold">重试</button></div> : null}
 
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {loading ? Array.from({ length: 6 }, (_, index) => <ResultSkeleton key={index} />) : items.map((asset) => (
@@ -235,6 +254,11 @@ export default function AudioSourceSearch({ onImport }: { onImport: (asset: Audi
         </div>
 
         {!loading && !error && items.length === 0 ? <div className="py-24 text-center"><SpeakerWaveIcon className="mx-auto h-10 w-10 text-slate-300" /><h3 className="mt-4 font-semibold">没有找到匹配素材</h3><p className="mt-2 text-sm text-slate-400">试试更短的英文关键词，或取消时长与授权筛选。</p></div> : null}
+        <div className="mt-6 flex justify-center gap-4">
+          <button disabled={loading || page === 1} onClick={() => setPage(p => p - 1)}>上一页</button>
+          <span>第 {page} 页</span>
+          <button disabled={loading || !hasNext} onClick={() => setPage(p => p + 1)}>下一页</button>
+        </div>
       </main>
 
       {selected ? (
@@ -253,7 +277,7 @@ export default function AudioSourceSearch({ onImport }: { onImport: (asset: Audi
             <div className="mt-6 rounded-xl bg-amber-50 p-4 text-xs leading-5 text-amber-800"><strong className="block">授权提醒</strong><span className="mt-1 block">聚合信息仅供检索参考。下载、发布或商用前，请在素材原页确认署名方式、使用范围及最新条款。</span></div>
             <p className="mt-6 break-words text-xs leading-5 text-slate-400">{selected.attribution}</p>
             <button type="button" onClick={() => onImport(selected)} className="mt-5 w-full rounded-xl bg-pink-600 px-4 py-3 text-sm font-semibold text-white hover:bg-pink-700">核对授权并导入候选库</button>
-            <p className="mt-2 text-xs leading-5 text-slate-500">导入的是来源提供的试听文件，可能是转码版本，不宣称原始 WAV。NC / ND 或未知授权不会导入。</p>
+            <p className="mt-2 text-xs leading-5 text-slate-500">{selected.fileNote || "导入来源提供的文件，NC / ND 或未知授权不会导入。"}</p>
             <div className="mt-8 grid grid-cols-2 gap-3">
               <button type="button" onClick={copyPreviewUrl} className="flex items-center justify-center gap-2 rounded-xl border border-slate-200 py-3 text-sm font-semibold hover:bg-slate-50">{copied ? <CheckIcon className="h-4 w-4 text-emerald-600" /> : <ClipboardDocumentIcon className="h-4 w-4" />}{copied ? '已复制' : '复制链接'}</button>
               <a href={selected.sourceUrl} target="_blank" rel="noreferrer" className="flex items-center justify-center gap-2 rounded-xl bg-slate-950 py-3 text-sm font-semibold text-white hover:bg-slate-800">打开原页<ArrowTopRightOnSquareIcon className="h-4 w-4" /></a>
