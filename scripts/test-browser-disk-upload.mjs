@@ -1,0 +1,13 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import vm from 'node:vm';import {randomUUID} from 'node:crypto';import {stripTypeScriptTypes} from 'node:module';
+const source=stripTypeScriptTypes(fs.readFileSync(new URL('../lib/workflow/browser-file-upload.ts',import.meta.url),'utf8'),{mode:'transform'}).replace(/^import .*;\s*$/gm,'').replace(/^export /gm,'');
+for(const mode of ['success','write-failure','input-failure','quota','init-failure','size-mismatch'])test('disk staging lifetime: '+mode,async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'disk-upload-test-'));const file=path.join(dir,'video.mp4');const bytes=Buffer.from('small isolated test bytes');fs.writeFileSync(file,bytes);let disposed=0,removed=0,closed=false;const chunks=[];
+ class Input{type='file';dispatchEvent(){}}class Transfer{files=[];items={add:file=>this.files.push(file)}};
+ const writer={write:async b=>{if(mode==='write-failure')throw Error('write-failure');chunks.push(b)},close:async()=>{closed=true},abort:async()=>{closed=true}};
+ const owner={entries:async function*(){},getDirectoryHandle:async()=>({getFileHandle:async()=>({createWritable:async()=>{if(mode==='init-failure')throw Error('init-failure');return writer},getFile:async()=>mode==='size-mismatch'?{size:0}:new File(chunks,'video.mp4')})}),removeEntry:async()=>{removed++}};
+ const sandbox={fs,path,randomUUID,navigator:{storage:{estimate:async()=>({quota:mode==='quota'?1:1e9,usage:0}),getDirectory:async()=>({getDirectoryHandle:async()=>owner})}},File,DataTransfer:Transfer,HTMLInputElement:Input,Event,atob,Uint8Array,Buffer};vm.createContext(sandbox);vm.runInContext(source+'\nglobalThis.transfer=transferFileToBrowserDisk;',sandbox);
+ const page={evaluateHandle:async(fn,arg)=>{const stage=await fn(arg);stage.dispose=async()=>{disposed++};return stage},evaluate:async(fn,arg)=>fn(arg)};const element=mode==='input-failure'?{}:new Input();const input={evaluate:async(fn,arg)=>fn(element,arg)};
+ try{if(mode==='success'){const cleanup=await sandbox.transfer(page,input,file,8);assert.equal(removed,0);assert.equal(closed,true);assert.equal(await element.files[0].text(),bytes.toString());await cleanup();await cleanup();assert.equal(removed,1);assert.equal(disposed,1);}
+ else{await assert.rejects(sandbox.transfer(page,input,file,8),new RegExp(mode==='quota'?'remote_upload_disk_quota':mode==='input-failure'?'upload_input_invalid':mode==='size-mismatch'?'remote_upload_disk_size_mismatch':mode));assert.equal(removed,mode==='quota'?0:1);if(!['quota','init-failure'].includes(mode))assert.equal(disposed,1);}}
+ finally{fs.rmSync(dir,{recursive:true,force:true});}
+});

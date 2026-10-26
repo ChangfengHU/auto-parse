@@ -12,7 +12,7 @@ import {test} from 'node:test';
 const source=stripTypeScriptTypes(fs.readFileSync(new URL('../lib/workflow/nodes/file-upload.ts',import.meta.url),'utf8'),{mode:'transform'}).replace(/^import .*;\s*$/gm,'').replace(/^export /gm,'');
 const context={URL,fs,os,path,http,https,pipeline,Transform};vm.createContext(context);
 vm.runInContext(source+'\nglobalThis.download=downloadToTemp;globalThis.limit=REMOTE_UPLOAD_MAX_BYTES;globalThis.chunk=REMOTE_UPLOAD_CHUNK_BYTES;',context);
-test('published cap is128MiB and CDP chunks stay256KiB',()=>{assert.equal(context.limit,134217728);assert.equal(context.chunk,262144);});
+test('published cap is512MiB and CDP chunks stay256KiB',()=>{assert.equal(context.limit,536870912);assert.equal(context.chunk,262144);});
 for(const mode of ['header-too-large','chunked-too-large','exact-boundary','legacy-over50MiB']){
  test('bounded download: '+mode,async()=>{
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'wf-upload-limit-test-'));const file=path.join(dir,'video.mp4');

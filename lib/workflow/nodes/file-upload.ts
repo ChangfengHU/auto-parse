@@ -8,8 +8,9 @@ import https from 'https';
 import http from 'http';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
+import { transferFileToBrowserDisk } from '../browser-file-upload';
 
-export const REMOTE_UPLOAD_MAX_BYTES = 128 * 1024 * 1024;
+export const REMOTE_UPLOAD_MAX_BYTES = 512 * 1024 * 1024;
 export const REMOTE_UPLOAD_CHUNK_BYTES = 256 * 1024;
 
 /** 下载 URL 到本地临时文件，返回临时文件路径 */
@@ -52,6 +53,7 @@ export async function executeFileUpload(
   const log: string[] = [];
   let tmpFile = '';
   let tmpDir = '';
+  let cleanupBrowserFile: (() => Promise<void>) | undefined;
 
   try {
     const url = params.url;
@@ -71,31 +73,7 @@ export async function executeFileUpload(
     if (params.transferMode === 'buffer') {
       const size = (await fs.promises.stat(tmpFile)).size;
       if (size > REMOTE_UPLOAD_MAX_BYTES) throw new Error('remote_upload_file_too_large');
-      // A single large base64 CDP command can block DevTools long enough for
-      // the browser watchdog to restart it. Transfer bounded chunks instead.
-      const chunks = await page.evaluateHandle(() => [] as Uint8Array<ArrayBuffer>[]);
-      const deadline = Date.now() + 180000;
-      try {
-        for await (const chunk of fs.createReadStream(tmpFile, { highWaterMark: REMOTE_UPLOAD_CHUNK_BYTES })) {
-          if (Date.now() > deadline) throw new Error('remote_upload_transfer_timeout');
-          await page.evaluate(({ chunks, data }) => {
-            chunks.push(Uint8Array.from(atob(data), c => c.charCodeAt(0)));
-          }, { chunks, data: (chunk as Buffer).toString('base64') });
-        }
-        await input.evaluate((element, { chunks, name, mimeType }) => {
-          if (!(element instanceof HTMLInputElement) || element.type !== 'file') throw new Error('upload_input_invalid');
-          const transfer = new DataTransfer();
-          transfer.items.add(new File(chunks, name, { type: mimeType }));
-          element.files = transfer.files;
-          element.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
-          element.dispatchEvent(new Event('change', { bubbles: true }));
-        }, {
-          chunks, name: path.basename(tmpFile),
-          mimeType: path.extname(tmpFile).toLowerCase() === '.mp4' ? 'video/mp4' : 'application/octet-stream',
-        });
-      } finally {
-        await chunks.dispose().catch(() => undefined);
-      }
+      cleanupBrowserFile = await transferFileToBrowserDisk(page, input, tmpFile, REMOTE_UPLOAD_CHUNK_BYTES, ctx.emit);
     } else {
       await input.setInputFiles(tmpFile);
     }
@@ -128,6 +106,10 @@ export async function executeFileUpload(
     const screenshot = await captureScreenshot(page).catch(() => undefined);
     return { success: false, log, error, screenshot };
   } finally {
+    if (cleanupBrowserFile) {
+      try { await cleanupBrowserFile(); }
+      catch { ctx.emit?.('log', '浏览器临时文件清理未确认；只在下次访问时回收本工具过期目录'); }
+    }
     // A local browser may read the selected path asynchronously after setInputFiles.
     // For Douyin, keep it until the actual upload finishes (or this node fails).
     // Own the directory before download starts, including partial-file failures.

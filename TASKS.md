@@ -4,12 +4,12 @@
 
 ## In Progress
 
-- [RUNTIME-005] 原画质视频128MiB受控上传
+- [RUNTIME-005] 原画质视频512MiB磁盘分块上传
   Status: In Progress
   Owner: codex
   Updated: 2026-10-26
   Log: dev-log/2026-10-26-original-video-upload.md
-  Next: 100项回归/类型/构建/89MB原字节隔离验证及真实非发布预览通过，修复已上线；跟踪已授权发布回执。默认分支GitHub推送被安全审核拦截，等待机主单独授权。
+  Next: 512MiB磁盘分块修复已上线；100项回归+6项磁盘生命周期、类型、构建、512MiB全链路校验通过。V5真实作品7700832043915119881已创建登记（89MB上传72719ms），审核未确认；本地提交保存，GitHub推送仍待明确授权。
 
 - [AUDIO-003] 音频搜索稳定性与页面/MCP完整回归
   Status: In Progress

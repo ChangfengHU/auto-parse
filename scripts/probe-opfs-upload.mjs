@@ -1,0 +1,9 @@
+import {chromium} from 'playwright';
+import http from 'node:http';import crypto from 'node:crypto';
+const bytes=Number(process.argv[2]||4194304);let received=0;let digest='';
+const server=http.createServer(async(req,res)=>{if(req.url==='/verify'){const h=crypto.createHash('sha256');for await(const b of req){received+=b.length;h.update(b);}digest=h.digest('hex');res.end(JSON.stringify({received,digest}));}else{res.setHeader('Content-Type','text/html');res.end('<input id="video" type="file">');}});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;
+try{browser=await chromium.launch({headless:true});const page=await browser.newPage();await page.goto('http://127.0.0.1:'+server.address().port);
+ const result=await page.evaluate(async bytes=>{const root=await navigator.storage.getDirectory();const dir=await root.getDirectoryHandle('vyibc-upload-probe-'+crypto.randomUUID(),{create:true});try{const handle=await dir.getFileHandle('probe.mp4',{create:true});const writer=await handle.createWritable();const b=new Uint8Array(262144);for(let p=0;p<bytes;p+=b.length)await writer.write(b.subarray(0,Math.min(b.length,bytes-p)));await writer.close();const disk=await handle.getFile();const file=new File([disk],'probe.mp4',{type:'video/mp4'});const dt=new DataTransfer();dt.items.add(file);document.querySelector('#video').files=dt.files;const response=await fetch('/verify',{method:'POST',body:document.querySelector('#video').files[0]});return {size:disk.size,mime:document.querySelector('#video').files[0].type,...await response.json()};}finally{await root.removeEntry(dir.name,{recursive:true});}},bytes);
+ console.log(JSON.stringify(result));if(result.received!==bytes)throw Error('byte_count_mismatch');
+}finally{if(browser)await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}

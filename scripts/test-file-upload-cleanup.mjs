@@ -31,9 +31,10 @@ for (const mode of ['success', 'buffer-success', 'buffer-transfer-failure', 'buf
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
     const sandbox = { URL, os, path, http, https, pipeline, Transform, atob, Uint8Array, File, Event, HTMLInputElement: Input, DataTransfer: Transfer,
-      fs: { ...fs, promises: { ...fs.promises, stat: async file => mode === 'buffer-too-large' ? { size: 129 * 1024 * 1024 } : fs.promises.stat(file), mkdtemp: async prefix => {
+      fs: { ...fs, promises: { ...fs.promises, stat: async file => mode === 'buffer-too-large' ? { size: 513 * 1024 * 1024 } : fs.promises.stat(file), mkdtemp: async prefix => {
         const dir = await fs.promises.mkdtemp(prefix); dirs.push(dir); return dir;
       } } },
+      transferFileToBrowserDisk: async () => { if (['buffer-transfer-failure','buffer-input-failure'].includes(mode)) { disposed=true;throw Error('transfer_failed'); }consumed=true;return async()=>{disposed=true;}; },
       captureScreenshot: async () => { if (mode === 'screenshot-failure') throw Error('screenshot'); },
     };
     vm.createContext(sandbox);
