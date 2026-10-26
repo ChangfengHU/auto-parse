@@ -209,7 +209,7 @@ export interface ScrollParams {
 export interface FileUploadParams {
   selector: string  // input[type=file] 的选择器
   url: string       // 视频/文件 URL，支持 {{变量}}
-  transferMode?: 'path' | 'buffer' // 远程 CDP 必须传二进制，不能传本机路径；上限 50 MiB
+  transferMode?: 'path' | 'buffer' // 远程 CDP 必须传二进制，不能传本机路径；上限 128 MiB（分块、下载前/中双重限额）
 }
 
 export interface WaitConditionParams {

@@ -7,9 +7,13 @@ import fs from 'fs';
 import https from 'https';
 import http from 'http';
 import { pipeline } from 'node:stream/promises';
+import { Transform } from 'node:stream';
+
+export const REMOTE_UPLOAD_MAX_BYTES = 128 * 1024 * 1024;
+export const REMOTE_UPLOAD_CHUNK_BYTES = 256 * 1024;
 
 /** 下载 URL 到本地临时文件，返回临时文件路径 */
-async function downloadToTemp(url: string, tmpFile: string): Promise<void> {
+async function downloadToTemp(url: string, tmpFile: string, maxBytes?: number): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const proto = url.startsWith('https') ? https : http;
     const request = proto.get(url, res => {
@@ -18,7 +22,22 @@ async function downloadToTemp(url: string, tmpFile: string): Promise<void> {
         reject(new Error(`下载失败 HTTP ${res.statusCode}`));
         return;
       }
-      pipeline(res, fs.createWriteStream(tmpFile, { flags: 'wx', mode: 0o600 }))
+      const advertisedSize = Number(res.headers['content-length']);
+      if (maxBytes !== undefined && Number.isFinite(advertisedSize) && advertisedSize > maxBytes) {
+        res.destroy();
+        reject(new Error('remote_upload_file_too_large'));
+        return;
+      }
+      let receivedBytes = 0;
+      const bounded = new Transform({
+        transform(chunk, _encoding, callback) {
+          receivedBytes += chunk.length;
+          if (maxBytes !== undefined && receivedBytes > maxBytes) {
+            callback(new Error('remote_upload_file_too_large'));
+          } else callback(null, chunk);
+        },
+      });
+      pipeline(res, bounded, fs.createWriteStream(tmpFile, { flags: 'wx', mode: 0o600 }))
         .then(resolve, reject);
     }).on('error', reject);
     request.setTimeout(60_000, () => request.destroy(new Error('视频下载超时')));
@@ -43,7 +62,7 @@ export async function executeFileUpload(
     if (!['https:', 'http:'].includes(source.protocol)) throw new Error('视频地址必须是 HTTP(S)');
     tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'wf-upload-'));
     tmpFile = path.join(tmpDir, 'video' + (path.extname(source.pathname) || '.mp4'));
-    await downloadToTemp(url, tmpFile);
+    await downloadToTemp(url, tmpFile, params.transferMode === 'buffer' ? REMOTE_UPLOAD_MAX_BYTES : undefined);
     log.push(`✅ 下载完成：${path.basename(tmpFile)}`);
 
     log.push(`📤 注入文件到上传控件：${params.selector}`);
@@ -51,13 +70,13 @@ export async function executeFileUpload(
     await input.waitFor({ state: 'attached', timeout: 15_000 });
     if (params.transferMode === 'buffer') {
       const size = (await fs.promises.stat(tmpFile)).size;
-      if (size > 50 * 1024 * 1024) throw new Error('remote_upload_file_too_large');
+      if (size > REMOTE_UPLOAD_MAX_BYTES) throw new Error('remote_upload_file_too_large');
       // A single large base64 CDP command can block DevTools long enough for
       // the browser watchdog to restart it. Transfer bounded chunks instead.
       const chunks = await page.evaluateHandle(() => [] as Uint8Array<ArrayBuffer>[]);
       const deadline = Date.now() + 180000;
       try {
-        for await (const chunk of fs.createReadStream(tmpFile, { highWaterMark: 256 * 1024 })) {
+        for await (const chunk of fs.createReadStream(tmpFile, { highWaterMark: REMOTE_UPLOAD_CHUNK_BYTES })) {
           if (Date.now() > deadline) throw new Error('remote_upload_transfer_timeout');
           await page.evaluate(({ chunks, data }) => {
             chunks.push(Uint8Array.from(atob(data), c => c.charCodeAt(0)));

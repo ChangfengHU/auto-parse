@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { reconcileDouyinTask } from '@/lib/workflow/douyin-reconcile';
 import { getWorkflowTaskSummary, getWorkflowTask } from '@/lib/workflow/workflow-task-cli';
 import { startDouyinWorkflow } from '@/lib/workflow/douyin-workflow-service';
+import { REMOTE_UPLOAD_MAX_BYTES, REMOTE_UPLOAD_CHUNK_BYTES } from '@/lib/workflow/nodes/file-upload';
 
 export async function POST(req: NextRequest) {
   const expected = process.env.AUTO_PARSE_ADMIN_TOKEN;
@@ -20,6 +21,7 @@ export async function POST(req: NextRequest) {
         topics: { maxItems: 5, mode: 'caption_text', nativeTopicSelection: false },
         cover: { modes: ['vertical_image', 'horizontal_image'], maxBytes: 8388608, verification: 'experimental' },
         aiGenerated: { required: true } },
+      upload: { transferMode: 'buffer', maxBytes: REMOTE_UPLOAD_MAX_BYTES, chunkBytes: REMOTE_UPLOAD_CHUNK_BYTES, originalBytesPreserved: true },
       prepareWithoutPublishing: true, requiresExplicitPublishConfirmation: true,
       receiptSources: ['creation_response', 'creator_work_list'], uncertainResultsMustNotBeRetried: true,
     });

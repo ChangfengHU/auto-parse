@@ -5,6 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { pipeline } from 'node:stream/promises';
+import { Transform } from 'node:stream';
 import { stripTypeScriptTypes } from 'node:module';
 import vm from 'node:vm';
 import { test } from 'node:test';
@@ -29,8 +30,8 @@ for (const mode of ['success', 'buffer-success', 'buffer-transfer-failure', 'buf
       res.end(bytes);
     });
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    const sandbox = { URL, os, path, http, https, pipeline, atob, Uint8Array, File, Event, HTMLInputElement: Input, DataTransfer: Transfer,
-      fs: { ...fs, promises: { ...fs.promises, stat: async file => mode === 'buffer-too-large' ? { size: 51 * 1024 * 1024 } : fs.promises.stat(file), mkdtemp: async prefix => {
+    const sandbox = { URL, os, path, http, https, pipeline, Transform, atob, Uint8Array, File, Event, HTMLInputElement: Input, DataTransfer: Transfer,
+      fs: { ...fs, promises: { ...fs.promises, stat: async file => mode === 'buffer-too-large' ? { size: 129 * 1024 * 1024 } : fs.promises.stat(file), mkdtemp: async prefix => {
         const dir = await fs.promises.mkdtemp(prefix); dirs.push(dir); return dir;
       } } },
       captureScreenshot: async () => { if (mode === 'screenshot-failure') throw Error('screenshot'); },
