@@ -3288,7 +3288,7 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
               <div>
                 <p className="text-sm font-semibold mb-1">工作流参数</p>
                 <p className="text-[11px] text-muted-foreground">
-                  素材选择已经做成正式节点。先点左侧第 1 个“素材节点”选择素材，执行后会输出 `videoUrl` 和 `title`，后面的上传和标题节点会直接复用。
+                  {nodes.some(n => n.type === 'x_publish') ? '填写目标 X 用户名和正文，选择已登录的浏览器。默认仅准备；确认正式内容后再勾选直接发布。' : '素材选择已经做成正式节点。先点左侧第 1 个素材节点选择素材，后续节点复用输出的 videoUrl 和 title。'}
                 </p>
               </div>
 
@@ -3304,12 +3304,18 @@ export function WorkflowEditor({ workflow: initialWorkflow, initialContext }: Wo
                             {key}
                             {WORKFLOW_VARS_META[key] ? ` · ${WORKFLOW_VARS_META[key]}` : ''}
                           </label>
-                          <input
+                          {key === 'text' && nodes.some(n => n.type === 'x_publish') ? <textarea
+                            aria-label="推文正文" rows={5}
                             value={runtimeVars[key] ?? ''}
                             onChange={e => setRuntimeVars(prev => ({ ...prev, [key]: e.target.value }))}
                             placeholder={fieldPlaceholder(key)}
                             className="w-full bg-background border border-border rounded px-2 py-1 text-[11px] font-mono outline-none focus:border-primary"
-                          />
+                          /> : <input
+                            value={runtimeVars[key] ?? ''}
+                            onChange={e => setRuntimeVars(prev => ({ ...prev, [key]: e.target.value }))}
+                            placeholder={fieldPlaceholder(key)}
+                            className="w-full bg-background border border-border rounded px-2 py-1 text-[11px] font-mono outline-none focus:border-primary"
+                          />}
                         </div>
                       ))}
                     </div>

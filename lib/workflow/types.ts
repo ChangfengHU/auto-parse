@@ -14,6 +14,7 @@ export type NodeType =
   | 'screenshot'      // 基础：截图快照
   | 'file_upload'     // 高级：URL → 下载 → 注入 <input type=file>
   | 'image_upload'    // 图文：有序多图上传，仅认证的任务浏览器
+  | 'x_publish'       // X 文字准备、单次提交与真实回执
   | 'image_text_publish' // 图文：准备/发布、账号检查、防重复及真实回执
   | 'wait_condition'  // 高级：轮询 + 条件判断（值/URL/元素存在）
   | 'qrcode'          // 高级：截取二维码 → 等待扫码成功（URL 跳转判断）
