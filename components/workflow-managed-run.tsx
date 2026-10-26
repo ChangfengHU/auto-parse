@@ -104,7 +104,7 @@ export function WorkflowManagedRun({ workflowId, vars, dirty, disabled }: {
       <div aria-live="polite">{busy ? '执行/核对中…' : snapshot ? snapshot.status : ''}</div>
       {error ? <p role="alert" className="text-red-400 break-words">{error}</p> : null}
       {snapshot?.history ? <ol className="space-y-1">{snapshot.history.map((h,i)=><li key={i}>{h.stepIndex+1}. {h.label}：{h.result.stepSkipped ? '按条件跳过' : h.result.success ? '成功' : '失败：'+h.result.error}</li>)}</ol> : null}
-      {receipt ? <p className="break-all">已取得作品回执：{String(receipt.postId ?? receipt.noteId ?? receipt.awemeId)}（{String(receipt.moderation)}）</p> : null}
+      {receipt ? <p className="break-all">{typeof receipt.postUrl === 'string' && /^https:\/\/(x\.com|www\.douyin\.com|www\.xiaohongshu\.com)\//.test(receipt.postUrl) ? <a href={receipt.postUrl} target="_blank" rel="noopener noreferrer" className="underline">查看作品</a> : null} 已取得作品回执：{String(receipt.postId ?? receipt.noteId ?? receipt.awemeId)}（{String(receipt.moderation)}）</p> : null}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       {shot ? <img src={shot} alt="当前任务浏览器截图" className="w-full rounded border"/> : null}
       <p className="text-muted-foreground">会话不跨服务重启保存；已有发布意图/回执会保留。未知结果不得更换请求重试。</p>

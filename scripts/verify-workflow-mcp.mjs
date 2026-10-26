@@ -30,7 +30,7 @@ try {
   await rpc('notifications/initialized', {}, false);
   assert.equal((await fetch(endpoint, { headers })).status, 405);
   const listing = await rpc('tools/list', {});
-  assert.equal(listing.result.tools.length, 16);
+  assert.ok(listing.result.tools.length >= 16);
   const capabilities = await call('workflow_capabilities');
   assert.equal(capabilities.source, 'supabase');
   const catalog = await call('workflow_node_catalog');

@@ -11,6 +11,7 @@ const tool = (name: string, description: string, properties: Record<string, unkn
   annotations: { readOnlyHint: readOnly, destructiveHint: !readOnly, openWorldHint: true },
 });
 export const WORKFLOW_MCP_TOOLS = [
+  tool('x_publication_status','Read durable X submission evidence after disconnect/restart; submitting means unknown, never retry.',{expectedUsername:string,text:string,requestId:string},['expectedUsername','text','requestId'],true),
   tool('workflow_capabilities', 'Read supported operations, browser binding and recovery limitations.', {}, [], true),
   tool('workflow_node_catalog', 'Read node defaults and parameter metadata. Credentials are redacted. debugSupported identifies executable nodes in this release.', { type: string }, [], true),
   tool('workflow_list', 'List the same Supabase workflows displayed in /workflows.', { query: string, page: { type: 'integer', minimum: 1 }, limit: { type: 'integer', minimum: 1, maximum: 200 } }, [], true),
