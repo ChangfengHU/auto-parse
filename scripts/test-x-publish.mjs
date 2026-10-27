@@ -11,7 +11,7 @@ const require=createRequire(path.join(root,'package.json')),ts=require('typescri
 function load(file,mocks={}) {
  const loadedModule={exports:{}};
  const source=ts.transpileModule(readFileSync(path.join(root,file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
- vm.runInNewContext(source,{module:loadedModule,exports:loadedModule.exports,require:n=>n in mocks?mocks[n]:n.startsWith('.')?load(path.join(path.dirname(file),n+'.ts'),mocks):require(n),process,URL,Buffer,AbortSignal,Response,fetch,console,Error});
+ vm.runInNewContext(source,{module:loadedModule,exports:loadedModule.exports,require:n=>n in mocks?mocks[n]:n.startsWith('.')?load(path.join(path.dirname(file),n+'.ts'),mocks):require(n),process,URL,URLSearchParams,Buffer,AbortSignal,Response,fetch,console,Error});
  return loadedModule.exports;
 }
 
@@ -111,4 +111,47 @@ test('catalog, validation and MCP expose X without inline auth',()=>{
  const v=load('lib/workflow/validation.ts');assert.equal(v.validateWorkflow({name:'X test',vars:[],nodes:[{type:'x_publish',params:{}}]}).valid,true);
  const contract=load('lib/workflow/mcp-contract.ts');
  assert.equal(contract.WORKFLOW_MCP_TOOLS.find(t=>t.name==='x_publication_status').annotations.readOnlyHint,true);
+});
+
+test('one optional trusted image preserves text-only identity and scopes fingerprints',()=>{
+ const a=c.xIdentity(p),b=c.xIdentity({...p,imageUrls:'https://resource.vyibc.com/photo.png'});
+ assert.equal(a.key,b.key);assert.notEqual(a.fingerprint,b.fingerprint);assert.equal(b.urls.length,1);
+ for(const imageUrls of [['https://resource.vyibc.com/a.png','https://cdn.vyibc.com/b.jpg'],'http://resource.vyibc.com/a.png','https://evil.test/a.png','https://resource.vyibc.com/a.png?token=x','{{imageUrls}}'])assert.throws(()=>c.xIdentity({...p,imageUrls}));
+});
+test('native photo receipt must match the uploaded media id and strips only its attachment link',()=>{
+ const e=c.xIdentity({...p,imageUrls:'https://resource.vyibc.com/a.png'});
+ const b=body(p.text+' https://t.co/photoABC');
+ b.data.create_tweet.tweet_results.result.legacy.extended_entities={media:[{id_str:'1234567899999999999',type:'photo',url:'https://t.co/photoABC'}]};
+ const r=c.xCreationReceipt(endpoint,'POST',200,b,e,['1234567899999999999']);
+ assert.equal(r.published,true);assert.equal(r.imageCount,1);
+ assert.equal(c.xCreationReceipt(endpoint,'POST',200,b,e,['1234567899999999998']),null);
+ assert.equal(c.xCreationReceipt(endpoint,'POST',200,b,e),null);
+ assert.equal(c.xCreationReceipt(endpoint,'POST',200,b,expected,['1234567899999999999']),null);
+ b.data.create_tweet.tweet_results.result.legacy.extended_entities.media[0].type='video';
+ assert.equal(c.xCreationReceipt(endpoint,'POST',200,b,e,['1234567899999999999']),null);
+});
+test('native upload identity accepts string ids only from exact uploader origins',()=>{
+ const b=load('lib/workflow/x-image-browser.ts');
+ assert.equal(b.xUploadEndpoint('https://upload.x.com/i/media/upload.json?command=FINALIZE'),true);
+ assert.equal(b.xUploadEndpoint('https://evil.test/i/media/upload.json'),false);
+ assert.equal(b.xUploadedId({media_id_string:'1234567899999999999'}),'1234567899999999999');
+ assert.equal(b.xUploadedId({media_key:'3_1234567899999999999'}),'1234567899999999999');
+ assert.equal(b.xUploadedId({media_id:1234567899999999999}),null);
+ assert.equal(b.xUploadedId({media_id_string:'1234567',errors:[{}]}),null);
+});
+test('image preview proof rejects changed/removed images',async()=>{
+ const b=load('lib/workflow/x-image-browser.ts'),createHash=require('node:crypto').createHash;
+ const source='blob:https://x.com/image-one';
+ const scope={locator:()=>({count:async()=>1,getAttribute:async()=>source,evaluate:async()=>true})};
+ const proof={mediaIds:['1234567899999999999'],thumbHash:createHash('sha256').update(source).digest('hex'),sha256:'a'.repeat(64)};
+ await b.verifyXImage(scope,proof);
+ await assert.rejects(b.verifyXImage(scope,{...proof,thumbHash:'changed'}),/changed/);
+ await assert.rejects(b.verifyXImage(scope,{...proof,mediaIds:[]}),/changed/);
+});
+
+test('image proof requires FINALIZE rather than an INIT allocation',()=>{
+ const b=load('lib/workflow/x-image-browser.ts');
+ assert.equal(b.xFinalizeCommand('https://upload.x.com/i/media/upload.json?command=INIT',null),false);
+ assert.equal(b.xFinalizeCommand('https://upload.x.com/i/media/upload.json?command=FINALIZE',null),true);
+ assert.equal(b.xFinalizeCommand('https://upload.x.com/i/media/upload.json','command=FINALIZE&media_id=123'),true);
 });

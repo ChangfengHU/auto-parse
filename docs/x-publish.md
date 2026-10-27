@@ -1,4 +1,4 @@
-# X text posting through AutoParse
+# X text and single-image posting through AutoParse
 
 The formal workflow and editor use Supabase rpa_workflows; do not add a parallel publisher or local JSON fallback. Use the existing authenticated /api/workflows/mcp endpoint and a browser already logged into the intended X account. Credentials remain in the existing Vault connector.
 
@@ -6,10 +6,11 @@ The formal workflow and editor use Supabase rpa_workflows; do not add a parallel
 
 - expectedUsername: the X @username, not display name.
 - text: exact nonempty text, no leading/trailing whitespace or unresolved templates. Maximum request text size is 10,000 UTF-8 bytes; this is a local input bound, not an X character allowance. X's enabled Post button determines whether the current account accepts the text.
+- imageUrls (optional): one HTTPS PNG/JPEG/WebP URL on resource.vyibc.com or cdn.vyibc.com, as a string or JSON string array; maximum 5 MiB. Omit for text-only.
 - requestId: stable 8–100 character letters/digits/underscore/hyphen ID.
 - directPublish: string "false" by default. "true" requires actual user authorization.
 
-This release supports a single text post, including Unicode, line breaks and hashtags. Images, videos, replies, quotes, threads, scheduling and long Premium posts are not accepted as supported functionality. It controls the existing web composer; it does not require an X developer API subscription, but depends on the current UI and a valid browser session.
+This release supports one text post with an optional single image, including Unicode, line breaks and hashtags. Videos, replies, quotes, threads, scheduling and long Premium posts are not accepted as supported functionality. It controls the existing web composer; it does not require an X developer API subscription, but depends on the current UI and a valid browser session.
 
 ## Workbench
 
@@ -26,9 +27,9 @@ Preparation fills and verifies the composer, returns prepared=true/published=fal
 5. Poll workflow_get_session; inspect history and screenshot. Keep the same operation/session after transport failure.
 6. workflow_close_session after review.
 
-Publishing requires both the conditional branch and server-checked directPublish=true. It checks same-session preparation proof, exact current text, single composer, no attachments/thread, matching account and enabled Post control. A disk-synced atomic reservation precedes the one click. A native CreateTweet response must carry a string post ID, matching author and exact text before a saved receipt is reported. HTTP 200 or a toast alone is insufficient. Creation confirmed does not mean public visibility independently checked.
+Publishing requires both the conditional branch and server-checked directPublish=true. It checks same-session preparation proof, exact current text, single composer, exact declared attachment count/no thread, matching account and enabled Post control. A disk-synced atomic reservation precedes the one click. A native CreateTweet response must carry a string post ID, matching author and exact text before a saved receipt is reported. Image posts additionally require a completed native upload ID, unchanged loaded preview and a matching photo media ID in the creation response; only the verified photo t.co suffix is removed for text comparison. HTTP 200 or a toast alone is insufficient. Creation confirmed does not mean public visibility independently checked.
 
-x_publication_status accepts expectedUsername/text/requestId and reads the durable local record even after a server restart. It makes no publishing request and does not check X public visibility:
+x_publication_status accepts expectedUsername/text/requestId and the same optional imageUrls and reads the durable local record even after a server restart. It makes no publishing request and does not check X public visibility:
 - not_submitted: no local reservation found; no external-state claim.
 - submitting: outcome unknown, do not automatically retry.
 - published: saved creation evidence including postId/postUrl; visibility remains unverified.
@@ -40,3 +41,9 @@ The ledger is .data/x-publications with directory 700/files 600, preserved acros
 Automated tests exercise mock submit/receipt and real filesystem concurrency. Real browser acceptance must be preparation only unless a particular public post is explicitly authorized. Do not describe a mock response as an actual X post.
 
 Rollback selects the previous verified build via the service's existing build environment file and restarts only AutoParse after tasks are idle. Keep the formal workflow and ledger for inspection; never restart Chrome, overwrite cookies, or discard uncertain records.
+
+## Single-image workflow
+
+The single-image workflow is a formal copy of the text workflow with imageUrls passed to both x_publish nodes. The original text workflow remains compatible. Native FINALIZE completion is required; INIT is insufficient. The content reservation key remains account + exact text, so a different image URL or request ID cannot bypass an existing reservation. The image URL is also bound into the preparation fingerprint.
+
+A user-authorized English photo post passed native creation receipt and independent logged-in permalink readback on 2026-10-27. This establishes account-session visibility, not anonymous visibility, discoverability or future moderation status. No extra test post was created. The production runtime uses the same tested build; the canary has been stopped. A root-run canary ledger was handed back to the claude service owner with directory 700/files 600; production status readback passed without republishing.
