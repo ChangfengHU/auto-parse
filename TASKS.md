@@ -107,6 +107,15 @@
 
 ## Done
 
+- [WORKFLOW-008] 自动发布插件与能力广场入驻
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-27
+  Log: dev-log/2026-10-27-auto-publish-plugin.md
+  Result: 两MCP+统一Skill固定插件已入驻；Codex隔离安装与只读公网业务验证通过，详见日志。
+
+
+
 - [WORKFLOW-007] X 单图发推与真实回执
   Status: Done
   Owner: codex
