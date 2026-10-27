@@ -52,6 +52,18 @@ const TIMEOUT_META: ParamMeta = {
 // ── 节点目录 ──────────────────────────────────────────────────────────────────
 
 export const NODE_CATALOG: NodeCatalogItem[] = [
+  {
+    type:'x_publish',label:'X：文字 / 单图发推',icon:'𝕏',category:'advanced',
+    desc:'复用已登录浏览器，核对账号/正文/原生图片ID并保存回执。可选1张PNG/JPEG/WebP，本地限制5MiB；暂不支持视频、回复、引用和线程。',
+    defaultParams:{mode:'prepare',expectedUsername:'{{expectedUsername}}',text:'{{text}}',requestId:'{{requestId}}',imageUrls:''},
+    paramMeta:{
+      mode:{label:'执行模式',type:'select',required:true,desc:'prepare不点击发布；publish需同任务准备证明及directPublish=true。',options:[{label:'仅准备',value:'prepare'},{label:'发布',value:'publish'}]},
+      expectedUsername:{label:'目标X用户名',type:'template',required:true,desc:'@用户名，与浏览器核对；不接受显示名称。'},
+      imageUrls:{label:'可选图片地址',type:'template',desc:'留空为纯文字；或传1个resource.vyibc.com/cdn.vyibc.com的PNG/JPEG/WebP地址/JSON数组。'},
+      text:{label:'推文正文',type:'template',required:true,desc:'纯文字及话题；长度由当前X发布按钮校验，超限停止。首尾不要空白。'},
+      requestId:{label:'稳定请求ID',type:'template',required:true,desc:'8–100位字母、数字、下划线或连字符；结果未知时查询原提交，禁止换ID重发。'},
+    },
+  },
   ...(['image_upload','image_text_publish'] as const).map(type => ({
     type, label: type === 'image_upload' ? '图文：有序多图上传' : '图文：准备 / 安全发布',
     icon: '🖼️', category: 'advanced' as const,
