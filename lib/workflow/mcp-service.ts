@@ -144,12 +144,12 @@ export async function callWorkflowTool(name: string, input: Record<string, unkno
     execution: 'task-owned tab, cross-process activity lock, async step/run and screenshot polling',
     conditionalNodes: { field: 'runIf', shape: { variable: 'directPublish', equals: true }, missingValue: false, acceptedValues: ['true', 'false'], invalidValue: 'fail before execution' },
     xhsPublication: 'click.params.xhsPublication: authenticated browser only; directPublish=true, workflow upload proof, matching account/title/body, AI declaration, durable source-URL deduplication and creation receipt. No blind retries.',
-    xPublication:{node:'x_publish',modes:['prepare','publish'],media:false,reply:false,thread:false,requirements:'Authenticated task-owned browser, expectedUsername, text, stable requestId; publish requires same-session preparation and directPublish=true. Durable content-scoped deduplication; unknown results must not be retried.',statusTool:'x_publication_status'},
+    xPublication:{node:'x_publish',modes:['prepare','publish'],media:true,maxImages:1,maxImageMiB:5,reply:false,thread:false,requirements:'Authenticated task-owned browser, expectedUsername, text, stable requestId; publish requires same-session preparation and directPublish=true. Durable content-scoped deduplication; unknown results must not be retried.',statusTool:'x_publication_status'},
     imageTextPublication: { platforms: ['xhs','douyin'], nodes: ['image_upload','image_text_publish'], maxImages: 9, maxImageMiB: 10, maxTotalMiB: 50, maxTitleCharacters: 20, sourceHosts: ['resource.vyibc.com','cdn.vyibc.com'], extensions: ['png','jpg','jpeg','webp'], preparation: 'Leaves the task tab prepared; not a promise of saved cloud draft.', publication: 'Explicit directPublish=true; stable account, upload/preparation proof, order, metadata and AI checks; durable deduplication; creation receipt required. Platform public submission still requires acceptance with user-approved content.' },
     publication: 'No implicit approval. Confirm execution only for user-authorized effects. Douyin video uses the dedicated guarded API; image-text uses the authenticated image_text_publish workflow node.',
   };
   if (name === 'x_publication_status') {
-    const identity=xIdentity({expectedUsername:str(input.expectedUsername,'expectedUsername'),text:str(input.text,'text'),requestId:str(input.requestId,'requestId')});
+    const identity=xIdentity({expectedUsername:str(input.expectedUsername,'expectedUsername'),text:str(input.text,'text'),requestId:str(input.requestId,'requestId'),imageUrls:input.imageUrls as string|undefined});
     const record=await xRecord(path.join(process.cwd(),'.data','x-publications'),identity.key,identity.fingerprint);
     return record ? {...record,note:'Saved local creation evidence only; not a public-visibility check. Submitting means unknown: do not retry.'} : {state:'not_submitted',published:false};
   }

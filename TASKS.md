@@ -107,6 +107,14 @@
 
 ## Done
 
+- [WORKFLOW-007] X 单图发推与真实回执
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-27
+  Log: dev-log/2026-10-27-x-image-publish.md
+  Result: 单图原生上传、媒体回执及独立链接回查通过；部署同一验收构建，生产重启后状态查询通过。
+
+
 - [WORKFLOW-004] 小红书浏览器一键发布与条件节点
   Status: Done
   Owner: codex

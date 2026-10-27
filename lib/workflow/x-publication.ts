@@ -1,19 +1,37 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
-export type XPostParams = { mode: 'prepare' | 'publish'; expectedUsername: string; text: string; requestId: string };
-export type XReceipt = { published: true; postId: string; postUrl: string; username: string; moderation: 'creation_confirmed_visibility_unverified'; verificationSource: 'creation_response'; verifiedAt: string };
+export type XPostParams = { mode: 'prepare' | 'publish'; expectedUsername: string; text: string; requestId: string; imageUrls?: string | string[] };
+export type XReceipt = { published: true; postId: string; postUrl: string; username: string; moderation: 'creation_confirmed_visibility_unverified'; verificationSource: 'creation_response'; verifiedAt: string; mediaIds?: string[]; imageCount?: number };
 export type XRecord = { fingerprint: string; requestId: string; state: 'submitting' | 'published'; startedAt: string; receipt?: XReceipt };
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 export const xText = (s: string) => s.replace(/\r\n?/g, '\n').normalize('NFC');
+export function xImages(value: unknown): string[] {
+  if (value === undefined || value === '') return [];
+  let items: unknown = value;
+  if (typeof value === 'string') {
+    try { items = value.trim().startsWith('[') ? JSON.parse(value) : value.trim().split(/\r?\n/); }
+    catch { throw new Error('x_image_sources_invalid'); }
+  }
+  if (!Array.isArray(items) || items.length > 1) throw new Error('x_single_image_only');
+  return items.map(v => {
+    if (typeof v !== 'string') throw new Error('x_image_url_invalid');
+    let u: URL; try { u = new URL(v); } catch { throw new Error('x_image_url_invalid'); }
+    if (u.protocol !== 'https:' || !['resource.vyibc.com','cdn.vyibc.com'].includes(u.hostname) ||
+        u.username || u.password || u.port || u.search || u.hash || !/\.(png|jpe?g|webp)$/i.test(u.pathname)) throw new Error('x_image_url_invalid');
+    return u.href;
+  });
+}
 export function xIdentity(p: Omit<XPostParams, 'mode'>) {
   if (typeof p.expectedUsername !== 'string' || !/^@?[a-zA-Z0-9_]{1,15}$/.test(p.expectedUsername) ||
       typeof p.requestId !== 'string' || !/^[A-Za-z0-9_-]{8,100}$/.test(p.requestId) ||
       typeof p.text !== 'string' || !p.text.trim() || p.text !== p.text.trim() ||
       Buffer.byteLength(p.text) > 10000 || /\{\{|\}\}|\u0000/.test(p.text)) throw new Error('x_publication_input_invalid');
   const username = p.expectedUsername.replace(/^@/, '').toLowerCase(), text = xText(p.text);
-  const fingerprint = hash(JSON.stringify([username, text]));
-  return { username, text, fingerprint, key: fingerprint };
+  const urls = xImages(p.imageUrls);
+  const key = hash(JSON.stringify([username, text]));
+  const fingerprint = urls.length ? hash(JSON.stringify([username,text,urls])) : key;
+  return { username, text, urls, fingerprint, key };
 }
 export function xCreationEndpoint(url: string) {
   try { const u = new URL(url); return u.origin === 'https://x.com' && /^\/i\/api\/graphql\/[A-Za-z0-9_-]+\/CreateTweet$/.test(u.pathname); }
@@ -33,19 +51,33 @@ function responseText(legacy: Obj) {
   }
   return xText(text);
 }
-export function xCreationReceipt(url: string, method: string, status: number, body: unknown, expected: ReturnType<typeof xIdentity>): XReceipt | null {
+export function xCreationReceipt(url: string, method: string, status: number, body: unknown, expected: ReturnType<typeof xIdentity>, uploadedMediaIds: string[] = []): XReceipt | null {
   const root = obj(body);
   if (!xCreationEndpoint(url) || method !== 'POST' || status < 200 || status >= 300 || (root.errors !== undefined && (!Array.isArray(root.errors) || root.errors.length))) return null;
   const tweet = obj(obj(obj(obj(root.data).create_tweet).tweet_results).result), legacy = obj(tweet.legacy);
   const user = obj(obj(obj(tweet.core).user_results).result);
   const username = String(obj(user.core).screen_name || obj(user.legacy).screen_name || '').toLowerCase();
   const id = tweet.rest_id;
+  const media = obj(legacy.extended_entities).media ?? obj(legacy.entities).media;
+  const expectedImages = expected.urls?.length || 0;
+  let checkedText = {...legacy};
+  if (expectedImages) {
+    if (!Array.isArray(media) || media.length !== expectedImages || uploadedMediaIds.length !== expectedImages) return null;
+    for (const [i,value] of media.entries()) {
+      const photo = obj(value);
+      if (photo.type !== 'photo' || typeof photo.id_str !== 'string' || photo.id_str !== uploadedMediaIds[i] ||
+          typeof photo.url !== 'string' || !/^https:\/\/t\.co\/[A-Za-z0-9]+$/.test(photo.url)) return null;
+      const text = checkedText.full_text;
+      if (typeof text !== 'string') return null;
+      if (text.endsWith(' '+photo.url)) checkedText = {...checkedText,full_text:text.slice(0,-photo.url.length-1)};
+    }
+  } else if (media) return null;
   if (typeof id !== 'string' || !/^\d{6,30}$/.test(id) || username !== expected.username ||
-      typeof legacy.full_text !== 'string' || responseText(legacy) !== expected.text ||
+      typeof legacy.full_text !== 'string' || responseText(checkedText) !== expected.text ||
       legacy.in_reply_to_status_id_str || legacy.is_quote_status === true ||
-      obj(legacy.extended_entities).media || obj(legacy.entities).media || tweet.note_tweet) return null;
+      tweet.note_tweet) return null;
   return { published: true, postId: id, postUrl: 'https://x.com/'+username+'/status/'+id, username,
-    moderation: 'creation_confirmed_visibility_unverified', verificationSource: 'creation_response', verifiedAt: new Date().toISOString() };
+    moderation: 'creation_confirmed_visibility_unverified', verificationSource: 'creation_response', verifiedAt: new Date().toISOString(), ...(expectedImages ? {mediaIds:uploadedMediaIds,imageCount:expectedImages} : {}) };
 }
 function filename(dir: string, key: string) {
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('x_publication_key_invalid');
