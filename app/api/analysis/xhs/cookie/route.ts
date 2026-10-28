@@ -15,7 +15,7 @@ export async function GET() {
   // 简单展示 cookie 的前20字符，不暴露完整值
   return NextResponse.json({
     set: true,
-    preview: cookie.slice(0, 40) + (cookie.length > 40 ? '...' : ''),
+    preview: '登录信息已保存',
   });
 }
 
