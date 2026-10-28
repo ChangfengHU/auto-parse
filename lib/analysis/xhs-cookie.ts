@@ -26,7 +26,7 @@ function loadCookieFromFile(): string | null {
 
 function saveCookieToFile(cookie: string): void {
   try {
-    writeFileSync(COOKIE_FILE, cookie, 'utf-8');
+    writeFileSync(COOKIE_FILE, cookie, {encoding:'utf-8',mode:0o600});
   } catch (error) {
     console.error('Failed to save XHS cookie to file:', error);
   }
