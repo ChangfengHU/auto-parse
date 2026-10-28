@@ -115,6 +115,15 @@
 
 ## Done
 
+- [RUNTIME-006] 小红书分析页扫码登录与读取恢复
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-28
+  Log: dev-log/2026-10-28-xhs-qr-login.md
+  Result: 官方网页扫码与停止轮询修复已上线；已复用浏览器2会话，页面展示热门笔记；54项回归、构建/类型与重启后读取通过。
+
+
+
 - [WORKFLOW-009] 自动发布插件按自媒体平台分域
   Status: Done
   Owner: codex

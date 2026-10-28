@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import type { XhsPostData, XhsImage } from '@/lib/analysis/xhs-fetch';
 import XhsSearchTab from '@/components/xhs/XhsSearchTab';
 import XhsSpyTab from '@/components/xhs/XhsSpyTab';
+import {startXhsQrPolling} from '@/lib/analysis/xhs-qr-polling';
 
 interface CookieStatus {
   set: boolean;
@@ -11,7 +12,7 @@ interface CookieStatus {
   valid?: boolean;
 }
 
-type XhsQrCookies = Record<string, string>;
+
 
 let initialCookieStatusCache: CookieStatus | null = null;
 let initialCookieStatusPromise: Promise<CookieStatus> | null = null;
@@ -37,35 +38,14 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
   const [testing, setTesting] = useState(false);
   const [msg, setMsg] = useState('');
   const [showInput, setShowInput] = useState(false);
-  const [qrState, setQrState] = useState<{
-    loading: boolean;
-    qrUrl: string | null;
-    qrId: string | null;
-    code: string | null;
-    a1: string | null;
-    webid: string | null;
-    initialCookies: XhsQrCookies | null;
-    statusText: string;
-  }>({
-    loading: false,
-    qrUrl: null,
-    qrId: null,
-    code: null,
-    a1: null,
-    webid: null,
-    initialCookies: null,
-    statusText: '',
-  });
-
-  const autoLoginTriedRef = useRef(false);
-  const pollPayloadRef = useRef<{
-    qr_id: string;
-    code: string;
-    a1: string;
-    webid: string;
-    cookies: XhsQrCookies;
-    clientId?: string | null;
-  } | null>(null);
+  const [syncingBrowser,setSyncingBrowser]=useState(false);
+  const [loginBrowser,setLoginBrowser]=useState(2);
+  const emptyQr={loading:false,qrUrl:null as string|null,loginId:null as string|null,statusText:''};
+  const [qrState,setQrState]=useState(emptyQr);
+  const autoLoginTriedRef=useRef(false);
+  const pollPayloadRef=useRef<{loginId:string;clientId?:string|null}|null>(null);
+  const pollStopRef=useRef<(()=>void)|null>(null);
+  const qrGenerationRef=useRef(0);
 
   const refresh = useCallback(async (options?: { force?: boolean }) => {
     const d = await (async () => {
@@ -94,7 +74,7 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
     const valid = d.set ? await requestLoginValidity().catch(() => false) : false;
     const nextStatus: CookieStatus = { ...d, valid };
     setStatus(nextStatus);
-    onStatusChange(Boolean(nextStatus.set));
+    onStatusChange(Boolean(nextStatus.valid));
     if (nextStatus.set) setShowInput(false);
   }, [onStatusChange]);
 
@@ -120,114 +100,55 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
     };
   }, []);
 
-  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const stopPolling=useCallback(async()=>{
+    qrGenerationRef.current++;
+    pollStopRef.current?.();pollStopRef.current=null;
+    const old=pollPayloadRef.current;pollPayloadRef.current=null;
+    if(old)await fetch('/api/analysis/xhs/login/qr',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({loginId:old.loginId}),keepalive:true}).catch(()=>{});
+  },[]);
+  useEffect(()=>()=>{void stopPolling();},[stopPolling]);
 
-  const stopPolling = useCallback(() => {
-    if (pollTimerRef.current) {
-      clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-    pollPayloadRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    return () => stopPolling();
-  }, [stopPolling]);
-
-  const startQrLogin = async () => {
-    setQrState(prev => ({ ...prev, loading: true, statusText: '正在生成二维码...' }));
-    setMsg('');
-    try {
-      const res = await fetch('/api/analysis/xhs/login/qr');
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || '生成二维码失败');
-
-      setQrState({
-        loading: false,
-        qrUrl: d.url,
-        qrId: d.qr_id,
-        code: d.code,
-        a1: d.a1,
-        webid: d.webid,
-        initialCookies: d.cookies,
-        statusText: '请使用小红书 App 扫码',
-      });
-
-      // 开始轮询
-      stopPolling();
-      pollPayloadRef.current = {
-        qr_id: d.qr_id,
-        code: d.code,
-        a1: d.a1,
-        webid: d.webid,
-        cookies: d.cookies,
-        clientId: input.trim() || pluginClientId,
-      };
-      pollTimerRef.current = setInterval(async () => {
-        try {
-          const payload = pollPayloadRef.current;
-          if (!payload) return;
-
-          const pollRes = await fetch('/api/analysis/xhs/login/poll', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-          });
-          const pollData = await pollRes.json();
-          if (!pollRes.ok || !pollData.ok) {
-            throw new Error(pollData.error || '轮询二维码状态失败');
+  const startQrLogin=async()=>{
+    await stopPolling();
+    const generation=qrGenerationRef.current;
+    setQrState({...emptyQr,loading:true,statusText:'正在打开官方登录页面...'});setMsg('');
+    try{
+      const response=await fetch('/api/analysis/xhs/login/qr',{cache:'no-store'});
+      const data=await response.json();
+      if(!response.ok||!data.ok)throw Error(data.error||'生成二维码失败');
+      if(generation!==qrGenerationRef.current){
+        void fetch('/api/analysis/xhs/login/qr',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({loginId:data.loginId}),keepalive:true});return;
+      }
+      const clientId=(mode==='credential'&&/^xhs_[A-Za-z0-9_-]{8,100}$/.test(input.trim())?input.trim():pluginClientId)||undefined;
+      const payload={loginId:data.loginId,clientId};pollPayloadRef.current=payload;
+      setQrState({loading:false,qrUrl:data.url,loginId:data.loginId,statusText:data.url?'请使用小红书 App 扫码并确认':'正在同步已验证的登录状态...'});
+      pollStopRef.current=startXhsQrPolling(
+        async signal=>{
+          const res=await fetch('/api/analysis/xhs/login/poll',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal});
+          const result=await res.json();if(!res.ok||!result.ok)throw Error(result.error||'扫码登录检查失败');return result;
+        },
+        result=>{
+          if(generation!==qrGenerationRef.current)return;
+          if(result.status_text==='success'){
+            void stopPolling();setMsg('✅ 登录成功，正在校验数据读取...');
+            setQrState({...emptyQr,statusText:''});void refresh({force:true});return;
           }
-
-          if (pollData.cookies) {
-            pollPayloadRef.current = {
-              ...payload,
-              cookies: pollData.cookies,
-            };
-            setQrState(prev => ({
-              ...prev,
-              initialCookies: pollData.cookies,
-            }));
+          if(result.status_text==='expired'||result.status_text==='failed'){
+            void stopPolling();setQrState(prev=>({...prev,statusText:result.error||'二维码已失效，请刷新二维码'}));return;
           }
-
-          if (pollData.status_text === 'scanned') {
-            setQrState(prev => ({ ...prev, statusText: '📲 已扫码，请在手机上点击确认...' }));
-          } else if (pollData.status_text === 'success') {
-            setQrState(prev => ({ ...prev, statusText: '✅ 登录成功！正在同步...' }));
-            stopPolling();
-            setMsg('✅ 登录成功，正在刷新页面...');
-            setTimeout(() => {
-              setQrState(prev => ({ ...prev, qrUrl: null }));
-              void refresh({ force: true });
-            }, 1500);
-          }
-        } catch (e) {
-          console.error('Polling error:', e);
-          setQrState(prev => ({
-            ...prev,
-            statusText: `轮询失败：${e instanceof Error ? e.message : String(e)}`,
-          }));
-        }
-      }, 3000);
-
-    } catch (e) {
-      setMsg('❌ ' + (e instanceof Error ? e.message : String(e)));
-      setQrState(prev => ({ ...prev, loading: false, statusText: '' }));
+          setQrState(prev=>({...prev,statusText:result.status_text==='scanned'?'已扫码，请在手机上确认':result.status_text==='verifying'?'已确认，正在校验登录状态...':'请使用小红书 App 扫码并确认'}));
+        },
+        error=>{
+          if(generation!==qrGenerationRef.current)return;
+          void stopPolling();setQrState(prev=>({...prev,statusText:error instanceof Error?error.message:'扫码登录检查失败，请刷新二维码'}));
+        },
+      );
+    }catch(error){
+      if(generation!==qrGenerationRef.current)return;
+      setMsg('❌ '+(error instanceof Error?error.message:'生成二维码失败'));setQrState(emptyQr);
     }
   };
-
-  const cancelQrLogin = () => {
-    stopPolling();
-    setQrState({
-      loading: false,
-      qrUrl: null,
-      qrId: null,
-      code: null,
-      a1: null,
-      webid: null,
-      initialCookies: null,
-      statusText: '',
-    });
-  };
+  const cancelQrLogin=()=>{void stopPolling();setQrState(emptyQr);};
 
   useEffect(() => {
     if (!pluginClientId || autoLoginTriedRef.current || status?.set) return;
@@ -258,7 +179,19 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
       }
     };
     void run();
-  }, [pluginClientId, refresh, status?.valid]);
+  }, [pluginClientId, refresh, status?.set]);
+
+  const syncBrowser=async()=>{
+    setSyncingBrowser(true);setMsg('');
+    try{
+      await stopPolling();setQrState(emptyQr);
+      const clientId=(mode==='credential'&&/^xhs_[A-Za-z0-9_-]{8,100}$/.test(input.trim())?input.trim():pluginClientId)||undefined;
+      const response=await fetch('/api/analysis/xhs/login/browser',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({browserInstance:loginBrowser,confirmBrowserControl:true,clientId})});
+      const data=await response.json();if(!response.ok||!data.ok)throw Error(data.error||'同步失败');
+      setMsg('✅ 已同步'+(data.nickname?' '+data.nickname:'')+'，正在校验数据读取...');await refresh({force:true});
+    }catch(error){setMsg('❌ '+(error instanceof Error?error.message:'同步失败'));}
+    finally{setSyncingBrowser(false);}
+  };
 
   const save = async () => {
     if (!input.trim()) return;
@@ -357,6 +290,16 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
         </p>
       )}
 
+      <div className="flex items-center gap-2 rounded-lg border border-border p-2">
+        <select aria-label="已登录的浏览器" value={loginBrowser} onChange={event=>setLoginBrowser(Number(event.target.value))} disabled={syncingBrowser} className="rounded border border-border bg-background p-1 text-xs">
+          <option value={1}>84 · 浏览器 1</option>
+          <option value={2}>84 · 浏览器 2</option>
+        </select>
+        <button onClick={syncBrowser} disabled={syncingBrowser} className="flex-1 rounded bg-primary px-2 py-1.5 text-xs font-medium text-primary-foreground disabled:opacity-50">
+          {syncingBrowser?'同步中...':'复用已登录浏览器'}
+        </button>
+      </div>
+
       {/* 手动输入区 / 扫码入口 */}
       {(!status?.set || showInput) && !qrState.qrUrl && (
         <div className="space-y-3 pt-1 animate-in fade-in slide-in-from-top-1 duration-200">
@@ -429,7 +372,7 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
           <div className="text-sm font-semibold text-foreground">扫码安全登录</div>
           <div className="bg-white p-2 rounded-lg shadow-inner border border-zinc-100">
             <img 
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrState.qrUrl)}`}
+              src={qrState.qrUrl}
               alt="小红书登录二维码"
               className="w-48 h-48"
             />
@@ -438,6 +381,7 @@ function CookiePanel({ onStatusChange }: { onStatusChange: (valid: boolean) => v
             <p className="text-xs font-medium text-primary animate-pulse">{qrState.statusText}</p>
             <p className="text-[10px] text-muted-foreground">该二维码仅用于登录验证，不记录您的账号密码</p>
           </div>
+          <button onClick={startQrLogin} className="text-xs text-primary underline">重新生成二维码</button>
           <button 
             onClick={cancelQrLogin}
             className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
