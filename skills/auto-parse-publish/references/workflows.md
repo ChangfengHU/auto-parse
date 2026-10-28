@@ -1,15 +1,15 @@
 # 工作流执行
 
-先读 targets.json 找ID，再 workflow_get读取最新定义。账号以实际保护节点参数为准，不把示例流程当任意账号通用流程。改账号需用户授权、验证登录身份并经正式copy后改副本；不改冻结原件。
+先读 targets.json选择该自媒体平台的MCP，再用该连接的workflow_get读取最新定义。账号以实际保护节点参数为准，不把示例流程当任意账号通用流程。发布连接不提供流程编辑工具；改账号需通过所有者独立维护连接验证登录身份，经正式copy后改副本并更新允许列表，不改冻结原件。
 
 ## 工具顺序
 
-1. workflow_capabilities({}) 与 workflow_node_catalog({type:节点类型})。
+1. 在目标平台连接调用workflow_capabilities({})；workflow_list只列该平台批准流程，不含其他平台和研究任务。
 2. workflow_get({workflowId})；核对vars、目标账号及directPublish条件。
 3. workflow_open_session({workflowId,browserInstance,vars,confirmBrowserControl:true})。vars的值全部为字符串。账号控制须在任务授权内。
 4. workflow_run_step({sessionId,expectedRevision,requestId,confirmExecution:true})逐步执行，或workflow_run同样参数执行剩余节点。操作requestId与内容requestId分开稳定保存。预览阶段用directPublish:"false"；只有本次用户授权公开发布才用"true"。
 5. workflow_get_session({sessionId,includeScreenshot:false})轮询，必要时includeScreenshot:true实际审图；按返回sessionRevision继续，不猜修订号。
-6. workflow_close_session({sessionId})释放任务。遇到未知结果先读取原任务证据，勿盲目新建。
+6. 在原平台连接workflow_close_session({sessionId})释放任务。会话按平台绑定，不能在其他平台或通用端点转接。遇到未知结果先读取原任务证据，勿盲目新建。
 
 完成节点不能在同一会话重放或修改。false分支完成后currentStep可能已跳过发布节点；如需后来公开发布，先核实准备证明是否仍可用于正确节点，不能把false改true后直接从头重跑。不在本插件中添加独立发布脚本。
 

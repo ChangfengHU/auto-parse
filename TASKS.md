@@ -115,6 +115,15 @@
 
 ## Done
 
+- [WORKFLOW-009] 自动发布插件按自媒体平台分域
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-28
+  Log: dev-log/2026-10-28-platform-publication-mcp.md
+  Result: 三个平台独立端点/认证/会话隔离已部署；110项回归、真实拒绝检查、新版0.2.0固定包与原生隔离安装通过。
+
+
+
 - [WORKFLOW-008] 自动发布插件与能力广场入驻
   Status: Done
   Owner: codex
