@@ -1,0 +1,68 @@
+{
+  "schema": "auto-parse-publish-routing/v1",
+  "version": "0.2.0",
+  "verifiedOn": "2026-10-28",
+  "runtimeAuthority": "live MCP schemas + Supabase rpa_workflows; this is a non-executable routing index",
+  "providers": [
+    {
+      "key": "douyin-video",
+      "server": "auto-parse-douyin-publish",
+      "capabilityVersion": "0.1.0",
+      "workflowId": "34f421be-f97c-498a-9c80-5214564abd1c",
+      "browserInstance": 2,
+      "reference": "douyin-video.md",
+      "acceptance": "real_creation_receipt_verified; moderation distinct",
+      "platform": "douyin"
+    },
+    {
+      "key": "xiaohongshu-video",
+      "server": "auto-parse-xiaohongshu-publish",
+      "capabilityVersion": "0.1.0",
+      "workflowId": "6105efc6-7e54-4c85-acfe-1a37e0d5093f",
+      "browserInstance": 1,
+      "reference": "workflows.md",
+      "acceptance": "real_creation_and_creator_list_verified; account/AI guard fixed in workflow",
+      "platform": "xiaohongshu"
+    },
+    {
+      "key": "xiaohongshu-image-text",
+      "server": "auto-parse-xiaohongshu-publish",
+      "capabilityVersion": "0.1.0",
+      "workflowId": "1dc07adf-65a1-48f0-98ab-31cfcafc7fd3",
+      "browserInstance": 1,
+      "reference": "workflows.md",
+      "acceptance": "real_browser_preparation_verified; public_submission_not_accepted",
+      "platform": "xiaohongshu"
+    },
+    {
+      "key": "douyin-image-text",
+      "server": "auto-parse-douyin-publish",
+      "capabilityVersion": "0.1.0",
+      "workflowId": "53197d8e-a89d-4d1a-bb8d-fc114156f30f",
+      "browserInstance": 2,
+      "reference": "workflows.md",
+      "acceptance": "real_browser_preparation_verified; public_submission_not_accepted",
+      "platform": "douyin"
+    },
+    {
+      "key": "x-text",
+      "server": "auto-parse-x-publish",
+      "capabilityVersion": "0.1.0",
+      "workflowId": "e3d8f5e6-d859-4424-b6b6-a85c9aefb551",
+      "browserInstance": 2,
+      "reference": "workflows.md",
+      "acceptance": "text_only_preparation_verified; shared_executor_single_image_creation_verified",
+      "platform": "x"
+    },
+    {
+      "key": "x-single-image",
+      "server": "auto-parse-x-publish",
+      "capabilityVersion": "0.1.0",
+      "workflowId": "8b626a95-e939-4fa0-a685-7aff71cb76dd",
+      "browserInstance": 2,
+      "reference": "workflows.md",
+      "acceptance": "real_creation_and_logged_in_permalink_verified; anonymous_visibility_not_tested",
+      "platform": "x"
+    }
+  ]
+}
