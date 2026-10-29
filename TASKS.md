@@ -9,7 +9,7 @@
   Owner: codex
   Updated: 2026-10-29
   Log: dev-log/2026-10-29-wechat-drafts.md
-  Next: 官方草稿7工具已部署、插件0.3.0已入驻；38项回归、类型/Lint/构建与公网MCP通过。真实微信返回40164，待出口IP白名单后素材上传、草稿创建及回读验收。
+  Next: 文章草稿MCP已上线；用户指定push站文章为来源，已调研静态newspic、GIF与Live方案并展示静态版式示意，尚未新增执行代码。待白名单后真实草稿验收，优先静态贴图与GIF，再验证两平台原生Live。
 
 
 - [WORKFLOW-006] X 文字发推工作流与安全预览
