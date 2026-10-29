@@ -1,8 +1,8 @@
 {
   "schema": "auto-parse-publish-routing/v1",
-  "version": "0.2.0",
-  "verifiedOn": "2026-10-28",
-  "runtimeAuthority": "live MCP schemas + Supabase rpa_workflows; this is a non-executable routing index",
+  "version": "0.3.0",
+  "verifiedOn": "2026-10-29",
+  "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers, official WeChat API for drafts; non-executable index",
   "providers": [
     {
       "key": "douyin-video",
@@ -63,6 +63,16 @@
       "reference": "workflows.md",
       "acceptance": "real_creation_and_logged_in_permalink_verified; anonymous_visibility_not_tested",
       "platform": "x"
+    },
+    {
+      "key": "wechat-draft",
+      "platform": "wechat",
+      "server": "auto-parse-wechat-publish",
+      "capabilityVersion": "0.1.0",
+      "reference": "wechat-drafts.md",
+      "transport": "official_https_api",
+      "browserRequired": false,
+      "acceptance": "implemented_and_mock_verified; real_api_blocked_by_IP_whitelist_40164; draft_creation_not_yet_verified"
     }
   ]
 }
