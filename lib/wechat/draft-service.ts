@@ -1,3 +1,4 @@
+import {wechatFetch,wechatNetworkInfo,wechatTransportKey} from './http';
 import {createHash,randomUUID} from 'node:crypto';
 import {readFileSync,mkdirSync,openSync,writeFileSync,renameSync,unlinkSync,closeSync} from 'node:fs';
 import path from 'node:path';
@@ -9,7 +10,7 @@ type Article={title:string;content:string;author?:string;digest?:string;thumbMed
 const API='https://api.weixin.qq.com/cgi-bin/';
 const IMAGE_LIMIT=2*1024*1024;
 const defaultHosts=['resource.vyibc.com','cdn.vyibc.com','mmbiz.qpic.cn'];
-let tokenCache:{appId:string;secretHash:string;token:string;expires:number}|undefined;
+let tokenCache:{appId:string;secretHash:string;transportKey:string;token:string;expires:number}|undefined;
 let tokenFlight:Promise<string>|undefined;
 
 export class WechatApiError extends Error{
@@ -37,8 +38,8 @@ function safeError(data:Json){
 }
 async function requestJson(url:URL,init:RequestInit={}):Promise<Json>{
  let response:Response;
- try{response=await fetch(url,{...init,redirect:'error',signal:AbortSignal.timeout(25000)});}
- catch{throw Error('wechat_transport_result_unknown');}
+ try{response=await wechatFetch(url,{...init,redirect:'error',signal:AbortSignal.timeout(25000)});}
+ catch(error){if(error instanceof Error&&error.message.startsWith('wechat_proxy_'))throw error;throw Error('wechat_transport_result_unknown');}
  if(!response.ok)throw Error('wechat_http_result_unknown');
  let data:Json;
  try{data=await response.json();}catch{throw Error('wechat_response_result_unknown');}
@@ -47,14 +48,14 @@ async function requestJson(url:URL,init:RequestInit={}):Promise<Json>{
  return data;
 }
 async function accessToken(c:Config){
- const secretHash=createHash('sha256').update(c.appSecret).digest('hex');
- if(tokenCache?.appId===c.appId&&tokenCache.secretHash===secretHash&&tokenCache.expires>Date.now()+120000)return tokenCache.token;
+ const secretHash=createHash('sha256').update(c.appSecret).digest('hex'),transportKey=wechatTransportKey();
+ if(tokenCache?.appId===c.appId&&tokenCache.secretHash===secretHash&&tokenCache.transportKey===transportKey&&tokenCache.expires>Date.now()+120000)return tokenCache.token;
  // One configured account per process; stable_token(force_refresh:false) does not invalidate other consumers.
  if(tokenFlight)return tokenFlight;
  tokenFlight=(async()=>{
   const data=await requestJson(new URL(API+'stable_token'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grant_type:'client_credential',appid:c.appId,secret:c.appSecret,force_refresh:false})});
   if(typeof data.access_token!=='string'||!Number.isFinite(Number(data.expires_in)))throw Error('wechat_invalid_token_response');
-  tokenCache={appId:c.appId,secretHash,token:data.access_token,expires:Date.now()+Number(data.expires_in)*1000};
+  tokenCache={appId:c.appId,secretHash,transportKey,token:data.access_token,expires:Date.now()+Number(data.expires_in)*1000};
   return tokenCache.token;
  })();
  try{return await tokenFlight;}finally{tokenFlight=undefined;}
@@ -119,7 +120,7 @@ async function imageBytes(c:Config,value:unknown){
  let url=assetUrl(c,value);
  for(let hop=0;hop<4;hop++){
   let res:Response;
-  try{res=await fetch(url,{redirect:'manual',signal:AbortSignal.timeout(20000)});}catch{throw Error('wechat_image_download_failed');}
+  try{res=await wechatFetch(url,{redirect:'manual',signal:AbortSignal.timeout(20000)});}catch{throw Error('wechat_image_download_failed');}
   if(res.status>=300&&res.status<400){const next=res.headers.get('location');await res.body?.cancel();if(!next)throw Error('wechat_image_redirect_invalid');url=assetUrl(c,new URL(next,url).href);continue;}
   if(!res.ok||!res.body)throw Error('wechat_image_download_failed');
   if(Number(res.headers.get('content-length'))>IMAGE_LIMIT){await res.body.cancel();throw Error('wechat_image_too_large');}
@@ -195,7 +196,7 @@ async function createDraft(c:Config,input:Json){
 }
 export async function callWechatDraftTool(name:string,input:Json):Promise<Json>{
  const c=config();
- if(name==='wechat_capabilities')return {platform:'wechat',account:{appId:c.appId,name:c.name},transport:'official_https_api',browserRequired:false,draftOnly:true,publicPublish:false,massSend:false,formats:['news_html'],articleLimit:8,imageMaxBytes:IMAGE_LIMIT,imageFormats:['jpeg','png'],assetHosts:c.assetHosts||defaultHosts,tokenStrategy:'stable_token_force_refresh_false',requestLedger:'restart_durable_single_host',unknownResult:'Check original request and official draft list; never blindly resubmit.',limits:'Account official API permissions and service egress IP whitelist are required. Draft saved is not public publication.'};
+ if(name==='wechat_capabilities')return {platform:'wechat',account:{appId:c.appId,name:c.name},transport:'official_https_api',network:wechatNetworkInfo(),browserRequired:false,draftOnly:true,publicPublish:false,massSend:false,formats:['news_html'],articleLimit:8,imageMaxBytes:IMAGE_LIMIT,imageFormats:['jpeg','png'],assetHosts:c.assetHosts||defaultHosts,tokenStrategy:'stable_token_force_refresh_false',requestLedger:'restart_durable_single_host',unknownResult:'Check original request and official draft list; never blindly resubmit.',limits:'Account official API permissions and service egress IP whitelist are required. Draft saved is not public publication.'};
  if(name==='wechat_account_status'){const count=await api(c,'draft/count');return {ok:true,account:{appId:c.appId,name:c.name},draftCount:count.total_count,checkedAt:new Date().toISOString()};}
  if(name==='wechat_upload_image'){
   if(input.purpose!=='cover'&&input.purpose!=='inline')throw Error('wechat_invalid_image_purpose');

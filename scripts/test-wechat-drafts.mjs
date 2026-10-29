@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import os from 'node:os';
+import {createServer} from 'node:http';
 import { createRequire } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
 const root = path.resolve(new URL('..', import.meta.url).pathname);
@@ -46,7 +47,7 @@ function setup(replies=[]){
   if(next instanceof Error)throw next;
   return Response.json(next);
  };
- const load=loader({}, {fetch:fakeFetch,process:{...process,cwd:()=>cwd,env:{}}});
+ const load=loader({}, {fetch:fakeFetch,process:{...process,cwd:()=>cwd,env:{WECHAT_HTTPS_PROXY:'http://127.0.0.1:7890'}}});
  const service=load('lib/wechat/draft-service.ts');
  const r={...service,calls,cwd,load,replies};suites.push(r);return r;
 }
@@ -79,7 +80,7 @@ test('creates exactly one official draft and replays receipt after service reloa
  const r=setup([token,{media_id:'draft-real-id'}]),a=await create(r);
  assert.equal(a.status,'draft_saved');assert.equal(a.published,false);
  const again=await create(r);assert.equal(again.replayed,true);assert.equal(r.calls.length,2);
- const reload=loader({}, {fetch:async()=>Response.json(token),process:{...process,cwd:()=>r.cwd,env:{}}})('lib/wechat/draft-service.ts');
+ const reload=loader({}, {fetch:async()=>Response.json(token),process:{...process,cwd:()=>r.cwd,env:{WECHAT_HTTPS_PROXY:'http://127.0.0.1:7890'}}})('lib/wechat/draft-service.ts');
  const restored=await reload.callWechatDraftTool('wechat_create_draft',{requestId:'create-1',confirmDraft:true,articles:[article]});
  assert.equal(restored.media_id,'draft-real-id');assert.equal(restored.replayed,true);
  const dir=path.join(r.cwd,'.data/wechat-drafts',fixture.appId),file=fs.readdirSync(dir).find(x=>x.endsWith('.json'));
@@ -169,4 +170,50 @@ test('read tools use draft/get, count, and bounded list only; unsupported publis
  await assert.rejects(r.callWechatDraftTool('wechat_list_drafts',{count:21}),/pagination/);
  await assert.rejects(r.callWechatDraftTool('publish',{}),/tool_not_allowed/);
  assert.equal(r.calls.length,4);
+});
+
+test('official JSON requests, uploads and asset downloads all carry an explicit proxy dispatcher',async()=>{
+ const r=setup([token,()=>new Response(png),{media_id:'via-proxy'}]);
+ await r.callWechatDraftTool('wechat_upload_image',{requestId:'proxy-upload',imageUrl:'https://resource.vyibc.com/a.png',purpose:'cover'});
+ assert.equal(r.calls.length,3);
+ for(const c of r.calls)assert(c.init.dispatcher,'request bypassed the proxy');
+ assert.equal(r.calls[0].init.dispatcher,r.calls[2].init.dispatcher);
+ assert.equal((await r.callWechatDraftTool('wechat_capabilities',{})).network.directFallback,false);
+});
+test('missing/invalid proxy config never attempts a direct request',async()=>{
+ for(const uri of ['', 'socks5://127.0.0.1:1080', 'http://proxy.test/path']){
+  let calls=0;
+  const load=loader({}, {process:{...process,cwd:()=>'/unused',env:{WECHAT_HTTPS_PROXY:uri}},fetch:async()=>{calls++;return Response.json({});}});
+  await assert.rejects(load('lib/wechat/http.ts').wechatFetch(new URL('https://api.weixin.qq.com/')),/wechat_proxy_(not_configured|configuration_invalid)/);
+  assert.equal(calls,0);
+ }
+});
+test('proxy transport error is not retried using the direct dispatcher',async()=>{
+ const r=setup([Error('proxy unavailable')]);
+ await assert.rejects(r.callWechatDraftTool('wechat_account_status',{}),/wechat_transport_result_unknown/);
+ assert.equal(r.calls.length,1);assert(r.calls[0].init.dispatcher);
+});
+test('proxy credentials stay internal, transport changes invalidate the token cache',async()=>{
+ const r=setup([token,{total_count:1},token,{total_count:1}]);
+ const testEnv={WECHAT_HTTPS_PROXY:'http://user:pass@proxy.test:7890'};
+ const load=loader({}, {process:{...process,cwd:()=>r.cwd,env:testEnv},fetch:async(url,init)=>{r.calls.push({url:String(url),init});return Response.json(r.replies.shift());}});
+ const service=load('lib/wechat/draft-service.ts');
+ const cap=await service.callWechatDraftTool('wechat_capabilities',{});
+ assert(!JSON.stringify(cap).includes('user:pass'));assert(!JSON.stringify(cap).includes('proxy.test'));
+ await service.callWechatDraftTool('wechat_account_status',{});
+ testEnv.WECHAT_HTTPS_PROXY='http://another-user:another-password@proxy.test:7890';
+ await service.callWechatDraftTool('wechat_account_status',{});
+ assert.equal(r.calls.filter(c=>c.url.endsWith('/stable_token')).length,2);
+});
+
+test('real failed proxy connection cannot fall back and reach the origin server',async()=>{
+ let reached=0;
+ const origin=createServer((req,res)=>{reached++;res.end('direct connection forbidden');});
+ await new Promise(resolve=>origin.listen(0,'127.0.0.1',resolve));
+ try{
+  const load=loader({}, {process:{...process,env:{WECHAT_HTTPS_PROXY:'http://127.0.0.1:1'}}});
+  const transport=load('lib/wechat/http.ts');
+  await assert.rejects(transport.wechatFetch(new URL('http://127.0.0.1:'+origin.address().port),{signal:AbortSignal.timeout(2000)}));
+  assert.equal(reached,0);
+ }finally{await new Promise(resolve=>origin.close(resolve));}
 });
