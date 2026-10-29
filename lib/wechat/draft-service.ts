@@ -2,12 +2,13 @@ import {wechatFetch,wechatNetworkInfo,wechatTransportKey} from './http';
 import {createHash,randomUUID} from 'node:crypto';
 import {readFileSync,mkdirSync,openSync,writeFileSync,renameSync,unlinkSync,closeSync} from 'node:fs';
 import path from 'node:path';
+import {isIP} from 'node:net';
 
 type Config={appId:string;appSecret:string;name:string;assetHosts?:string[]};
 type Json=Record<string,unknown>;
 type Ledger={requestId:string;appId:string;operation:string;fingerprint:string;state:'submitting'|'completed'|'failed'|'unknown';updatedAt:string;result?:Json;error?:Json};
 type DraftImage={imageMediaId?:string;imageUrl?:string};
-type Article={articleType?:'news'|'newspic';images?:DraftImage[];title:string;content:string;author?:string;digest?:string;thumbMediaId?:string;coverImageUrl?:string;contentSourceUrl?:string;needOpenComment?:boolean;onlyFansCanComment?:boolean};
+type Article={articleType?:'news'|'newspic';images?:DraftImage[];liveCoverVideoUrl?:string;title:string;content:string;author?:string;digest?:string;thumbMediaId?:string;coverImageUrl?:string;contentSourceUrl?:string;needOpenComment?:boolean;onlyFansCanComment?:boolean};
 const API='https://api.weixin.qq.com/cgi-bin/';
 const IMAGE_LIMIT=10*1024*1024;
 const INLINE_IMAGE_LIMIT=1024*1024;
@@ -150,9 +151,16 @@ async function upload(c:Config,url:string,purpose:'cover'|'inline'|'newspic',id:
  return mutate(c,id,'upload_image',{url,purpose},async()=>{
   const image=await imageBytes(c,url,purpose==='inline'?INLINE_IMAGE_LIMIT:IMAGE_LIMIT),form=new FormData();
   form.set('media',new Blob([new Uint8Array(image.bytes)],{type:image.type}),'image.'+image.ext);
-  const result=await api(c,purpose!=='inline'?'material/add_material?type=image':'media/uploadimg',undefined,form);
-  if(purpose!=='inline'&&typeof result.media_id!=='string'||purpose==='inline'&&typeof result.url!=='string')throw Error('wechat_upload_response_result_unknown');
-  return {purpose,...result};
+  const send=async()=>{const result=await api(c,purpose!=='inline'?'material/add_material?type=image':'media/uploadimg',undefined,form);
+   if(purpose!=='inline'&&typeof result.media_id!=='string'||purpose==='inline'&&typeof result.url!=='string')throw Error('wechat_upload_response_result_unknown');return result;};
+  if(purpose==='inline')return {purpose,...await send()};
+  // Permanent material is reused only for byte-identical data on the same account.
+  // A stale/deleted upstream material must be reconciled; never bypass an unknown upload.
+  const sha=createHash('sha256').update(image.bytes).digest('hex');
+  const saved=await mutate(c,'material-sha256:'+sha,'upload_permanent_content',{sha},send);
+  const {requestId:ignoredRequest,replayed:cacheHit,...result}=saved;void ignoredRequest;
+  return {purpose,...result,materialReused:cacheHit===true};
+
  });
 }
 function validateArticles(value:unknown,c:Config):Article[]{
@@ -166,20 +174,22 @@ function validateArticles(value:unknown,c:Config):Article[]{
   if(a.digest!==undefined&&(typeof a.digest!=='string'||Array.from(a.digest).length>120))throw Error('wechat_invalid_article_digest');
   if(a.articleType!==undefined&&a.articleType!=='news'&&a.articleType!=='newspic')throw Error('wechat_invalid_article_type');
   if(a.articleType==='newspic'){
+   if(a.liveCoverVideoUrl!==undefined)assetUrl(c,a.liveCoverVideoUrl);
    if(Array.from(a.title).length>32)throw Error('wechat_invalid_article_title');
    if(/<[^>]*>/.test(a.content))throw Error('wechat_invalid_newspic_plain_text');
    if(a.thumbMediaId!==undefined||a.coverImageUrl!==undefined)throw Error('wechat_cover_newspic_uses_first_image');
    if(!Array.isArray(a.images)||a.images.length<1||a.images.length>20)throw Error('wechat_invalid_newspic_images_count');
-   const images=a.images.map(image=>{
+   const images=a.images.map((image,imageIndex)=>{try{
     if(!image||typeof image!=='object'||Array.isArray(image))throw Error('wechat_invalid_newspic_image');
     if(Object.keys(image).some(key=>key!=='imageMediaId'&&key!=='imageUrl'))throw Error('wechat_invalid_newspic_image');
     if(Boolean(image.imageMediaId)===Boolean(image.imageUrl))throw Error('wechat_invalid_newspic_image_requires_one_id_or_url');
     if(image.imageMediaId&&(typeof image.imageMediaId!=='string'||image.imageMediaId.length>256))throw Error('wechat_invalid_image_media_id');
     if(image.imageUrl)assetUrl(c,image.imageUrl);
     return {...image};
-   });
+   }catch(error){if(error instanceof Error&&/^wechat_/.test(error.message))throw new WechatImageError(error.message,'请检查该图片的链接、格式和素材ID。',imageIndex+1);throw error;}});
    return {...a,images};
   }
+  if(a.liveCoverVideoUrl!==undefined)throw Error('wechat_invalid_live_reference_for_news');
   if(a.images!==undefined)throw Error('wechat_invalid_news_images_use_html');
   if(Boolean(a.thumbMediaId)===Boolean(a.coverImageUrl))throw Error('wechat_cover_requires_exactly_one_media_id_or_url');
   if(a.thumbMediaId&&(typeof a.thumbMediaId!=='string'||a.thumbMediaId.length>256))throw Error('wechat_invalid_cover_media_id');
@@ -208,7 +218,7 @@ async function createDraft(c:Config,input:Json){
     for(let image=0;image<a.images!.length;image++){
      const source=a.images![image];
      let mediaId=source.imageMediaId;
-     if(!mediaId){try{mediaId=String((await upload(c,source.imageUrl!,'newspic',id+':image:'+index+':'+image)).media_id);}catch(error){if(error instanceof WechatImageError)throw new WechatImageError(error.code,error.hint,image+1,error.httpStatus);if(error instanceof WechatApiError)error.imageIndex=image+1;throw error;}}
+     if(!mediaId){try{mediaId=String((await upload(c,source.imageUrl!,'newspic',id+':image:'+index+':'+image)).media_id);}catch(error){if(error instanceof WechatImageError)throw new WechatImageError(error.code,error.hint,image+1,error.httpStatus);if(error instanceof WechatApiError)error.imageIndex=image+1;else if(error instanceof Error&&/^wechat_(image_|unsupported_|untrusted_|invalid_image_)/.test(error.message))throw new WechatImageError(error.message,'请检查该图片链接、格式和大小。',image+1);throw error;}}
      imageList.push({image_media_id:mediaId});
     }
     prepared.push({article_type:'newspic',title:a.title,content:a.content,image_info:{image_list:imageList},...(a.author?{author:a.author}:{}),...(a.needOpenComment!==undefined?{need_open_comment:a.needOpenComment?1:0}:{}),...(a.onlyFansCanComment!==undefined?{only_fans_can_comment:a.onlyFansCanComment?1:0}:{})});
@@ -228,12 +238,15 @@ async function createDraft(c:Config,input:Json){
   }
   const draft=await api(c,'draft/add',{articles:prepared});
   if(typeof draft.media_id!=='string'||!draft.media_id)throw Error('wechat_draft_response_result_unknown');
-  return {status:'draft_saved',media_id:draft.media_id,account:{appId:c.appId,name:c.name},articleCount:articles.length,createdAt:new Date().toISOString(),published:false};
+  return {status:'draft_saved',media_id:draft.media_id,account:{appId:c.appId,name:c.name},articleCount:articles.length,...articles.some(a=>a.liveCoverVideoUrl)?{auxiliaryMetadata:articles.map((a,index)=>a.liveCoverVideoUrl?{articleIndex:index,liveCoverVideoUrl:a.liveCoverVideoUrl,storedOnly:true}:null).filter(Boolean)}:{},createdAt:new Date().toISOString(),published:false};
  });
 }
 export async function callWechatDraftTool(name:string,input:Json):Promise<Json>{
  const c=config();
- if(name==='wechat_capabilities')return {platform:'wechat',account:{appId:c.appId,name:c.name},transport:'official_https_api',network:wechatNetworkInfo(),browserRequired:false,draftOnly:false,publicPublish:'official_api_requires_account_permission',massSend:false,formats:['news_html','newspic'],newspic:{imageLimit:20,contentMaxCharsExclusive:20000,contentMaxBytesExclusive:1048576,contentOverflow:'reject',upstreamLimit:'WeChat may apply stricter limits; no silent truncation',firstImageIsCover:true,animatedGifVerified:false,livePhoto:false},inlineImageMaxBytes:INLINE_IMAGE_LIMIT,articleLimit:8,imageMaxBytes:IMAGE_LIMIT,imageFormats:['jpeg','png','gif'],inlineImageFormats:['jpeg','png'],recommendedTimeoutMs:120000,titleMaxChars:{news:32,newspic:32},assetHosts:c.assetHosts||defaultHosts,tokenStrategy:'stable_token_force_refresh_false',requestLedger:'restart_durable_single_host',unknownResult:'Check original request and official draft list; never blindly resubmit.',limits:'Account official API permissions and service egress IP whitelist are required. Draft saved is not public publication.'};
+ if(name==='wechat_capabilities'){
+  let egress:Json|undefined;
+  if(input.includeEgress===true){try{const response=await wechatFetch(new URL('https://api.ipify.org/?format=json'),{redirect:'error',signal:AbortSignal.timeout(10000)});if(!response.ok)throw Error();const data=await response.json() as Json;if(typeof data.ip!=='string'||!isIP(data.ip))throw Error();egress={ip:data.ip,checkedAt:new Date().toISOString(),probeHost:'api.ipify.org',note:'Proxy routing may differ by destination; WeChat-observed IP remains authoritative.'};}catch{egress={error:'wechat_egress_probe_failed',note:'Check configured proxy and verify WeChat-observed IP.'};}}
+  return {platform:'wechat',account:{appId:c.appId,name:c.name},transport:'official_https_api',network:{...wechatNetworkInfo(),...(egress?{egress}:{})},browserRequired:false,draftOnly:false,publicPublish:'official_api_requires_account_permission',massSend:false,formats:['news_html','newspic'],newspic:{imageLimit:20,contentMaxCharsExclusive:20000,contentMaxBytesExclusive:1048576,contentOverflow:'reject',upstreamLimit:'WeChat may apply stricter limits; no silent truncation',firstImageIsCover:true,animatedGifVerified:false,livePhoto:false,liveCoverVideoUrl:'stored_in_request_ledger_only_no_wechat_upload'},inlineImageMaxBytes:INLINE_IMAGE_LIMIT,articleLimit:8,imageMaxBytes:IMAGE_LIMIT,imageFormats:['jpeg','png','gif'],inlineImageFormats:['jpeg','png'],recommendedTimeoutMs:120000,titleMaxChars:{news:32,newspic:32},assetHosts:c.assetHosts||defaultHosts,tokenStrategy:'stable_token_force_refresh_false',requestLedger:'restart_durable_single_host',unknownResult:'Check original request and official draft list; never blindly resubmit.',limits:'Account official API permissions and service egress IP whitelist are required. Draft saved is not public publication.'};}
  if(name==='wechat_account_status'){const count=await api(c,'draft/count');return {ok:true,account:{appId:c.appId,name:c.name},draftCount:count.total_count,checkedAt:new Date().toISOString()};}
  if(name==='wechat_upload_image'){
   if(input.purpose!=='cover'&&input.purpose!=='inline'&&input.purpose!=='newspic')throw Error('wechat_invalid_image_purpose');
