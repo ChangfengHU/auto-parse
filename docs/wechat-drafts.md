@@ -41,3 +41,6 @@
 ## v2b阶段更新（2026-10-29）
 公众号MCP实际serverVersion0.2.0，10工具。wechat_delete_draft指定mediaId、稳定requestId、confirmDelete=true，已对本次专用测试稿创建/删除/回查实测；不得删除其他草稿。wechat_publish_draft按mediaId单独调用官方freepublish/submit，需confirmPublish=true和独立requestId，同一账号与草稿具有持久防重；wechat_publish_status查询publish_id。当前公众号官方权限只读探测返回48001，尚不可使用官方发表，无浏览器回退，无公开发表测试。提交不代表发表成功。
 wechat_get_draft/list_drafts新增normalized:true中性articles包装，默认保持兼容原结构。标题按官方文档上限32码点；贴图正文取消本地1000限制，少于20000 UTF-16代码单元及1MiB则发给微信，超限拒绝不截断。真实1400字测试被微信45166拒绝；错误原因及微信实际文字上限不能仅凭一次响应判断。
+
+## v0.2.1补充
+公众号MCP版本0.2.1。wechat_capabilities可选includeEgress，探测目标api.ipify.org、记录时间，代理可能按目标分流。永久素材以同账号和文件字节SHA-256建立持久防重，真实上传同一图两次得到相同media_id和materialReused=true；历史上传账本未自动回填缓存，素材被外部删除时需要核对。newspic可设置liveCoverVideoUrl，限定可信素材域名、只写本机请求账本与创建回执，绝不声明已上传或能发布Live。真实临时草稿验证保存后已删除。61项回归、类型/Lint、构建通过；GIF播放、真实贴图正文上限和当前账号公开发表仍未验收。

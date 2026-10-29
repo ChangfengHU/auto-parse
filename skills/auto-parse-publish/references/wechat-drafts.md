@@ -29,7 +29,7 @@
 ## 已验证范围与网络
 2026-10-29已完成官方认证、永久封面上传、一篇接入验证文章草稿创建、同media_id官方回读，以及同requestId重放返回原回执。同日已通过同一生产MCP创建8张早报原生贴图草稿，官方回读article_type=newspic；逐项比对8个永久图片ID顺序与首图封面，同请求重放返回原media_id，草稿仅增加1。此验证不代表已成功公开发表、群发、GIF播放或原生Live Photo。不得为了确认连接反复创建测试草稿，优先查询账号状态与已有回执。
 服务端通过WECHAT_HTTPS_PROXY显式代理调用；代理缺失、配置无效或连接失败均不回退直连。代理地址及其认证配置由受信任服务端维护，不能作为MCP工具参数修改，不向普通输出回显。公众号AppSecret与MCP Bearer令牌是两种不同凭据。
-插件0.3.3包含v2调用指南；公众号Hub组件固定0.2.0，其他三个组件仍为0.1.0。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
+插件0.3.4包含v2调用指南；公众号Hub组件固定0.2.1，其他三个组件仍为0.1.0。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
 
 ## 原生贴图调用示例
 ~~~json
@@ -55,3 +55,9 @@ wechat_publish_draft({requestId,mediaId,confirmPublish:true})调用官方freepub
 wechat_get_draft和wechat_list_drafts可传normalized:true返回中性articles结构；默认保留原样。
 能力声明的recommendedTimeoutMs为120000。超时后先查询原requestId状态和官方草稿箱；unknown或submitting不得更换ID盲目重试。
 1400字测试返回微信45166，不能只凭这个错误判定长度上限。不得静默截断，微信如拒绝则原样返回错误码。
+
+## 诊断与素材复用
+wechat_capabilities({includeEgress:true})通过代理访问api.ipify.org并回报探测IP和时间。代理可按目标分流，该IP不保证等于微信看到的出口；应以微信错误中的出口或同路验证为准。
+永久图片以下载字节SHA-256在同一公众号下去重，内容变化不会沿用旧素材；相同内容跨请求返回相同素材ID及materialReused:true。缓存对应微信素材若被外部删除，应先核对，不能绕过未知提交状态盲目重传。源码以前的上传账本不会自动回填去重缓存。
+newspic可传liveCoverVideoUrl（受信任素材域名HTTPS）；此值仅保存至本机请求账本和创建回执的auxiliaryMetadata，wechat_draft_request_status按原requestId读取。它不会上传视频或在微信生成Live Photo；素材链接有效性及最终发布未验证。
+本地校验和图片错误返回code、message、hint；贴图相关图片校验或上传错误可含1起始imageIndex；下载HTTP失败可含httpStatus。微信业务错误保留微信code并返回中文说明，仍须参照具体场景。

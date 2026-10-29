@@ -328,3 +328,33 @@ test('wechat business error permission 48001 is preserved and never reports succ
  await assert.rejects(r.callWechatDraftTool('wechat_publish_draft',{requestId:'denied-pub',mediaId:'draft',confirmPublish:true}),e=>e.code===48001);
  assert.equal((await r.callWechatDraftTool('wechat_draft_request_status',{requestId:'denied-pub'})).state,'failed');
 });
+
+test('identical permanent image bytes are reused across separate requests on the same account',async()=>{
+ const r=setup([token,()=>new Response(png),{media_id:'shared-material'},()=>new Response(png)]);
+ const a={imageUrl:'https://resource.vyibc.com/a.png',purpose:'newspic'};
+ const first=await r.callWechatDraftTool('wechat_upload_image',{...a,requestId:'cache-first'});
+ const next=await r.callWechatDraftTool('wechat_upload_image',{...a,requestId:'cache-next'});
+ assert.equal(first.media_id,'shared-material');assert.equal(next.media_id,'shared-material');assert.equal(next.materialReused,true);
+ assert.equal(r.calls.filter(c=>new URL(c.url).pathname.endsWith('/material/add_material')).length,1);
+});
+test('explicit egress probe uses configured proxy and reports probe destination',async()=>{
+ const r=setup([{ip:'203.0.113.7'}]);const cap=await r.callWechatDraftTool('wechat_capabilities',{includeEgress:true});
+ assert.equal(cap.network.egress.ip,'203.0.113.7');assert.equal(cap.network.egress.probeHost,'api.ipify.org');assert(r.calls[0].init.dispatcher);
+ assert(cap.network.egress.note.includes('differ'));
+});
+
+test('invalid image reference reports its 1-based position before any network request',async()=>{
+ const r=setup();const a={...newspic,images:[{imageMediaId:'valid'},{imageUrl:'https://evil.test/a.png'}]};
+ await assert.rejects(create(r,'bad-image-index',[a]),e=>e.code==='wechat_untrusted_image_host_use_resource_or_cdn_vyibc'&&e.imageIndex===2);
+ assert.equal(r.calls.length,0);
+});
+
+test('Live cover reference is preserved as local metadata and never passed to WeChat',async()=>{
+ const r=setup([token,{media_id:'draft-with-reference'}]);
+ const a={...newspic,liveCoverVideoUrl:'https://resource.vyibc.com/morning/cover.mp4'};
+ const result=await create(r,'live-reference',[a]);assert.equal(result.auxiliaryMetadata[0].storedOnly,true);
+ assert.equal(result.auxiliaryMetadata[0].liveCoverVideoUrl,a.liveCoverVideoUrl);
+ assert(!JSON.stringify(JSON.parse(r.calls.at(-1).init.body)).includes(a.liveCoverVideoUrl));
+ assert.equal((await r.callWechatDraftTool('wechat_draft_request_status',{requestId:'live-reference'})).result.auxiliaryMetadata[0].liveCoverVideoUrl,a.liveCoverVideoUrl);
+ await assert.rejects(create(r,'live-invalid',[{...a,liveCoverVideoUrl:'https://example.org/untrusted.mp4'}]),/untrusted_image_host/);
+});
