@@ -1,6 +1,6 @@
 # 自动发布插件：按自媒体平台分类
 
-稳定插件ID：vyibc-auto-publish，当前版本0.3.2。统一入口Skill为auto-parse-publish 0.3.2。
+稳定插件ID：vyibc-auto-publish，当前版本0.3.3。统一入口Skill为auto-parse-publish 0.3.3。
 能力广场：https://fleet.vyibc.com/#/hub?view=plugins&plugin=vyibc-auto-publish
 
 ## 四个平台，四个MCP
@@ -10,12 +10,12 @@
 | 抖音 | auto-parse-douyin-publish | /api/publish/mcp/douyin | 视频、图文、视频任务查询和对账 |
 | 小红书 | auto-parse-xiaohongshu-publish | /api/publish/mcp/xiaohongshu | 视频、图文及任务会话回查 |
 | X | auto-parse-x-publish | /api/publish/mcp/x | 文字、单图及持久创建回执查询 |
-| 微信公众号 | auto-parse-wechat-publish | /api/publish/mcp/wechat | 官方API图文及原生贴图草稿、素材上传和查询；无群发或公开发表 |
+| 微信公众号 | auto-parse-wechat-publish | /api/publish/mcp/wechat | 官方API图文及原生贴图草稿、素材上传、查询与删除；按ID官方发表需接口权限，当前账号无权限 |
 
-四个端点均在https://auto-parse-v2.vyibc.com。公众号MCP固定版本0.1.1，其他MCP各0.1.0；插件版本与组件版本独立。
+四个端点均在https://auto-parse-v2.vyibc.com。公众号MCP固定版本0.2.0，其他MCP各0.1.0；插件版本与组件版本独立。
 三个连接复用原AutoParse发布节点、正式Supabase工作流、上传与去重执行器。没有复制独立发布器。新版包内已移除通用auto-parse-workflow和带研究工具的vyibc-douyin连接；这些既有服务保留供其他用途，不被删除或撤销。
 
-公众号使用官方API而非浏览器工作流，详见[公众号草稿箱](wechat-drafts.md)。新增连接不影响既有三个MCP版本；新版客户端需安装0.3.2并配置对应安全连接。40164白名单与真实草稿验收状态见专项日志，不因入驻即视为草稿创建通过。
+公众号使用官方API而非浏览器工作流，详见[公众号草稿箱](wechat-drafts.md)。新增连接不影响既有三个MCP版本；新版客户端需安装0.3.3并配置对应安全连接。40164白名单与真实草稿验收状态见专项日志，不因入驻即视为草稿创建通过。
 
 ## 认证与权限边界
 
@@ -27,11 +27,15 @@
 ## 安装与升级
 
 ~~~bash
-bash <(curl -fsSL 'https://fleet.vyibc.com/api/hub/onboarding/packages/vyibc-auto-publish/0.3.2/install') codex
+bash <(curl -fsSL 'https://fleet.vyibc.com/api/hub/onboarding/packages/vyibc-auto-publish/0.3.3/install') codex
 ~~~
 
 当前插件保留同一ID，旧0.1.0固定包与历史回执仍可读。旧版客户端需按原生安装器提示只卸载此插件的旧版本，再安装新版；不删除其他市场、插件或配置。安装器不会自动替用户卸载。
 服务认证使用客户端安全连接，完整包有四个无密钥MCP模板；平台凭据不能互换，旧的通用连接令牌也不能用于新平台端点。安装与认证仍分开。Claude目标只提供plugin-dir启动方式；Dots、ChatGPT等客户端未在本次验收中实际安装，不据此声称已同步。
+
+## 0.3.3 公众号维护与官方发表入口
+
+新增指定草稿删除、官方发表和发表状态工具，服务版本0.2.0。真实测试稿创建、删除与回读不存在已验证；当前账号官方发表权限检查48001，官方发表不能使用，网页发表按ID尚未实现。120秒超时建议、GIF永久素材校验、归一回读及本地正文限制已更新，GIF播放和贴图实际文字上限未验证。插件回执 c815c2ef-39be-4d82-99c7-914f96e47dee，固定包SHA256 50f52745b3cc1bc0be87989e4370ef13516f90c9dedbd6d2a39fa0d5db29658f；四个无密钥连接模板和更新指南已核验。未自动升级客户端。
 
 ## 0.3.2原生贴图补齐
 
