@@ -1,3 +1,4 @@
+import {callWechatDraftTool} from '../wechat/draft-service';
 import {callWorkflowTool} from './mcp-service';
 import {getSession} from './session-store';
 import {startDouyinWorkflow,DOUYIN_WORKFLOW_ID} from './douyin-workflow-service';
@@ -20,6 +21,7 @@ function assertVideoTask(id:unknown){
 }
 export async function callPlatformTool(platform:PublicationPlatform,name:string,input:Record<string,unknown>):Promise<unknown>{
  if(!platformMcpTools(platform).some(t=>t.name===name))throw Error('platform_tool_not_allowed');
+ if(platform==='wechat')return callWechatDraftTool(name,input);
  if(name==='workflow_capabilities'){
   const c=await callWorkflowTool(name,{}) as Record<string,unknown>;
   return {owner:'auto-parse',platform,workflows:Object.keys(PLATFORM_WORKFLOWS[platform]),browserInstances:[...new Set(Object.values(PLATFORM_WORKFLOWS[platform]))],

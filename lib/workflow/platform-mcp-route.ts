@@ -1,3 +1,4 @@
+import {WechatApiError,WechatImageError} from '../wechat/draft-service';
 import {validToolArguments} from './mcp-contract';
 import {authorizePlatformMcp,isPublicationPlatform,platformMcpTools} from './platform-mcp-contract';
 import {callPlatformTool} from './platform-mcp-service';
@@ -31,8 +32,8 @@ export async function handlePlatformMcp(req:Request,platform:string) {
   let result: unknown;
   if (message.method === 'initialize') result = {
     protocolVersion: VERSIONS.includes(String(params.protocolVersion)) ? params.protocolVersion : VERSIONS[0],
-    capabilities: { tools: {} }, serverInfo: { name: 'auto-parse-'+platform+'-publish', version: '0.1.0' },
-    instructions: 'Platform-scoped '+platform+' publication only. Use approved workflows and existing task-owned browser runtime. Do not author arbitrary workflows or access other platforms. Public publication requires user authorization; preserve original request/session/task IDs and reconcile unknown results. Sessions do not survive restart.',
+    capabilities: { tools: {} }, serverInfo: { name: 'auto-parse-'+platform+'-publish', version: platform==='wechat'?'0.2.1':'0.1.0' },
+    instructions: platform==='wechat'?'Official WeChat drafts and separately authorized publishing/delete. Public publish requires official account permission. Use stable requestId; unknown results require reconciliation.': 'Platform-scoped '+platform+' publication only. Use approved workflows and existing task-owned browser runtime. Do not author arbitrary workflows or access other platforms. Public publication requires user authorization; preserve original request/session/task IDs and reconcile unknown results. Sessions do not survive restart.',
   };
   else if (message.method === 'ping') result = {};
   else if (message.method === 'tools/list') result = { tools: WORKFLOW_MCP_TOOLS };
@@ -54,7 +55,7 @@ export async function handlePlatformMcp(req:Request,platform:string) {
       result = { content, isError: false };
     } catch (error) {
       const safe = error instanceof WorkflowInputError || error instanceof WorkflowConflictError || (error instanceof Error && /^[a-z0-9_]+$/.test(error.message));
-      result = { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: safe && error instanceof Error ? error.message : 'workflow_operation_failed' }) }] };
+      result = { isError: true, content: [{ type: 'text', text: JSON.stringify(error instanceof WechatImageError?{error:error.code,code:error.code,message:error.message,hint:error.hint,...error.imageIndex?{imageIndex:error.imageIndex}:{},...error.httpStatus?{httpStatus:error.httpStatus}:{}}:error instanceof WechatApiError?{error:'wechat_api_error',code:error.code,message:error.message,...error.egressIp?{egressIp:error.egressIp}:{},...error.imageIndex?{imageIndex:error.imageIndex}:{}}:{ error: safe && error instanceof Error ? error.message : 'workflow_operation_failed',code:safe && error instanceof Error ? error.message : 'workflow_operation_failed',message:safe && error instanceof Error ? error.message : '操作失败',hint:'核对输入、请求状态及服务日志；结果未知时不要更换请求ID重试。' }) }] };
     }
   } else return rpcError(id, -32601, 'Method not found');
   return Response.json({ jsonrpc: '2.0', id, result }, { headers });

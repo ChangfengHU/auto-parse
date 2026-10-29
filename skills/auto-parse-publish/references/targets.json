@@ -1,8 +1,8 @@
 {
   "schema": "auto-parse-publish-routing/v1",
-  "version": "0.2.0",
-  "verifiedOn": "2026-10-28",
-  "runtimeAuthority": "live MCP schemas + Supabase rpa_workflows; this is a non-executable routing index",
+  "version": "0.3.5",
+  "verifiedOn": "2026-10-29",
+  "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers, official WeChat API for drafts; non-executable index",
   "providers": [
     {
       "key": "douyin-video",
@@ -63,6 +63,42 @@
       "reference": "workflows.md",
       "acceptance": "real_creation_and_logged_in_permalink_verified; anonymous_visibility_not_tested",
       "platform": "x"
+    },
+    {
+      "key": "wechat-draft",
+      "platform": "wechat",
+      "server": "auto-parse-wechat-publish",
+      "capabilityVersion": "0.2.1",
+      "reference": "wechat-drafts.md",
+      "transport": "official_https_api",
+      "browserRequired": false,
+      "acceptance": "official_authentication_permanent_cover_upload_draft_creation_same_media_id_readback_and_idempotent_replay_verified; no_public_publish_or_mass_send"
+    },
+    {
+      "key": "wechat-newspic-draft",
+      "platform": "wechat",
+      "server": "auto-parse-wechat-publish",
+      "capabilityVersion": "0.2.1",
+      "reference": "wechat-drafts.md",
+      "transport": "official_https_api",
+      "browserRequired": false,
+      "acceptance": "real_eight_image_draft_created; official_article_type_newspic_order_and_first_cover_verified; same_request_replay_no_duplicate; no_public_publish"
+    },
+    {
+      "key": "wechat-draft-delete",
+      "platform": "wechat",
+      "server": "auto-parse-wechat-publish",
+      "capabilityVersion": "0.2.1",
+      "reference": "wechat-drafts.md",
+      "acceptance": "real_single_test_draft_created_deleted_and_readback_absent; explicit_confirmation"
+    },
+    {
+      "key": "wechat-official-publish",
+      "platform": "wechat",
+      "server": "auto-parse-wechat-publish",
+      "capabilityVersion": "0.2.1",
+      "reference": "wechat-drafts.md",
+      "acceptance": "implementation_and_mock_tests_only; account_official_permission_probe_48001; no_web_publish_or_real_publication"
     }
   ]
 }

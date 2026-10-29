@@ -4,6 +4,21 @@
 
 ## In Progress
 
+- [WORKFLOW-011] 公众号网页按草稿ID发表
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-10-29
+  Log: dev-log/2026-10-29-wechat-web-publish.md
+  Next: 贴图标题20字约束已部署；网页登录态单项发表预检查实测ret=0，网页按草稿ID发表尚未实现。
+
+
+- [API-003]公众号官方接口草稿箱与平台MCP
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-10-29
+  Log: dev-log/2026-10-29-wechat-drafts.md
+  Next: 微信MCP0.2.1已上线，10工具、真实删除、素材复用、代理出口探测及Live链接本地留存验证通过，61项回归通过，插件0.3.4登记；官方发表权限48001，网页按草稿ID发表、GIF实际播放和微信正文上限仍待验证。
+
 - [WORKFLOW-006] X 文字发推工作流与安全预览
   Status: In Progress
   Owner: codex
@@ -106,6 +121,13 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+
+- [WORKFLOW-010] 公众号草稿MCP验收与插件补丁发布
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-29
+  Log: dev-log/2026-10-29-wechat-hub-release.md
+  Result: 沿用公众号7工具与4平台插件，Skill/插件0.3.1已发布；固定包校验、Hub回执及隔离原生安装通过，无新业务草稿。
 
 - [RUNTIME-006] 小红书分析页扫码登录与读取恢复
   Status: Done
