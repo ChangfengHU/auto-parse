@@ -14,3 +14,5 @@ test('matches exact title, timestamp and image while ignoring CDN sizing',()=>{c
 test('fails closed for incomplete scan and ambiguity',()=>{assert.throws(()=>match(official,[card],false),/incomplete/);assert.throws(()=>match(official,[card,card],true),/ambiguous/);});
 test('refuses changed title, time or cover',()=>{for(const patch of [{title:'其他'},{create_time:1700000001},{img_url:'https://mmbiz.qpic.cn/other'}])assert.throws(()=>match(official,[{...card,...patch}],true),/not_matched/);});
 test('refuses untrusted cover, bad ids and titles beyond 20 code points',()=>{assert.throws(()=>match({...official,thumbUrl:'https://evil.test/a/b'},[card],true),/invalid_cover/);assert.throws(()=>match(official,[{...card,app_id:0}],true),/invalid_internal_id/);assert.throws(()=>match({...official,title:'字'.repeat(21)},[card],true),/invalid_newspic_title/);});
+
+test('web-saved drafts may have file_id zero while app_id remains mandatory',()=>{assert.equal(match(official,[{...card,file_id:0}],true).fileId,0);assert.throws(()=>match(official,[{...card,app_id:0,file_id:0}],true),/invalid_internal_id/)});

@@ -52,11 +52,17 @@ const TIMEOUT_META: ParamMeta = {
 // ── 节点目录 ──────────────────────────────────────────────────────────────────
 
 export const NODE_CATALOG: NodeCatalogItem[] = [
-  {type:'wechat_web_prepare',label:'公众号：核对贴图草稿',icon:'微',category:'advanced',
-   desc:'按官方草稿ID和已登录账号精确核对贴图，不发表。列表不完整或匹配不唯一时停止。',
-   defaultParams:{mediaId:'{{mediaId}}',expectedAccount:'{{expectedAccount}}'},
-   paramMeta:{mediaId:{label:'官方草稿 ID',type:'template',required:true,desc:'官方 API 返回的 media_id。'},
-    expectedAccount:{label:'公众号原始 ID',type:'template',required:true,desc:'必须与已登录网页一致的 gh_ 开头原始 ID。'}}},
+  {type:'wechat_web_prepare',label:'公众号：贴图核对 / 网页发表',icon:'微',category:'advanced',
+   desc:'按官方草稿ID精确核对。publish需要准备指纹、directPublish=true及AI来源声明；可能需要管理员扫码，持久防重复。',
+   defaultParams:{mode:'prepare',mediaId:'{{mediaId}}',expectedAccount:'{{expectedAccount}}'},
+   paramMeta:{
+    mode:{label:'执行模式',type:'select',desc:'默认仅核对。publish会保存来源声明并请求公开发表。',options:[{label:'仅核对',value:'prepare'},{label:'网页发表',value:'publish'}]},
+    mediaId:{label:'官方草稿 ID',type:'template',required:true,desc:'官方 API 返回的 media_id。'},
+    expectedAccount:{label:'公众号原始 ID',type:'template',required:true,desc:'必须与已登录网页一致的 gh_ 开头原始 ID。'},
+    requestId:{label:'稳定请求 ID',type:'template',desc:'发表必填；未知结果不得换 ID 重试。'},
+    expectedFingerprint:{label:'准备指纹',type:'template',desc:'准备结果中的 draftFingerprint，草稿变化后须重新核对。'},
+    aiGenerated:{label:'AI来源声明',type:'template',desc:'当前发表只支持已确认AI生成内容，必须为字符串 true。'}
+   }},
   {
     type:'x_publish',label:'X：文字 / 单图发推',icon:'𝕏',category:'advanced',
     desc:'复用已登录浏览器，核对账号/正文/原生图片ID并保存回执。可选1张PNG/JPEG/WebP，本地限制5MiB；暂不支持视频、回复、引用和线程。',

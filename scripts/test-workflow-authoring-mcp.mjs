@@ -193,3 +193,26 @@ test('completed prefix tolerates JSON object key order but rejects actual edits'
   await assert.rejects(service.callWorkflowTool('workflow_set_session_nodes', {sessionId:opened.sessionId,expectedRevision:changed.sessionRevision,nodes:[{...nodes[0],label:'tampered'},nodes[1]]}),/completed_nodes_are_frozen/);
   await service.callWorkflowTool('workflow_close_session',{sessionId:opened.sessionId});
 });
+
+test('WeChat editor handoff keeps the QR page and browser lease until explicit close',async()=>{
+ let released=0,oldClosed=0,editorClosed=0;
+ const context={};
+ const initial={context:()=>context,close:async()=>{oldClosed++},isClosed:()=>false};
+ const editor={context:()=>context,close:async()=>{editorClosed++},isClosed:()=>false,evaluate:async()=>({title:'verification'})};
+ context.newPage=async()=>initial;
+ const load=loader({
+  playwright:{chromium:{connectOverCDP:async()=>({contexts:()=>[context],close:async()=>{}})}},
+  'lib/workflow/workflow-db.ts':{getWorkflow:async()=>({...base(),nodes:[{type:'wechat_web_prepare',params:{mode:'publish'}}]})},
+  'lib/workflow/browser-activity.ts':{acquireManagedBrowserActivity:async()=>async()=>{released++}},
+  'lib/workflow/engine.ts':{executeNode:async()=>({success:true,newPage:editor,output:{status:'awaiting_admin_scan'},log:[]})}
+ });
+ const service=load('lib/workflow/mcp-service.ts');
+ const opened=await service.callWorkflowTool('workflow_open_session',{workflowId:'draft',browserInstance:1,confirmBrowserControl:true});
+ await service.callWorkflowTool('workflow_run',{sessionId:opened.sessionId,expectedRevision:0,requestId:'handoff',confirmExecution:true});
+ await delay(10);
+ const result=await service.callWorkflowTool('workflow_get_session',{sessionId:opened.sessionId,includeScreenshot:false});
+ assert.equal(result.observation.title,'verification');assert.equal(result.history[0].result.output.status,'awaiting_admin_scan');
+ assert.equal(oldClosed,1);assert.equal(editorClosed,0);assert.equal(released,0);
+ await service.callWorkflowTool('workflow_close_session',{sessionId:opened.sessionId});
+ assert.equal(editorClosed,1);assert.equal(released,1);
+});

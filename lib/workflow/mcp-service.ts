@@ -114,6 +114,12 @@ async function startOperation(input: Record<string, unknown>, runAll: boolean) {
         const node = original.type === 'navigate' ? { ...original, params: { ...original.params, useAdsPower: false, adsManualCdpUrl: '', postClickEnabled: original.params.postClickEnabled ?? false } } : original;
         const context = { vars: { ...current.vars }, outputs: Object.assign({}, ...current.history.filter(h => h.result.success).map(h => h.result.output ?? {})), managedPublicationAuthorized: true };
         const result = await executeNode(current._page!, node, context);
+        if(node.type==='wechat_web_prepare' && result.newPage){
+          const nextPage=result.newPage as Page;
+          if(nextPage.context()!==current._page!.context()||nextPage.isClosed())throw Error('wechat_workflow_page_handoff_invalid');
+          const previous=current._page;current._page=nextPage;
+          if(previous!==nextPage)await previous?.close().catch(()=>{});
+        }
         const failed = !result.success && !node.continueOnError;
         const nextStep = failed ? index : index + 1;
         updateSession(id, {

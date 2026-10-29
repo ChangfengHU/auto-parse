@@ -1,9 +1,11 @@
+import {webDraftFingerprint} from '../../wechat/web-draft-fingerprint';
+import {publishVerifiedEditor} from '../../wechat/web-publish';
 import type { Page } from 'playwright';
 import type { NodeResult, WorkflowContext } from '../types';
 import { callWechatDraftTool } from '../../wechat/draft-service';
 import { matchWebNewspic, type WebDraftCard } from '../../wechat/web-draft-identity';
 
-type Params = { mediaId: string; expectedAccount: string };
+type Params = { mediaId: string; expectedAccount: string; mode?:string;requestId?:string;expectedFingerprint?:string;aiGenerated?:string };
 export async function executeWechatWebPrepare(page: Page, params: Params, ctx: WorkflowContext): Promise<NodeResult> {
   let editor: Page | undefined;
   let verifier: Page | undefined;
@@ -17,6 +19,11 @@ export async function executeWechatWebPrepare(page: Page, params: Params, ctx: W
     const article = articles[0] as Record<string, unknown>;
     if (article.article_type !== 'newspic' || typeof article.title !== 'string' || typeof article.thumb_url !== 'string')
       throw Error('wechat_web_single_newspic_required');
+    const fingerprint=webDraftFingerprint(articles);
+    const publishing=params.mode==='publish';
+    if(params.mode && !['prepare','publish'].includes(params.mode))throw Error('wechat_web_invalid_mode');
+    if(publishing && (ctx.vars.directPublish!=='true'||params.aiGenerated!=='true'||!params.requestId||params.expectedFingerprint!==fingerprint))
+      throw Error('wechat_web_publication_confirmation_or_fingerprint_required');
     const official = {title: article.title, createdAt: Number(raw.create_time), thumbUrl: article.thumb_url};
     await page.setViewportSize({width: 1440, height: 1000});
     await page.goto('https://mp.weixin.qq.com/', {waitUntil:'domcontentloaded', timeout:30000});
@@ -26,12 +33,10 @@ export async function executeWechatWebPrepare(page: Page, params: Params, ctx: W
     await page.getByRole('link', {name:'草稿箱', exact:true}).click({timeout:20000});
     const button = page.getByRole('button', {name:/^贴图/});
     await button.click({timeout:20000});
-    await page.waitForFunction(title => [...document.querySelectorAll('.publish_card_container')].some(e =>
-      (e as Element & {__vue__?: {$props?: {source?: WebDraftCard}}}).__vue__?.$props?.source?.title === title),
-      official.title,{timeout:15000});
+    await page.locator('.publish_card_container').first().waitFor({state:'visible',timeout:15000});
     const text = await button.innerText(), count = text.match(/^贴图\s*(\d+)$/);
     if (!count) throw Error('wechat_web_total_unknown');
-    const cards = await page.evaluate(() => {
+    const collect = () => page.evaluate(() => {
       const seen = new Set<string>();
       const rows = [...document.querySelectorAll('*')].map(e => (e as Element & {__vue__?: {$props?: {source?: WebDraftCard}}}).__vue__?.$props?.source);
       return rows.filter((s): s is WebDraftCard => {
@@ -41,6 +46,12 @@ export async function executeWechatWebPrepare(page: Page, params: Params, ctx: W
         seen.add(key); return true;
       }).map(s => ({title:s.title,create_time:s.create_time,img_url:s.img_url,app_id:s.app_id,file_id:s.file_id}));
     });
+    let cards=await collect();
+    for(let attempt=0;cards.length<Number(count[1])&&attempt<8;attempt++){
+      await page.locator('.publish_card_container').last().scrollIntoViewIfNeeded();
+      await page.mouse.wheel(0,1200);
+      await page.waitForTimeout(1000);cards=await collect();
+    }
     if (new URL(page.url()).origin !== 'https://mp.weixin.qq.com') throw Error('wechat_web_account_mismatch');
     verifier = await page.context().newPage();
     await verifier.goto('https://mp.weixin.qq.com/', {waitUntil:'domcontentloaded',timeout:30000});
@@ -67,7 +78,15 @@ export async function executeWechatWebPrepare(page: Page, params: Params, ctx: W
     if ((await titleField.innerText()) !== official.title) throw Error('wechat_web_editor_title_mismatch');
     const publishButton = editor.locator('button.mass_send:visible');
     if (await publishButton.count() !== 1) throw Error('wechat_web_publish_button_ambiguous');
-    return {success:true, log:['已唯一匹配草稿并核对编辑器；未发表。'], output:{prepared:true,published:false,accountVerified:true,uniqueMatch:true,editorVerified:true,scanned:cards.length,title:official.title}};
+    if(publishing){
+      const fresh=await callWechatDraftTool('wechat_get_draft',{mediaId:params.mediaId});
+      if(webDraftFingerprint(fresh.news_item)!==fingerprint)
+        throw Error('wechat_web_draft_changed_prepare_again');
+      const result=await publishVerifiedEditor(editor,{mediaId:params.mediaId,expectedAccount:params.expectedAccount,requestId:params.requestId!,expectedFingerprint:params.expectedFingerprint!,aiGenerated:true},matched.appId,fingerprint);
+      const retainedEditor=editor;editor=undefined;
+      return {success:true,newPage:retainedEditor,log:['公众号网页发表状态：'+result.status],output:{...result,draftFingerprint:fingerprint,title:official.title}};
+    }
+    return {success:true, log:['已唯一匹配草稿并核对编辑器；未发表。'], output:{prepared:true,published:false,accountVerified:true,uniqueMatch:true,editorVerified:true,draftFingerprint:fingerprint,scanned:cards.length,title:official.title}};
   } catch (e) {
     const error=e instanceof Error && /^wechat_[a-z_]+$/.test(e.message)?e.message:'wechat_web_preparation_failed';
     return {success:false,error,log:['公众号网页核对已停止：'+error]};

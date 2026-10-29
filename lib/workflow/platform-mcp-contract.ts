@@ -5,7 +5,7 @@ export const PLATFORMS=['douyin','xiaohongshu','x','wechat'] as const;
 export type PublicationPlatform=typeof PLATFORMS[number];
 export function isPublicationPlatform(value:string):value is PublicationPlatform{return (PLATFORMS as readonly string[]).includes(value);}
 export const PLATFORM_WORKFLOWS:Record<PublicationPlatform,Record<string,number>>={
- wechat:{'9a676224-70bd-41d4-9e85-c8d2b83a00c4':1},
+ wechat:{'9a676224-70bd-41d4-9e85-c8d2b83a00c4':1,'cea6d731-ce15-46d8-95fb-f420ebfacb93':1},
  douyin:{'53197d8e-a89d-4d1a-bb8d-fc114156f30f':2},
  xiaohongshu:{'6105efc6-7e54-4c85-acfe-1a37e0d5093f':1,'1dc07adf-65a1-48f0-98ab-31cfcafc7fd3':1},
  x:{'e3d8f5e6-d859-4424-b6b6-a85c9aefb551':2,'8b626a95-e939-4fa0-a685-7aff71cb76dd':2},
@@ -28,7 +28,10 @@ const string={type:'string',minLength:1};
 const video={accountId:string,videoUrl:string,title:string,description:{type:'string'},topics:{type:'array',maxItems:5,items:string},aiGenerated:{type:'boolean'},requestId:string,cover:{type:'object',properties:{verticalUrl:string,horizontalUrl:string},additionalProperties:false}};
 const tool=(name:string,description:string,properties:Record<string,unknown>,required:string[],readOnly=false)=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:readOnly,destructiveHint:!readOnly,openWorldHint:true}});
 export function platformMcpTools(platform:PublicationPlatform){
- if(platform==='wechat')return [...WECHAT_DRAFT_TOOLS,...WORKFLOW_MCP_TOOLS.filter(t=>shared.has(t.name)).map(t=>({...t,description:'[wechat approved preparation workflows only] '+t.description}))];
+ if(platform==='wechat')return [...WECHAT_DRAFT_TOOLS,
+ tool('wechat_web_publish_draft','Publish one existing AI-generated newspic draft through the authorized browser workflow. Prepare first and supply its exact draftFingerprint. This can update the draft source declaration, save it and submit publicly. May return awaiting_admin_scan: keep session open and use workflow_get_session for QR; poll wechat_web_publish_status. Never resubmit an uncertain draft.',{mediaId:string,expectedAccount:string,requestId:string,expectedFingerprint:string,aiGenerated:{type:'boolean',const:true},confirmPublish:{type:'boolean',const:true}},['mediaId','expectedAccount','requestId','expectedFingerprint','aiGenerated','confirmPublish']),
+ tool('wechat_web_publish_status','Read the durable web publication intent by account and draft. submitted means a successful submission response, not an independently verified public post. No retry or mutation.',{mediaId:string,expectedAccount:string},['mediaId','expectedAccount'],true),
+ ...WORKFLOW_MCP_TOOLS.filter(t=>shared.has(t.name)).map(t=>({...t,description:'[wechat approved preparation workflows only] '+t.description}))];
  const tools=WORKFLOW_MCP_TOOLS.filter(t=>shared.has(t.name)||(platform==='x'&&t.name==='x_publication_status')).map(t=>({...t,description:'['+platform+' publication only] '+t.description}));
  if(platform==='douyin')tools.push(
   tool('prepare_video','Prepare a Douyin video through the approved workflow without publishing. Account control/upload requires user authorization.',video,['accountId','videoUrl','title','aiGenerated','requestId']),

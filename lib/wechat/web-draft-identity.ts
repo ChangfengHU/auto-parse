@@ -1,9 +1,9 @@
 /** Exact cross-surface candidate matching; this does not authorize or perform publication. */
 export type OfficialNewspic = { title: string; createdAt: number; thumbUrl: string };
 export type WebDraftCard = { title: string; create_time: number | string; img_url: string; app_id: number | string; file_id: number | string };
-function positiveInt(value: number | string): number {
+function positiveInt(value: number | string, allowZero = false): number {
   const n = Number(value);
-  if (!Number.isSafeInteger(n) || n <= 0) throw Error('wechat_web_invalid_internal_id');
+  if (!Number.isSafeInteger(n) || (allowZero ? n < 0 : n <= 0)) throw Error('wechat_web_invalid_internal_id');
   return n;
 }
 function imageKey(value: string): string {
@@ -25,5 +25,5 @@ export function matchWebNewspic(official: OfficialNewspic, cards: WebDraftCard[]
   });
   if (matches.length === 0) throw Error('wechat_web_draft_not_matched');
   if (matches.length !== 1) throw Error('wechat_web_draft_ambiguous');
-  return { appId: positiveInt(matches[0].app_id), fileId: positiveInt(matches[0].file_id) };
+  return { appId: positiveInt(matches[0].app_id), fileId: positiveInt(matches[0].file_id, true) };
 }

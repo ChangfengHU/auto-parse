@@ -1,8 +1,8 @@
 {
   "schema": "auto-parse-publish-routing/v1",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "verifiedOn": "2026-10-29",
-  "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers, official WeChat API for drafts; non-executable index",
+  "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers; official WeChat API for drafts; non-executable index",
   "providers": [
     {
       "key": "douyin-video",
@@ -68,7 +68,7 @@
       "key": "wechat-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.2.1",
+      "capabilityVersion": "0.3.0",
       "reference": "wechat-drafts.md",
       "transport": "official_https_api",
       "browserRequired": false,
@@ -78,7 +78,7 @@
       "key": "wechat-newspic-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.2.1",
+      "capabilityVersion": "0.3.0",
       "reference": "wechat-drafts.md",
       "transport": "official_https_api",
       "browserRequired": false,
@@ -88,7 +88,7 @@
       "key": "wechat-draft-delete",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.2.1",
+      "capabilityVersion": "0.3.0",
       "reference": "wechat-drafts.md",
       "acceptance": "real_single_test_draft_created_deleted_and_readback_absent; explicit_confirmation"
     },
@@ -96,9 +96,21 @@
       "key": "wechat-official-publish",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.2.1",
+      "capabilityVersion": "0.3.0",
       "reference": "wechat-drafts.md",
       "acceptance": "implementation_and_mock_tests_only; account_official_permission_probe_48001; no_web_publish_or_real_publication"
+    },
+    {
+      "key": "wechat-web-newspic",
+      "platform": "wechat",
+      "server": "auto-parse-wechat-publish",
+      "capabilityVersion": "0.3.0",
+      "reference": "wechat-drafts.md",
+      "workflowId": "cea6d731-ce15-46d8-95fb-f420ebfacb93",
+      "prepareWorkflowId": "9a676224-70bd-41d4-9e85-c8d2b83a00c4",
+      "browserInstance": 1,
+      "browserRequired": true,
+      "acceptance": "real_browser_admin_verification_reached_with_final_send_blocked; final_live_submission_and_public_visibility_not_yet_verified"
     }
   ]
 }

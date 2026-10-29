@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Read-only preparation. This command never clicks "publish".
+// Preparation by default; --publish uses the guarded web publisher with explicit confirmation.
 import fs from 'node:fs';
+import path from 'node:path';
 import vm from 'node:vm';
 import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
@@ -8,6 +9,9 @@ const require=createRequire(import.meta.url);
 const {chromium}=require('playwright'),ts=require('typescript');
 const token=process.env.WECHAT_MCP_TOKEN, mediaId=process.env.WECHAT_DRAFT_MEDIA_ID;
 const expected=process.env.WECHAT_WEB_ACCOUNT;
+const publish=process.argv.includes('--publish');
+if(process.argv.slice(2).some(v=>v!=='--publish')){console.error('wechat_invalid_cli_argument');process.exit(2)}
+if(publish&&(process.env.WECHAT_CONFIRM_PUBLISH!=='true'||process.env.WECHAT_AI_GENERATED!=='true'||!process.env.WECHAT_REQUEST_ID||!process.env.WECHAT_EXPECTED_FINGERPRINT)){console.error('wechat_publish_confirmation_required');process.exit(2)}
 const endpoint=process.env.WECHAT_MCP_URL||'https://auto-parse-v2.vyibc.com/api/publish/mcp/wechat';
 if(!token||!mediaId||!expected){console.error('wechat_prepare_missing_environment');process.exit(2)}
 const endpointUrl=new URL(endpoint);
@@ -34,13 +38,21 @@ function runRea(scenario,secretEnv){
   child.stdin.end(JSON.stringify(scenario));
  });
 }
+const fingerprintModule={exports:{}};
+vm.runInNewContext(ts.transpileModule(fs.readFileSync('lib/wechat/web-draft-fingerprint.ts','utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{module:fingerprintModule,exports:fingerprintModule.exports,require});
+const {webDraftFingerprint}=fingerprintModule.exports;
 let release,browser,page,editor,verifier;
 try{
+ const readDraft=async()=>{
  const response=await fetch(endpoint,{method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json','Accept':'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'wechat_get_draft',arguments:{mediaId}}}),signal:AbortSignal.timeout(30000)});
  if(!response.ok)throw Error('wechat_draft_read_failed');
  const rpc=await response.json();if(rpc.error||rpc.result?.isError)throw Error('wechat_draft_read_failed');
- const data=JSON.parse(rpc.result.content.find(x=>x.type==='text').text),article=data.news_item?.[0];
+ return JSON.parse(rpc.result.content.find(x=>x.type==='text').text);
+ };
+ const data=await readDraft(),article=data.news_item?.[0];
  if(data.news_item?.length!==1||article?.article_type!=='newspic')throw Error('wechat_newspic_single_article_required');
+ const fingerprint=webDraftFingerprint(data.news_item);
+ if(publish&&fingerprint!==process.env.WECHAT_EXPECTED_FINGERPRINT)throw Error('wechat_web_draft_changed_prepare_again');
  const official={title:article.title,createdAt:data.create_time,thumbUrl:article.thumb_url};
  release=await lockBrowser();browser=await chromium.connectOverCDP('http://127.0.0.1:9222');const context=browser.contexts()[0];
  page=await context.newPage();await page.setViewportSize({width:1440,height:1000});await page.goto('https://mp.weixin.qq.com/',{waitUntil:'domcontentloaded',timeout:30000});
@@ -60,7 +72,8 @@ try{
  const countText=await page.getByRole('button',{name:/^贴图/}).innerText(),countMatch=countText.match(/^贴图\s*(\d+)$/);
  if(!countMatch)throw Error('wechat_web_total_unknown');
  const total=Number(countMatch[1]);
- const cards=await page.evaluate(()=>{const seen=new Set();return [...document.querySelectorAll('*')].map(e=>e.__vue__?.$props?.source).filter(s=>s?.title&&!seen.has(s.app_id+':'+s.file_id)&&seen.add(s.app_id+':'+s.file_id)).map(s=>({title:s.title,create_time:s.create_time,img_url:s.img_url,app_id:s.app_id,file_id:s.file_id}))});
+ const collect=()=>page.evaluate(()=>{const seen=new Set();return [...document.querySelectorAll('*')].map(e=>e.__vue__?.$props?.source).filter(s=>s?.title&&!seen.has(s.app_id+':'+s.file_id)&&seen.add(s.app_id+':'+s.file_id)).map(s=>({title:s.title,create_time:s.create_time,img_url:s.img_url,app_id:s.app_id,file_id:s.file_id}))});
+ let cards=await collect();for(let n=0;cards.length<total&&n<8;n++){await page.locator('.publish_card_container').last().scrollIntoViewIfNeeded();await page.mouse.wheel(0,1200);await page.waitForTimeout(1000);cards=await collect();}
  const compiled={exports:{}},src=fs.readFileSync('lib/wechat/web-draft-identity.ts','utf8');vm.runInNewContext(ts.transpileModule(src,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{module:compiled,exports:compiled.exports,URL});
  const matched=compiled.exports.matchWebNewspic(official,cards,cards.length===total);
  const elements=page.locator('.publish_card_container'),targets=[];
@@ -72,6 +85,14 @@ try{
  const editorUrl=new URL(editor.url());if(editorUrl.origin!=='https://mp.weixin.qq.com'||editorUrl.searchParams.get('appmsgid')!==String(matched.appId))throw Error('wechat_web_editor_id_mismatch');
  const field=editor.locator('.ProseMirror:visible').first();await field.waitFor({state:'visible',timeout:15000});if(await field.innerText()!==official.title)throw Error('wechat_web_editor_title_mismatch');
  if(await editor.locator('button.mass_send:visible').count()!==1)throw Error('wechat_web_publish_button_ambiguous');
- console.log(JSON.stringify({ok:true,stage:'prepared',published:false,engine:'rea-6.8.0',accountVerified:true,uniqueMatch:true,editorVerified:true,scanned:cards.length,title:official.title,note:'Matched the draft and editor; publication is not implemented.'}));
+ if(publish){
+  const fresh=await readDraft();
+  if(webDraftFingerprint(fresh.news_item)!==fingerprint)throw Error('wechat_web_draft_changed_prepare_again');
+  const cache=new Map();function loadModule(file){if(cache.has(file))return cache.get(file);const m={exports:{}};const output=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;vm.runInNewContext(output,{module:m,exports:m.exports,require:n=>n.startsWith('.')?loadModule(path.normalize(path.join(path.dirname(file),n))+'.ts'):require(n),URL,URLSearchParams,process,Buffer});cache.set(file,m.exports);return m.exports}
+  const api=loadModule('lib/wechat/web-publish.ts');
+  const result=await api.publishVerifiedEditor(editor,{mediaId,expectedAccount:expected,requestId:process.env.WECHAT_REQUEST_ID,expectedFingerprint:process.env.WECHAT_EXPECTED_FINGERPRINT,aiGenerated:true},matched.appId,fingerprint);
+  console.log(JSON.stringify(result));
+  if(result.keepSessionOpen){const deadline=Date.now()+20*60*1000;while(Date.now()<deadline){const record=api.webPublishState(expected,mediaId);if(record&&['submitted','unknown'].includes(record.state)){console.log(JSON.stringify(record));break;}await new Promise(resolve=>setTimeout(resolve,1000));}}
+ }else console.log(JSON.stringify({ok:true,stage:'prepared',published:false,engine:'rea-6.8.0',accountVerified:true,uniqueMatch:true,editorVerified:true,draftFingerprint:fingerprint,scanned:cards.length,title:official.title,note:'Matched the draft and editor; no publication performed.'}));
 }catch(error){const msg=error instanceof Error&&/^(wechat_|rea_)[a-z_]+$/.test(error.message)?error.message:'wechat_prepare_failed';console.error(JSON.stringify({ok:false,error:msg,published:false}));process.exitCode=1}
 finally{if(editor&&!editor.isClosed())await editor.close().catch(()=>{});if(verifier&&!verifier.isClosed())await verifier.close().catch(()=>{});if(page)await page.close().catch(()=>{});if(browser)await browser.close().catch(()=>{});if(release)release()}

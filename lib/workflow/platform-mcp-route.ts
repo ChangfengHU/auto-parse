@@ -32,8 +32,8 @@ export async function handlePlatformMcp(req:Request,platform:string) {
   let result: unknown;
   if (message.method === 'initialize') result = {
     protocolVersion: VERSIONS.includes(String(params.protocolVersion)) ? params.protocolVersion : VERSIONS[0],
-    capabilities: { tools: {} }, serverInfo: { name: 'auto-parse-'+platform+'-publish', version: platform==='wechat'?'0.2.3':'0.1.0' },
-    instructions: platform==='wechat'?'Official WeChat drafts and separately authorized publishing/delete. Public publish requires official account permission. Use stable requestId; unknown results require reconciliation.': 'Platform-scoped '+platform+' publication only. Use approved workflows and existing task-owned browser runtime. Do not author arbitrary workflows or access other platforms. Public publication requires user authorization; preserve original request/session/task IDs and reconcile unknown results. Sessions do not survive restart.',
+    capabilities: { tools: {} }, serverInfo: { name: 'auto-parse-'+platform+'-publish', version: platform==='wechat'?'0.3.0':'0.1.0' },
+    instructions: platform==='wechat'?'Official WeChat drafts/delete and two separate publication routes: official API requires account permission; web AI-newspic requires preparation fingerprint, explicit publication confirmation and possibly administrator scan. Keep the original workflow session open during verification. submitted is not public visibility. Use stable requestId; unknown results require reconciliation.': 'Platform-scoped '+platform+' publication only. Use approved workflows and existing task-owned browser runtime. Do not author arbitrary workflows or access other platforms. Public publication requires user authorization; preserve original request/session/task IDs and reconcile unknown results. Sessions do not survive restart.',
   };
   else if (message.method === 'ping') result = {};
   else if (message.method === 'tools/list') result = { tools: WORKFLOW_MCP_TOOLS };

@@ -1,3 +1,4 @@
+import {webPublishState} from '../wechat/web-publish';
 import {callWechatDraftTool} from '../wechat/draft-service';
 import {WECHAT_DRAFT_TOOLS} from '../wechat/draft-contract';
 import {callWorkflowTool} from './mcp-service';
@@ -9,6 +10,7 @@ import {PLATFORM_WORKFLOWS,platformMcpTools,type PublicationPlatform} from './pl
 import type {DouyinWorkflowInput} from './douyin-workflow-service';
 import {isRecord} from './validation';
 declare global {var __publicationPlatformSessions:Map<string,PublicationPlatform>|undefined;}
+const WECHAT_WEB_CAPABILITIES={prepareWorkflow:'9a676224-70bd-41d4-9e85-c8d2b83a00c4',publishWorkflow:'cea6d731-ce15-46d8-95fb-f420ebfacb93',publishTool:'wechat_web_publish_draft',statusTool:'wechat_web_publish_status',maxTitleCharacters:20,aiGeneratedOnly:true,requiresPreparedFingerprint:true,administratorVerification:'may require administrator scan; poll the same workflow session for screenshot',recommendedTimeoutMs:120000,submittedMeaning:'WeChat accepted the final request; public visibility not independently verified',verifiedThrough:'real logged-in page reached administrator verification; final live submission not yet acceptance-tested',concurrency:1};
 const owners=()=>global.__publicationPlatformSessions??=new Map<string,PublicationPlatform>();
 function assertWorkflow(platform:PublicationPlatform,id:unknown){
  if(typeof id!=='string'||!Object.hasOwn(PLATFORM_WORKFLOWS[platform],id))throw Error('platform_workflow_not_allowed');
@@ -22,12 +24,32 @@ function assertVideoTask(id:unknown){
 }
 export async function callPlatformTool(platform:PublicationPlatform,name:string,input:Record<string,unknown>):Promise<unknown>{
  if(!platformMcpTools(platform).some(t=>t.name===name))throw Error('platform_tool_not_allowed');
- if(platform==='wechat' && WECHAT_DRAFT_TOOLS.some(t=>t.name===name))return callWechatDraftTool(name,input);
+ if(platform==='wechat' && name==='wechat_web_publish_status'){
+  if(typeof input.expectedAccount!=='string'||typeof input.mediaId!=='string')throw Error('wechat_web_invalid_input');
+  const record=webPublishState(input.expectedAccount,input.mediaId);
+  return record?{found:true,...record}:{found:false};
+ }
+ if(platform==='wechat' && name==='wechat_web_publish_draft'){
+  if(input.confirmPublish!==true||input.aiGenerated!==true||typeof input.expectedFingerprint!=='string'||!/^[a-f0-9]{64}$/.test(input.expectedFingerprint)||typeof input.requestId!=='string'||!input.requestId||typeof input.expectedAccount!=='string'||typeof input.mediaId!=='string')throw Error('wechat_web_confirmation_and_preparation_required');
+  const old=webPublishState(input.expectedAccount,input.mediaId);
+  if(old)return {reused:true,...old,note:'Existing intent; no second click. Query status.'};
+  const opened=await callWorkflowTool('workflow_open_session',{workflowId:'cea6d731-ce15-46d8-95fb-f420ebfacb93',browserInstance:1,vars:{mediaId:input.mediaId,expectedAccount:input.expectedAccount,requestId:input.requestId,expectedFingerprint:input.expectedFingerprint,aiGenerated:'true',directPublish:'true'},confirmBrowserControl:true}) as Record<string,unknown>;
+  const sid=String(opened.sessionId);owners().set(sid,platform);
+  try{
+   await callWorkflowTool('workflow_run',{sessionId:sid,expectedRevision:opened.sessionRevision,requestId:input.requestId,confirmExecution:true});
+   return {status:'running',sessionId:sid,requestId:input.requestId,poll:'workflow_get_session',publicationStatus:'wechat_web_publish_status',note:'Keep session open through administrator verification. No retry under a new ID.'};
+  }catch(error){await callWorkflowTool('workflow_close_session',{sessionId:sid}).catch(()=>{});owners().delete(sid);throw error;}
+ }
+ if(platform==='wechat' && WECHAT_DRAFT_TOOLS.some(t=>t.name===name)){
+  const value=await callWechatDraftTool(name,input);
+  return name==='wechat_capabilities'?{...value,webPublication:WECHAT_WEB_CAPABILITIES}:value;
+ }
  if(name==='workflow_capabilities'){
   const c=await callWorkflowTool(name,{}) as Record<string,unknown>;
   return {owner:'auto-parse',platform,workflows:Object.keys(PLATFORM_WORKFLOWS[platform]),browserInstances:[...new Set(Object.values(PLATFORM_WORKFLOWS[platform]))],
    sessionIdleMinutes:c.sessionIdleMinutes,sessionSurvivesRestart:false,authoring:false,
-   formats:platform==='wechat'?['newspic-preparation']:platform==='x'?['text','single-image']:['video','image-text'],
+   formats:platform==='wechat'?['newspic-preparation','newspic-web-publication']:platform==='x'?['text','single-image']:['video','image-text'],
+   wechatWebPublication:platform==='wechat'?WECHAT_WEB_CAPABILITIES:undefined,
    xPublication:platform==='x'?c.xPublication:undefined,imageTextPublication:platform==='x'||platform==='wechat'?undefined:{...(c.imageTextPublication as object),platforms:[platform==='xiaohongshu'?'xhs':'douyin']},
    video:platform==='douyin'?{workflowId:DOUYIN_WORKFLOW_ID,maxBytes:536870912,topics:'caption_text',cover:'experimental',receiptSources:['creation_response','creator_work_list']}:undefined,
    limits:'Only platform-approved workflows; no arbitrary nodes/CRUD. User-authorized account control and explicit public publication. Unknown submissions must not be retried.'};
