@@ -14,7 +14,7 @@ import { DEFAULT_HUMAN_OPTIONS } from './human-options';
 import { booleanVariable } from './condition';
 import type { NodeDef, WorkflowSession } from './types';
 
-const DEBUG_TYPES = new Set(['material', 'navigate', 'click', 'text_input', 'press_hotkey', 'scroll', 'file_upload', 'image_upload', 'image_text_publish', 'x_publish', 'wait_condition', 'screenshot', 'qrcode']);
+const DEBUG_TYPES = new Set(['wechat_web_prepare', 'material', 'navigate', 'click', 'text_input', 'press_hotkey', 'scroll', 'file_upload', 'image_upload', 'image_text_publish', 'x_publish', 'wait_condition', 'screenshot', 'qrcode']);
 const IDLE_MS = 20 * 60 * 1000;
 type Operation = { id: string; fingerprint: string; status: 'running' | 'done' | 'error' | 'stopped'; error?: string };
 type ManagedSession = { browser: Browser; release: () => Promise<void>; port: number; revision: number; expiresAt: number; timer?: ReturnType<typeof setTimeout>; stopped: boolean; closing: boolean; saving?: boolean; operation?: Operation; requests: Map<string, Operation> };

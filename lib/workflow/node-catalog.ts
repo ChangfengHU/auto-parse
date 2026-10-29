@@ -52,6 +52,11 @@ const TIMEOUT_META: ParamMeta = {
 // ── 节点目录 ──────────────────────────────────────────────────────────────────
 
 export const NODE_CATALOG: NodeCatalogItem[] = [
+  {type:'wechat_web_prepare',label:'公众号：核对贴图草稿',icon:'微',category:'advanced',
+   desc:'按官方草稿ID和已登录账号精确核对贴图，不发表。列表不完整或匹配不唯一时停止。',
+   defaultParams:{mediaId:'{{mediaId}}',expectedAccount:'{{expectedAccount}}'},
+   paramMeta:{mediaId:{label:'官方草稿 ID',type:'template',required:true,desc:'官方 API 返回的 media_id。'},
+    expectedAccount:{label:'公众号原始 ID',type:'template',required:true,desc:'必须与已登录网页一致的 gh_ 开头原始 ID。'}}},
   {
     type:'x_publish',label:'X：文字 / 单图发推',icon:'𝕏',category:'advanced',
     desc:'复用已登录浏览器，核对账号/正文/原生图片ID并保存回执。可选1张PNG/JPEG/WebP，本地限制5MiB；暂不支持视频、回复、引用和线程。',

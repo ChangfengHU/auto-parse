@@ -24,6 +24,7 @@ import { executeScroll } from './nodes/scroll';
 import { executeScreenshot } from './nodes/screenshot';
 import { executeFileUpload } from './nodes/file-upload';
 import { executeImageUpload } from './nodes/image-upload';
+import { executeWechatWebPrepare } from './nodes/wechat-web-prepare';
 import { executeXPublish } from './nodes/x-publish';
 import { executeImageTextPublish } from './nodes/image-text-publish';
 import { executeWaitCondition } from './nodes/wait-condition';
@@ -60,6 +61,7 @@ const NODE_REGISTRY: Record<NodeType, NodeExecutor> = {
   screenshot:            executeScreenshot,
   file_upload:           executeFileUpload,
   image_upload:          executeImageUpload,
+  wechat_web_prepare:   executeWechatWebPrepare,
   x_publish:            executeXPublish,
   image_text_publish:    executeImageTextPublish,
   wait_condition:        executeWaitCondition,

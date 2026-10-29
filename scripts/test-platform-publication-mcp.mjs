@@ -132,3 +132,11 @@ test('an in-flight stop preserves ownership until asynchronous cleanup finishes'
  r.sessions.delete(opened.sessionId);
  await assert.rejects(r.call('x','workflow_get_session',{sessionId:opened.sessionId}),/expired_do_not_retry/);
 });
+
+test('wechat permits only its preparation workflow',async()=>{
+ const r=runtime(),id=Object.keys(contract.PLATFORM_WORKFLOWS.wechat)[0];
+ const rows=await r.call('wechat','workflow_list',{});
+ assert.deepEqual(Array.from(rows.items,w=>w.id),[id]);
+ await assert.rejects(r.call('wechat','workflow_get',{workflowId:Object.keys(contract.PLATFORM_WORKFLOWS.x)[0]}),/platform_workflow_not_allowed/);
+ await assert.rejects(r.call('wechat','workflow_open_session',{workflowId:id,browserInstance:2}),/platform_browser_mismatch/);
+});

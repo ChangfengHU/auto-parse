@@ -1,4 +1,5 @@
 import {callWechatDraftTool} from '../wechat/draft-service';
+import {WECHAT_DRAFT_TOOLS} from '../wechat/draft-contract';
 import {callWorkflowTool} from './mcp-service';
 import {getSession} from './session-store';
 import {startDouyinWorkflow,DOUYIN_WORKFLOW_ID} from './douyin-workflow-service';
@@ -21,13 +22,13 @@ function assertVideoTask(id:unknown){
 }
 export async function callPlatformTool(platform:PublicationPlatform,name:string,input:Record<string,unknown>):Promise<unknown>{
  if(!platformMcpTools(platform).some(t=>t.name===name))throw Error('platform_tool_not_allowed');
- if(platform==='wechat')return callWechatDraftTool(name,input);
+ if(platform==='wechat' && WECHAT_DRAFT_TOOLS.some(t=>t.name===name))return callWechatDraftTool(name,input);
  if(name==='workflow_capabilities'){
   const c=await callWorkflowTool(name,{}) as Record<string,unknown>;
   return {owner:'auto-parse',platform,workflows:Object.keys(PLATFORM_WORKFLOWS[platform]),browserInstances:[...new Set(Object.values(PLATFORM_WORKFLOWS[platform]))],
    sessionIdleMinutes:c.sessionIdleMinutes,sessionSurvivesRestart:false,authoring:false,
-   formats:platform==='x'?['text','single-image']:['video','image-text'],
-   xPublication:platform==='x'?c.xPublication:undefined,imageTextPublication:platform==='x'?undefined:{...(c.imageTextPublication as object),platforms:[platform==='xiaohongshu'?'xhs':'douyin']},
+   formats:platform==='wechat'?['newspic-preparation']:platform==='x'?['text','single-image']:['video','image-text'],
+   xPublication:platform==='x'?c.xPublication:undefined,imageTextPublication:platform==='x'||platform==='wechat'?undefined:{...(c.imageTextPublication as object),platforms:[platform==='xiaohongshu'?'xhs':'douyin']},
    video:platform==='douyin'?{workflowId:DOUYIN_WORKFLOW_ID,maxBytes:536870912,topics:'caption_text',cover:'experimental',receiptSources:['creation_response','creator_work_list']}:undefined,
    limits:'Only platform-approved workflows; no arbitrary nodes/CRUD. User-authorized account control and explicit public publication. Unknown submissions must not be retried.'};
  }

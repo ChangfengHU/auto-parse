@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url),ts=require('typescript');
+const source=fs.readFileSync(new URL('../lib/wechat/web-draft-identity.ts',import.meta.url),'utf8');
+const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const mod={exports:{}};vm.runInNewContext(code,{module:mod,exports:mod.exports,URL});
+const match=mod.exports.matchWebNewspic;
+const official={title:'早报',createdAt:1700000000,thumbUrl:'http://mmbiz.qpic.cn/a/b?size=1'};
+const card={title:'早报',create_time:1700000000,img_url:'https://mmbiz.qlogo.cn/a/b?size=2',app_id:12,file_id:13};
+test('matches exact title, timestamp and image while ignoring CDN sizing',()=>{const r=match(official,[card],true);assert.equal(r.appId,12);assert.equal(r.fileId,13);});
+test('fails closed for incomplete scan and ambiguity',()=>{assert.throws(()=>match(official,[card],false),/incomplete/);assert.throws(()=>match(official,[card,card],true),/ambiguous/);});
+test('refuses changed title, time or cover',()=>{for(const patch of [{title:'其他'},{create_time:1700000001},{img_url:'https://mmbiz.qpic.cn/other'}])assert.throws(()=>match(official,[{...card,...patch}],true),/not_matched/);});
+test('refuses untrusted cover, bad ids and titles beyond 20 code points',()=>{assert.throws(()=>match({...official,thumbUrl:'https://evil.test/a/b'},[card],true),/invalid_cover/);assert.throws(()=>match(official,[{...card,app_id:0}],true),/invalid_internal_id/);assert.throws(()=>match({...official,title:'字'.repeat(21)},[card],true),/invalid_newspic_title/);});

@@ -55,15 +55,15 @@ const token={access_token:'fixture-token-never-return',expires_in:7200};
 const article={title:'Fixture',content:'<p>Test body</p>',thumbMediaId:'permanent-cover'};
 const create=(r,id='create-1',articles=[article])=>r.callWechatDraftTool('wechat_create_draft',{requestId:id,confirmDraft:true,articles});
 test.after(()=>{for(const r of suites)fs.rmSync(r.cwd,{recursive:true,force:true});});
-test('catalog is draft-only and has independent platform authentication',()=>{
+test('wechat catalog has independent auth and only approved preparation workflow',()=>{
  const c=loader()('lib/workflow/platform-mcp-contract.ts'),names=c.platformMcpTools('wechat').map(x=>x.name);
- assert.equal(names.length,10);assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(!names.some(x=>/workflow/.test(x)));
+ assert.equal(names.length,19);assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(names.includes('workflow_open_session'));assert(!names.includes('workflow_create'));assert(!names.includes('workflow_update'));
  const env={WORKFLOW_MCP_TOKEN:'fixture'};
  for(const other of ['douyin','xiaohongshu','x']){
   const req=new Request('https://auto-parse-v2.vyibc.com/api/publish/mcp/wechat',{headers:{authorization:'Bearer '+c.platformMcpToken(other,env)}});
   assert.equal(c.authorizePlatformMcp(req,'wechat',env),401);
  }
- assert.equal(Object.keys(c.PLATFORM_WORKFLOWS.wechat).length,0);
+ assert.deepEqual(Object.keys(c.PLATFORM_WORKFLOWS.wechat),['9a676224-70bd-41d4-9e85-c8d2b83a00c4']);
 });
 test('capabilities have no secrets or network side effects',async()=>{
  const r=setup(),data=await r.callWechatDraftTool('wechat_capabilities',{});
