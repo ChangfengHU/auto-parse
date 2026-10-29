@@ -1,3 +1,4 @@
+import {WechatApiError} from '../wechat/draft-service';
 import {validToolArguments} from './mcp-contract';
 import {authorizePlatformMcp,isPublicationPlatform,platformMcpTools} from './platform-mcp-contract';
 import {callPlatformTool} from './platform-mcp-service';
@@ -32,7 +33,7 @@ export async function handlePlatformMcp(req:Request,platform:string) {
   if (message.method === 'initialize') result = {
     protocolVersion: VERSIONS.includes(String(params.protocolVersion)) ? params.protocolVersion : VERSIONS[0],
     capabilities: { tools: {} }, serverInfo: { name: 'auto-parse-'+platform+'-publish', version: '0.1.0' },
-    instructions: 'Platform-scoped '+platform+' publication only. Use approved workflows and existing task-owned browser runtime. Do not author arbitrary workflows or access other platforms. Public publication requires user authorization; preserve original request/session/task IDs and reconcile unknown results. Sessions do not survive restart.',
+    instructions: platform==='wechat'?'Official WeChat account draft-box only. Use wechat_capabilities and account status, then create drafts with stable requestId. No browser, public publishing or mass-send. Unknown results require original ledger and draft-list reconciliation.': 'Platform-scoped '+platform+' publication only. Use approved workflows and existing task-owned browser runtime. Do not author arbitrary workflows or access other platforms. Public publication requires user authorization; preserve original request/session/task IDs and reconcile unknown results. Sessions do not survive restart.',
   };
   else if (message.method === 'ping') result = {};
   else if (message.method === 'tools/list') result = { tools: WORKFLOW_MCP_TOOLS };
@@ -54,7 +55,7 @@ export async function handlePlatformMcp(req:Request,platform:string) {
       result = { content, isError: false };
     } catch (error) {
       const safe = error instanceof WorkflowInputError || error instanceof WorkflowConflictError || (error instanceof Error && /^[a-z0-9_]+$/.test(error.message));
-      result = { isError: true, content: [{ type: 'text', text: JSON.stringify({ error: safe && error instanceof Error ? error.message : 'workflow_operation_failed' }) }] };
+      result = { isError: true, content: [{ type: 'text', text: JSON.stringify(error instanceof WechatApiError?{error:'wechat_api_error',code:error.code,message:error.message,...error.egressIp?{egressIp:error.egressIp}:{}}:{ error: safe && error instanceof Error ? error.message : 'workflow_operation_failed' }) }] };
     }
   } else return rpcError(id, -32601, 'Method not found');
   return Response.json({ jsonrpc: '2.0', id, result }, { headers });

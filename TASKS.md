@@ -4,6 +4,13 @@
 
 ## In Progress
 
+- [API-003] 公众号官方接口草稿箱与平台MCP
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-10-29
+  Log: dev-log/2026-10-29-wechat-drafts.md
+  Next: 官方草稿7工具已部署、插件0.3.0已入驻；38项回归、类型/Lint/构建与公网MCP通过。真实微信返回40164，待出口IP白名单后素材上传、草稿创建及回读验收。
+
 
 - [WORKFLOW-006] X 文字发推工作流与安全预览
   Status: In Progress
