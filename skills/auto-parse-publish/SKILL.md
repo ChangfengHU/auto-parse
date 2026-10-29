@@ -1,6 +1,6 @@
 ---
 name: auto-parse-publish
-description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用户准备、发布并回查抖音、小红书及 X 内容，并通过官方API保存公众号图文草稿；也用于查询支持的平台、账号要求和发布状态。不负责采集素材、生图、登录或绕过平台风控。
+description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用户准备、发布并回查抖音、小红书及 X 内容，并通过官方API保存公众号图文与原生贴图草稿；也用于查询支持的平台、账号要求和发布状态。不负责采集素材、生图、登录或绕过平台风控。
 ---
 
 # 自动发布
@@ -9,7 +9,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 依赖与授权
 
-插件0.3.1按自媒体平台包含四个MCP（各0.1.0），公众号当前仅草稿箱，不再把研究工具或通用工作流编辑器作为发布依赖：
+插件0.3.2按自媒体平台包含四个MCP（公众号0.1.1，其他各0.1.0），公众号当前仅草稿箱，不再把研究工具或通用工作流编辑器作为发布依赖：
 
 | 自媒体平台 | MCP服务器 | 专用端点 |
 | --- | --- | --- |
@@ -34,7 +34,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 路由
 
-- 微信公众号：读 [官方草稿箱工具](references/wechat-drafts.md)，只创建、查询图文草稿和上传所需图片；没有公开发表、群发或删除工具。不能把草稿media_id当作公开文章链接。
+- 微信公众号：读 [官方草稿箱工具](references/wechat-drafts.md)，创建、查询图文与原生贴图草稿和上传所需图片；没有公开发表、群发或删除工具。不能把草稿media_id当作公开文章链接。
 
 - 抖音视频：读 [专用发布工具](references/douyin-video.md)，使用 auto-parse-douyin-publish 的 prepare_video / publish_video / get_video_task / reconcile_video_task。禁止通过旧 publish.sh、匿名接口或通用调试器执行受保护抖音视频流程。
 - X 文字／单图、小红书视频、抖音／小红书图文：读 [工作流调用](references/workflows.md)，使用各自平台的发布MCP。

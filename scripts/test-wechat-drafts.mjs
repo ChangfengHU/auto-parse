@@ -217,3 +217,64 @@ test('real failed proxy connection cannot fall back and reach the origin server'
   assert.equal(reached,0);
  }finally{await new Promise(resolve=>origin.close(resolve));}
 });
+
+const newspic={articleType:'newspic',title:'早报贴图',content:'示例正文',images:[{imageMediaId:'image-first'},{imageMediaId:'image-second'}]};
+test('native newspic preserves image order, first-image cover, mixed news compatibility and idempotence',async()=>{
+ const r=setup([token,{media_id:'native-draft'}]);
+ const result=await create(r,'native',[newspic,article]);
+ const body=JSON.parse(r.calls.at(-1).init.body),n=body.articles[0];
+ assert.equal(n.article_type,'newspic');
+ assert.deepEqual(n.image_info.image_list,[{image_media_id:'image-first'},{image_media_id:'image-second'}]);
+ assert.equal(n.thumb_media_id,undefined);assert.equal(n.content,'示例正文');
+ assert.equal(body.articles[1].thumb_media_id,'permanent-cover');assert.equal(result.articleCount,2);
+ assert.equal((await create(r,'native',[newspic,article])).replayed,true);assert.equal(r.calls.length,2);
+ await assert.rejects(create(r,'native',[{...newspic,images:[...newspic.images].reverse()},article]),/request_id_conflict/);
+});
+test('newspic imports URLs as permanent image material, never inline uploads',async()=>{
+ const r=setup([token,()=>new Response(png),{media_id:'uploaded-image'},{media_id:'image-draft'}]);
+ await create(r,'native-url',[{...newspic,images:[{imageUrl:'https://resource.vyibc.com/card.png'},{imageMediaId:'existing-image'}]}]);
+ assert.equal(new URL(r.calls[2].url).pathname,'/cgi-bin/material/add_material');
+ assert.deepEqual(JSON.parse(r.calls.at(-1).init.body).articles[0].image_info.image_list,[{image_media_id:'uploaded-image'},{image_media_id:'existing-image'}]);
+});
+test('native image validation rejects bad counts, HTML, conflicting references and news-only cover',async()=>{
+ const r=setup();
+ for(const patch of [
+  {images:[]},{images:Array.from({length:21},()=>({imageMediaId:'x'}))},{images:[{}]},
+  {images:[{imageMediaId:'x',imageUrl:'https://resource.vyibc.com/x.png'}]},
+  {images:[{imageUrl:'https://evil.test/x.png'}]},{images:[{imageMediaId:3}]},
+  {content:'<p>Not plain text</p>'},{content:'x'.repeat(1001)},{title:'字'.repeat(33)},
+  {coverImageUrl:'https://resource.vyibc.com/cover.png'},{articleType:'live'},
+ ])await assert.rejects(create(r,'invalid-native',[{...newspic,...patch}]));
+ await assert.rejects(create(r,'invalid-news',[{...article,images:newspic.images}]));
+ assert.equal(r.calls.length,0);
+});
+test('uncertain native draft creation keeps completed image uploads and never blindly retries',async()=>{
+ const r=setup([token,()=>new Response(png),{media_id:'retained-upload'},Error('network after submission')]);
+ const a={...newspic,images:[{imageUrl:'https://resource.vyibc.com/card.png'}]};
+ await assert.rejects(create(r,'native-unknown',[a]),/result_unknown/);
+ assert.equal((await r.callWechatDraftTool('wechat_draft_request_status',{requestId:'native-unknown'})).state,'unknown');
+ assert.equal((await r.callWechatDraftTool('wechat_draft_request_status',{requestId:'native-unknown:image:0:0'})).state,'completed');
+ await assert.rejects(create(r,'native-unknown',[a]),/submission_unknown/);assert.equal(r.calls.length,4);
+});
+test('definite native API rejection reuses already uploaded images on same-ID retry',async()=>{
+ const r=setup([token,()=>new Response(png),{media_id:'retained-upload'},{errcode:45008,errmsg:'reject'},{media_id:'retried-draft'}]);
+ const a={...newspic,images:[{imageUrl:'https://resource.vyibc.com/card.png'}]};
+ await assert.rejects(create(r,'native-retry',[a]),e=>e.code===45008);
+ assert.equal((await create(r,'native-retry',[a])).media_id,'retried-draft');
+ assert.equal(r.calls.filter(c=>new URL(c.url).pathname.endsWith('/material/add_material')).length,1);
+});
+test('permanent native images accept over 1MiB while inline images enforce 1MiB',async()=>{
+ const bytes=Buffer.concat([png,Buffer.alloc(1024*1024)]);
+ const native=setup([token,()=>new Response(bytes),{media_id:'large-permanent'}]);
+ assert.equal((await native.callWechatDraftTool('wechat_upload_image',{requestId:'large-image',imageUrl:'https://resource.vyibc.com/card.png',purpose:'newspic'})).media_id,'large-permanent');
+ const inline=setup([token,()=>new Response(bytes)]);
+ await assert.rejects(inline.callWechatDraftTool('wechat_upload_image',{requestId:'large-inline',imageUrl:'https://resource.vyibc.com/card.png',purpose:'inline'}),/image_too_large/);
+ const capped=setup([token,()=>new Response('x',{headers:{'content-length':String(10*1024*1024+1)}})]);
+ await assert.rejects(capped.callWechatDraftTool('wechat_upload_image',{requestId:'large-native',imageUrl:'https://resource.vyibc.com/card.png',purpose:'newspic'}),/image_too_large/);
+});
+test('advertised native schema passes actual MCP recursive argument validation',()=>{
+ const c=loader()('lib/workflow/platform-mcp-contract.ts'),validate=loader()('lib/workflow/mcp-contract.ts').validToolArguments;
+ const def=c.platformMcpTools('wechat').find(t=>t.name==='wechat_create_draft');
+ assert.equal(validate(def.inputSchema,{requestId:'schema-native',confirmDraft:true,articles:[newspic]}),true);
+ assert.equal(validate(def.inputSchema,{requestId:'schema-native',confirmDraft:true,articles:[{...newspic,images:[{imageUrl:'https://resource.vyibc.com/a.png',extra:1}]}]}),false);
+});

@@ -6,9 +6,11 @@ import path from 'node:path';
 type Config={appId:string;appSecret:string;name:string;assetHosts?:string[]};
 type Json=Record<string,unknown>;
 type Ledger={requestId:string;appId:string;operation:string;fingerprint:string;state:'submitting'|'completed'|'failed'|'unknown';updatedAt:string;result?:Json;error?:Json};
-type Article={title:string;content:string;author?:string;digest?:string;thumbMediaId?:string;coverImageUrl?:string;contentSourceUrl?:string;needOpenComment?:boolean;onlyFansCanComment?:boolean};
+type DraftImage={imageMediaId?:string;imageUrl?:string};
+type Article={articleType?:'news'|'newspic';images?:DraftImage[];title:string;content:string;author?:string;digest?:string;thumbMediaId?:string;coverImageUrl?:string;contentSourceUrl?:string;needOpenComment?:boolean;onlyFansCanComment?:boolean};
 const API='https://api.weixin.qq.com/cgi-bin/';
-const IMAGE_LIMIT=2*1024*1024;
+const IMAGE_LIMIT=10*1024*1024;
+const INLINE_IMAGE_LIMIT=1024*1024;
 const defaultHosts=['resource.vyibc.com','cdn.vyibc.com','mmbiz.qpic.cn'];
 let tokenCache:{appId:string;secretHash:string;transportKey:string;token:string;expires:number}|undefined;
 let tokenFlight:Promise<string>|undefined;
@@ -116,16 +118,16 @@ function assetUrl(c:Config,value:unknown){
  if(!hosts.includes(url.hostname))throw Error('wechat_untrusted_image_host_use_resource_or_cdn_vyibc');
  return url;
 }
-async function imageBytes(c:Config,value:unknown){
+async function imageBytes(c:Config,value:unknown,limit:number){
  let url=assetUrl(c,value);
  for(let hop=0;hop<4;hop++){
   let res:Response;
   try{res=await wechatFetch(url,{redirect:'manual',signal:AbortSignal.timeout(20000)});}catch{throw Error('wechat_image_download_failed');}
   if(res.status>=300&&res.status<400){const next=res.headers.get('location');await res.body?.cancel();if(!next)throw Error('wechat_image_redirect_invalid');url=assetUrl(c,new URL(next,url).href);continue;}
   if(!res.ok||!res.body)throw Error('wechat_image_download_failed');
-  if(Number(res.headers.get('content-length'))>IMAGE_LIMIT){await res.body.cancel();throw Error('wechat_image_too_large');}
+  if(Number(res.headers.get('content-length'))>limit){await res.body.cancel();throw Error('wechat_image_too_large');}
   const reader=res.body.getReader(),chunks:Uint8Array[]=[];let size=0;
-  try{while(true){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>IMAGE_LIMIT){await reader.cancel();throw Error('wechat_image_too_large');}chunks.push(part.value);}}
+  try{while(true){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>limit){await reader.cancel();throw Error('wechat_image_too_large');}chunks.push(part.value);}}
   finally{reader.releaseLock();}
   const bytes=Buffer.concat(chunks);
   const jpeg=bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff;
@@ -135,15 +137,15 @@ async function imageBytes(c:Config,value:unknown){
  }
  throw Error('wechat_image_too_many_redirects');
 }
-async function upload(c:Config,url:string,purpose:'cover'|'inline',id:string){
+async function upload(c:Config,url:string,purpose:'cover'|'inline'|'newspic',id:string){
  assetUrl(c,url);
  // Authenticate before writing a mutation intent when credentials/IP are not ready.
  await accessToken(c);
  return mutate(c,id,'upload_image',{url,purpose},async()=>{
-  const image=await imageBytes(c,url),form=new FormData();
+  const image=await imageBytes(c,url,purpose==='inline'?INLINE_IMAGE_LIMIT:IMAGE_LIMIT),form=new FormData();
   form.set('media',new Blob([new Uint8Array(image.bytes)],{type:image.type}),'image.'+image.ext);
-  const result=await api(c,purpose==='cover'?'material/add_material?type=image':'media/uploadimg',undefined,form);
-  if(purpose==='cover'&&typeof result.media_id!=='string'||purpose==='inline'&&typeof result.url!=='string')throw Error('wechat_upload_response_result_unknown');
+  const result=await api(c,purpose!=='inline'?'material/add_material?type=image':'media/uploadimg',undefined,form);
+  if(purpose!=='inline'&&typeof result.media_id!=='string'||purpose==='inline'&&typeof result.url!=='string')throw Error('wechat_upload_response_result_unknown');
   return {purpose,...result};
  });
 }
@@ -156,6 +158,23 @@ function validateArticles(value:unknown,c:Config):Article[]{
   if(typeof a.content!=='string'||!a.content.trim()||a.content.length>=20000||Buffer.byteLength(a.content)>=1024*1024)throw Error('wechat_invalid_article_content');
   if(a.author!==undefined&&(typeof a.author!=='string'||Array.from(a.author).length>8))throw Error('wechat_invalid_article_author');
   if(a.digest!==undefined&&(typeof a.digest!=='string'||Array.from(a.digest).length>120))throw Error('wechat_invalid_article_digest');
+  if(a.articleType!==undefined&&a.articleType!=='news'&&a.articleType!=='newspic')throw Error('wechat_invalid_article_type');
+  if(a.articleType==='newspic'){
+   if(Array.from(a.title).length>32)throw Error('wechat_invalid_article_title');
+   if(a.content.length>1000||/<[^>]*>/.test(a.content))throw Error('wechat_invalid_newspic_plain_text');
+   if(a.thumbMediaId!==undefined||a.coverImageUrl!==undefined)throw Error('wechat_cover_newspic_uses_first_image');
+   if(!Array.isArray(a.images)||a.images.length<1||a.images.length>20)throw Error('wechat_invalid_newspic_images_count');
+   const images=a.images.map(image=>{
+    if(!image||typeof image!=='object'||Array.isArray(image))throw Error('wechat_invalid_newspic_image');
+    if(Object.keys(image).some(key=>key!=='imageMediaId'&&key!=='imageUrl'))throw Error('wechat_invalid_newspic_image');
+    if(Boolean(image.imageMediaId)===Boolean(image.imageUrl))throw Error('wechat_invalid_newspic_image_requires_one_id_or_url');
+    if(image.imageMediaId&&(typeof image.imageMediaId!=='string'||image.imageMediaId.length>256))throw Error('wechat_invalid_image_media_id');
+    if(image.imageUrl)assetUrl(c,image.imageUrl);
+    return {...image};
+   });
+   return {...a,images};
+  }
+  if(a.images!==undefined)throw Error('wechat_invalid_news_images_use_html');
   if(Boolean(a.thumbMediaId)===Boolean(a.coverImageUrl))throw Error('wechat_cover_requires_exactly_one_media_id_or_url');
   if(a.thumbMediaId&&(typeof a.thumbMediaId!=='string'||a.thumbMediaId.length>256))throw Error('wechat_invalid_cover_media_id');
   if(a.coverImageUrl)assetUrl(c,a.coverImageUrl);
@@ -177,7 +196,18 @@ async function createDraft(c:Config,input:Json){
  return mutate(c,id,'create_draft',articles,async()=>{
   const prepared:Json[]=[];
   for(let index=0;index<articles.length;index++){
-   const a=articles[index];let thumb=a.thumbMediaId;
+   const a=articles[index];
+   if(a.articleType==='newspic'){
+    const imageList:Json[]=[];
+    for(let image=0;image<a.images!.length;image++){
+     const source=a.images![image];
+     const mediaId=source.imageMediaId||String((await upload(c,source.imageUrl!,'newspic',id+':image:'+index+':'+image)).media_id);
+     imageList.push({image_media_id:mediaId});
+    }
+    prepared.push({article_type:'newspic',title:a.title,content:a.content,image_info:{image_list:imageList},...(a.author?{author:a.author}:{}),...(a.needOpenComment!==undefined?{need_open_comment:a.needOpenComment?1:0}:{}),...(a.onlyFansCanComment!==undefined?{only_fans_can_comment:a.onlyFansCanComment?1:0}:{})});
+    continue;
+   }
+   let thumb=a.thumbMediaId;
    if(!thumb){const cover=await upload(c,a.coverImageUrl!,'cover',id+':cover:'+index);thumb=String(cover.media_id);}
    let content=a.content;const sources=[...new Set([...content.matchAll(/<img\b[^>]*\bsrc\s*=\s*(["'])(.*?)\1[^>]*>/gi)].map(m=>m[2]))];
    for(let image=0;image<sources.length;image++){
@@ -196,10 +226,10 @@ async function createDraft(c:Config,input:Json){
 }
 export async function callWechatDraftTool(name:string,input:Json):Promise<Json>{
  const c=config();
- if(name==='wechat_capabilities')return {platform:'wechat',account:{appId:c.appId,name:c.name},transport:'official_https_api',network:wechatNetworkInfo(),browserRequired:false,draftOnly:true,publicPublish:false,massSend:false,formats:['news_html'],articleLimit:8,imageMaxBytes:IMAGE_LIMIT,imageFormats:['jpeg','png'],assetHosts:c.assetHosts||defaultHosts,tokenStrategy:'stable_token_force_refresh_false',requestLedger:'restart_durable_single_host',unknownResult:'Check original request and official draft list; never blindly resubmit.',limits:'Account official API permissions and service egress IP whitelist are required. Draft saved is not public publication.'};
+ if(name==='wechat_capabilities')return {platform:'wechat',account:{appId:c.appId,name:c.name},transport:'official_https_api',network:wechatNetworkInfo(),browserRequired:false,draftOnly:true,publicPublish:false,massSend:false,formats:['news_html','newspic'],newspic:{imageLimit:20,contentMaxChars:1000,firstImageIsCover:true,animatedGifVerified:false,livePhoto:false},inlineImageMaxBytes:INLINE_IMAGE_LIMIT,articleLimit:8,imageMaxBytes:IMAGE_LIMIT,imageFormats:['jpeg','png'],assetHosts:c.assetHosts||defaultHosts,tokenStrategy:'stable_token_force_refresh_false',requestLedger:'restart_durable_single_host',unknownResult:'Check original request and official draft list; never blindly resubmit.',limits:'Account official API permissions and service egress IP whitelist are required. Draft saved is not public publication.'};
  if(name==='wechat_account_status'){const count=await api(c,'draft/count');return {ok:true,account:{appId:c.appId,name:c.name},draftCount:count.total_count,checkedAt:new Date().toISOString()};}
  if(name==='wechat_upload_image'){
-  if(input.purpose!=='cover'&&input.purpose!=='inline')throw Error('wechat_invalid_image_purpose');
+  if(input.purpose!=='cover'&&input.purpose!=='inline'&&input.purpose!=='newspic')throw Error('wechat_invalid_image_purpose');
   return upload(c,String(input.imageUrl),input.purpose,requestId(input.requestId));
  }
  if(name==='wechat_create_draft')return createDraft(c,input);

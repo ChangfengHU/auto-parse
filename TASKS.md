@@ -9,7 +9,7 @@
   Owner: codex
   Updated: 2026-10-29
   Log: dev-log/2026-10-29-wechat-drafts.md
-  Next: 显式代理修复已上线；43项回归/类型/Lint/构建通过，文章草稿已真实创建并回读，稳定请求重放不重复。贴图/GIF/原生Live仍需按调研方案继续实现，当前不冒充已支持。
+  Next: 官方API现已支持news图文和newspic原生贴图；早报8图实测、官方类型/顺序/封面与防重回放、后台贴图页签可见通过。50项回归、类型/Lint/构建通过，插件0.3.2已登记；网页预览验证码、公开发表、GIF/Live待验收。
 
 - [WORKFLOW-006] X 文字发推工作流与安全预览
   Status: In Progress
