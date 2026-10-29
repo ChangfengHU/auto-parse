@@ -1,6 +1,6 @@
 {
   "schema": "auto-parse-publish-routing/v1",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "verifiedOn": "2026-10-29",
   "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers, official WeChat API for drafts; non-executable index",
   "providers": [

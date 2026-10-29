@@ -242,7 +242,7 @@ test('native image validation rejects bad counts, HTML, conflicting references a
   {images:[]},{images:Array.from({length:21},()=>({imageMediaId:'x'}))},{images:[{}]},
   {images:[{imageMediaId:'x',imageUrl:'https://resource.vyibc.com/x.png'}]},
   {images:[{imageUrl:'https://evil.test/x.png'}]},{images:[{imageMediaId:3}]},
-  {content:'<p>Not plain text</p>'},{content:'x'.repeat(20000)},{title:'字'.repeat(33)},
+  {content:'<p>Not plain text</p>'},{content:'x'.repeat(20000)},{title:'字'.repeat(21)},
   {coverImageUrl:'https://resource.vyibc.com/cover.png'},{articleType:'live'},
  ])await assert.rejects(create(r,'invalid-native',[{...newspic,...patch}]));
  await assert.rejects(create(r,'invalid-news',[{...article,images:newspic.images}]));
@@ -357,4 +357,11 @@ test('Live cover reference is preserved as local metadata and never passed to We
  assert(!JSON.stringify(JSON.parse(r.calls.at(-1).init.body)).includes(a.liveCoverVideoUrl));
  assert.equal((await r.callWechatDraftTool('wechat_draft_request_status',{requestId:'live-reference'})).result.auxiliaryMetadata[0].liveCoverVideoUrl,a.liveCoverVideoUrl);
  await assert.rejects(create(r,'live-invalid',[{...a,liveCoverVideoUrl:'https://example.org/untrusted.mp4'}]),/untrusted_image_host/);
+});
+
+test('newspic title allows 20 codepoints and rejects 21 before contacting WeChat',async()=>{
+ const r=setup([token,{media_id:'title-at-limit'}]);
+ await create(r,'title-20',[{...newspic,title:'字'.repeat(20)}]);
+ await assert.rejects(create(r,'title-21',[{...newspic,title:'字'.repeat(21)}]),/invalid_newspic_title_max_20/);
+ assert.equal(r.calls.length,2);
 });
