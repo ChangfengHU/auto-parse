@@ -34,3 +34,6 @@
 ## 原生贴图补齐（2026-10-29）
 同一wechat_create_draft新增articleType=newspic，images为1至20项有序imageMediaId或imageUrl；生成官方image_info.image_list，首张为封面，content纯文本。news默认行为、专用认证与账本保持兼容。七个工具身份不变，新增上传purpose=newspic；仅JPEG/PNG，不承诺GIF或Live。官方最新API文档已通过实际浏览器读取并核对字段：https://developers.weixin.qq.com/doc/service/api/draftbox/draftmanage/api_draft_add 。
 生产早报8张静态贴图已真实创建，官方回读newspic、8项顺序及首图封面通过，同请求回放同media_id且草稿仅增加1；没有公开发表。50项回归、独立类型/Lint、生产构建通过。通用静态导出：node scripts/render-newspic-cards.mjs input.json output-directory；输入brand/date/source/cards，每卡title/label/points/source，自动检查溢出，输出1080x1440 PNG、manifest和联系表；仅受信任维护调用，不是MCP任意脚本执行。
+
+## v2阶段更新（2026-10-29）
+永久图片上传允许GIF/JPEG/PNG并按文件签名检查，正文图片仍仅JPEG/PNG；GIF能否通过微信上传以及在贴图内播放均待真实验收。新增图片下载HTTP错误码和提示，贴图批量上传错误返回1起始图片序号；错误覆盖尚非完整统一。能力声明增加建议120秒超时与现有标题限制；未知结果继续先查询原requestId，禁止更换ID盲重提。其他v2需求和草稿ID单独发表尚未完成。
