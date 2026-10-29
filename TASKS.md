@@ -4,6 +4,14 @@
 
 ## In Progress
 
+- [WORKFLOW-011] 公众号网页按草稿ID发表
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-10-29
+  Log: dev-log/2026-10-29-wechat-web-publish.md
+  Next: 贴图标题20字约束已部署、62项回归及生产拒绝21字通过。通过Supabase正式工作流在已登录浏览器按草稿ID定位及发表仍未实现；网页身份唯一映射与最终确认流程待验证。
+
+
 
 - [API-003] 公众号官方接口草稿箱与平台MCP
   Status: In Progress

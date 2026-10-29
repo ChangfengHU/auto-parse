@@ -1,6 +1,6 @@
 # 自动发布插件：按自媒体平台分类
 
-稳定插件ID：vyibc-auto-publish，当前版本0.3.4。统一入口Skill为auto-parse-publish 0.3.4。
+稳定插件ID：vyibc-auto-publish，当前版本0.3.5。统一入口Skill为auto-parse-publish 0.3.5。
 能力广场：https://fleet.vyibc.com/#/hub?view=plugins&plugin=vyibc-auto-publish
 
 ## 四个平台，四个MCP
@@ -15,7 +15,7 @@
 四个端点均在https://auto-parse-v2.vyibc.com。公众号MCP固定版本0.2.1，其他MCP各0.1.0；插件版本与组件版本独立。
 三个连接复用原AutoParse发布节点、正式Supabase工作流、上传与去重执行器。没有复制独立发布器。新版包内已移除通用auto-parse-workflow和带研究工具的vyibc-douyin连接；这些既有服务保留供其他用途，不被删除或撤销。
 
-公众号使用官方API而非浏览器工作流，详见[公众号草稿箱](wechat-drafts.md)。新增连接不影响既有三个MCP版本；新版客户端需安装0.3.4并配置对应安全连接。40164白名单与真实草稿验收状态见专项日志，不因入驻即视为草稿创建通过。
+公众号使用官方API而非浏览器工作流，详见[公众号草稿箱](wechat-drafts.md)。新增连接不影响既有三个MCP版本；新版客户端需安装0.3.5并配置对应安全连接。40164白名单与真实草稿验收状态见专项日志，不因入驻即视为草稿创建通过。
 
 ## 认证与权限边界
 
@@ -27,11 +27,15 @@
 ## 安装与升级
 
 ~~~bash
-bash <(curl -fsSL 'https://fleet.vyibc.com/api/hub/onboarding/packages/vyibc-auto-publish/0.3.4/install') codex
+bash <(curl -fsSL 'https://fleet.vyibc.com/api/hub/onboarding/packages/vyibc-auto-publish/0.3.5/install') codex
 ~~~
 
 当前插件保留同一ID，旧0.1.0固定包与历史回执仍可读。旧版客户端需按原生安装器提示只卸载此插件的旧版本，再安装新版；不删除其他市场、插件或配置。安装器不会自动替用户卸载。
 服务认证使用客户端安全连接，完整包有四个无密钥MCP模板；平台凭据不能互换，旧的通用连接令牌也不能用于新平台端点。安装与认证仍分开。Claude目标只提供plugin-dir启动方式；Dots、ChatGPT等客户端未在本次验收中实际安装，不据此声称已同步。
+
+## 0.3.5贴图标题约束
+
+按用户明确要求及微信编辑器显示，贴图标题最多20个Unicode码点；21字在调用微信前拒绝，不截断。生产和固定包指南已验证。插件回执 828cf2d7-6251-471a-9827-f10838e36fd8；固定包SHA256 70ff5130cdd66928123c3ff668a72e5d89fdb863172508d753a0ea13ca3ecf1f。公众号MCP版本仍为0.2.1，网页按草稿ID发表仍在开发，不能以官方API代替。
 
 ## 0.3.4素材复用与诊断
 

@@ -9,11 +9,11 @@
 3. wechat_create_draft：requestId保持稳定，confirmDraft=true，articles为1至8篇。
    图文：articleType=news（默认）。每篇填写title、HTML content，另提供 thumbMediaId（本公众号永久封面素材ID）或 coverImageUrl，二选一。可选author、digest、contentSourceUrl、needOpenComment、onlyFansCanComment。
    coverImageUrl会自动上传永久图片；正文img必须是带引号的https src，来自实际允许的素材域名，非微信图片会自动通过微信正文图片接口上传并替换。data-src、srcset、活动脚本和不支持的嵌入标签会拒绝。
-   贴图：articleType=newspic，title不超过32字，content为纯文本，本地拒绝20000 UTF-16单元或1MiB及以上；微信的真实上限未确认；images按展示顺序传1至20项，每项imageMediaId（本公众号永久图片素材ID）或imageUrl二选一，首张自动作为封面，不传thumbMediaId/coverImageUrl。服务使用官方image_info.image_list，不是把图片塞进HTML。
+   贴图：articleType=newspic，title不超过20字，content为纯文本，本地拒绝20000 UTF-16单元或1MiB及以上；微信的真实上限未确认；images按展示顺序传1至20项，每项imageMediaId（本公众号永久图片素材ID）或imageUrl二选一，首张自动作为封面，不传thumbMediaId/coverImageUrl。服务使用官方image_info.image_list，不是把图片塞进HTML。
 4. wechat_get_draft(mediaId)：使用创建回执media_id实查；列表用 wechat_list_drafts(offset,count,includeContent)，count为1至20。
 5. 如需预先上传图片，用 wechat_upload_image(requestId,imageUrl,purpose)，purpose=cover或newspic返回永久media_id（不超过10MiB），inline返回微信url（不超过1MiB）。永久素材接受JPEG/PNG/GIF（GIF真实上传及播放未验收），正文图片仅JPEG/PNG；先放到自有资源域名，不接受任意内网/外部URL，也不把本地文件路径作为图片地址。
 
-适配器当前校验标题不超过32字、作者8字、摘要120字；正文小于20000字符且小于1MiB，每篇最多30张正文图片，永久图片上限10MiB、正文图片上限1MiB。这些是现有代码边界，不能当作微信保证接受的上限。按最新官方文档更严格准备：标题建议不超过32字，正文图片使用小于1MB的JPEG/PNG；作者仍服从适配器8字限制。微信最终可能因权限、内容和素材参数拒绝。已支持公众号原生贴图newspic；暂未验收GIF实际播放，不支持Live Photo、视频或Markdown自动排版；Markdown需先转换合适HTML。
+适配器当前校验文章标题不超过32字、贴图标题不超过20字、作者8字、摘要120字；正文小于20000字符且小于1MiB，每篇最多30张正文图片，永久图片上限10MiB、正文图片上限1MiB。这些是现有代码边界，不能当作微信保证接受的上限。按最新官方文档更严格准备：标题建议不超过32字，正文图片使用小于1MB的JPEG/PNG；作者仍服从适配器8字限制。微信最终可能因权限、内容和素材参数拒绝。已支持公众号原生贴图newspic；暂未验收GIF实际播放，不支持Live Photo、视频或Markdown自动排版；Markdown需先转换合适HTML。
 
 ## 恢复
 
@@ -29,7 +29,7 @@
 ## 已验证范围与网络
 2026-10-29已完成官方认证、永久封面上传、一篇接入验证文章草稿创建、同media_id官方回读，以及同requestId重放返回原回执。同日已通过同一生产MCP创建8张早报原生贴图草稿，官方回读article_type=newspic；逐项比对8个永久图片ID顺序与首图封面，同请求重放返回原media_id，草稿仅增加1。此验证不代表已成功公开发表、群发、GIF播放或原生Live Photo。不得为了确认连接反复创建测试草稿，优先查询账号状态与已有回执。
 服务端通过WECHAT_HTTPS_PROXY显式代理调用；代理缺失、配置无效或连接失败均不回退直连。代理地址及其认证配置由受信任服务端维护，不能作为MCP工具参数修改，不向普通输出回显。公众号AppSecret与MCP Bearer令牌是两种不同凭据。
-插件0.3.4包含v2调用指南；公众号Hub组件固定0.2.1，其他三个组件仍为0.1.0。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
+插件0.3.5包含v2调用指南；公众号Hub组件固定0.2.1，其他三个组件仍为0.1.0。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
 
 ## 原生贴图调用示例
 ~~~json

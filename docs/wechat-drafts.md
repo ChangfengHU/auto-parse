@@ -44,3 +44,6 @@ wechat_get_draft/list_drafts新增normalized:true中性articles包装，默认�
 
 ## v0.2.1补充
 公众号MCP版本0.2.1。wechat_capabilities可选includeEgress，探测目标api.ipify.org、记录时间，代理可能按目标分流。永久素材以同账号和文件字节SHA-256建立持久防重，真实上传同一图两次得到相同media_id和materialReused=true；历史上传账本未自动回填缓存，素材被外部删除时需要核对。newspic可设置liveCoverVideoUrl，限定可信素材域名、只写本机请求账本与创建回执，绝不声明已上传或能发布Live。真实临时草稿验证保存后已删除。61项回归、类型/Lint、构建通过；GIF播放、真实贴图正文上限和当前账号公开发表仍未验收。
+
+## 贴图标题修正
+2026-10-29用户明确要求贴图标题最多20字，网页编辑器亦显示20字计数；公众号贴图草稿创建现按Unicode码点限制20，超限拒绝不截断。文章news仍按官方文档32字。网页按草稿ID发表仍在WORKFLOW-011，不应将官方API发表功能冒充网页流程。
