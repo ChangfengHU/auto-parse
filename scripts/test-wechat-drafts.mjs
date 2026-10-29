@@ -57,7 +57,7 @@ const create=(r,id='create-1',articles=[article])=>r.callWechatDraftTool('wechat
 test.after(()=>{for(const r of suites)fs.rmSync(r.cwd,{recursive:true,force:true});});
 test('catalog is draft-only and has independent platform authentication',()=>{
  const c=loader()('lib/workflow/platform-mcp-contract.ts'),names=c.platformMcpTools('wechat').map(x=>x.name);
- assert.equal(names.length,7);assert(names.includes('wechat_create_draft'));assert(!names.some(x=>/workflow|publish|delete/.test(x)));
+ assert.equal(names.length,10);assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(!names.some(x=>/workflow/.test(x)));
  const env={WORKFLOW_MCP_TOKEN:'fixture'};
  for(const other of ['douyin','xiaohongshu','x']){
   const req=new Request('https://auto-parse-v2.vyibc.com/api/publish/mcp/wechat',{headers:{authorization:'Bearer '+c.platformMcpToken(other,env)}});
@@ -67,7 +67,7 @@ test('catalog is draft-only and has independent platform authentication',()=>{
 });
 test('capabilities have no secrets or network side effects',async()=>{
  const r=setup(),data=await r.callWechatDraftTool('wechat_capabilities',{});
- assert.equal(data.draftOnly,true);assert.equal(data.publicPublish,false);assert.equal(data.browserRequired,false);
+ assert.equal(data.draftOnly,false);assert.equal(data.publicPublish,'official_api_requires_account_permission');assert.equal(data.browserRequired,false);
  assert(!JSON.stringify(data).includes(fixture.appSecret));assert.equal(r.calls.length,0);
 });
 test('whitelist failures are sanitized and cause no mutation intent',async()=>{
@@ -242,7 +242,7 @@ test('native image validation rejects bad counts, HTML, conflicting references a
   {images:[]},{images:Array.from({length:21},()=>({imageMediaId:'x'}))},{images:[{}]},
   {images:[{imageMediaId:'x',imageUrl:'https://resource.vyibc.com/x.png'}]},
   {images:[{imageUrl:'https://evil.test/x.png'}]},{images:[{imageMediaId:3}]},
-  {content:'<p>Not plain text</p>'},{content:'x'.repeat(1001)},{title:'字'.repeat(33)},
+  {content:'<p>Not plain text</p>'},{content:'x'.repeat(20000)},{title:'字'.repeat(33)},
   {coverImageUrl:'https://resource.vyibc.com/cover.png'},{articleType:'live'},
  ])await assert.rejects(create(r,'invalid-native',[{...newspic,...patch}]));
  await assert.rejects(create(r,'invalid-news',[{...article,images:newspic.images}]));
@@ -292,4 +292,39 @@ test('failed image URL reports exact index and HTTP status without poisoning rep
  const a={...newspic,images:[{imageMediaId:'valid-id'},{imageUrl:'https://resource.vyibc.com/missing.png'}]};
  await assert.rejects(create(r,'bad-url',[a]),e=>e.code==='wechat_image_download_http_error'&&e.imageIndex===2&&e.httpStatus===404);
  assert.equal((await r.callWechatDraftTool('wechat_draft_request_status',{requestId:'bad-url'})).state,'failed');
+});
+
+test('delete requires explicit confirmation and exact mediaId and replays a durable receipt',async()=>{
+ const r=setup([token,{errcode:0}]);
+ await assert.rejects(r.callWechatDraftTool('wechat_delete_draft',{requestId:'delete-test',mediaId:'draft'}),/confirmation/);
+ const args={requestId:'delete-test',mediaId:'draft',confirmDelete:true};
+ assert.equal((await r.callWechatDraftTool('wechat_delete_draft',args)).status,'draft_deleted');
+ assert.equal(new URL(r.calls.at(-1).url).pathname,'/cgi-bin/draft/delete');
+ assert.equal((await r.callWechatDraftTool('wechat_delete_draft',args)).replayed,true);assert.equal(r.calls.length,2);
+});
+test('public submission is separate, requires permission and prevents same draft from being resubmitted under a new ID',async()=>{
+ const r=setup([token,{publish_id:'12345'}]);
+ await assert.rejects(r.callWechatDraftTool('wechat_publish_draft',{requestId:'pub-test',mediaId:'draft'}),/confirmation/);
+ const args={requestId:'pub-test',mediaId:'draft',confirmPublish:true};
+ const first=await r.callWechatDraftTool('wechat_publish_draft',args);assert.equal(first.status,'submitted');assert.equal(first.publish_id,'12345');
+ const again=await r.callWechatDraftTool('wechat_publish_draft',{...args,requestId:'pub-new'});
+ assert.equal(again.publish_id,'12345');assert.equal(r.calls.length,2);
+});
+test('long native content is sent whole and title limits apply to both formats',async()=>{
+ const r=setup([token,{media_id:'long-draft'}]);const content='早'.repeat(1400);
+ await create(r,'long-content',[{...newspic,content}]);
+ assert.equal(JSON.parse(r.calls.at(-1).init.body).articles[0].content,content);
+ await assert.rejects(create(r,'long-title',[{...article,title:'字'.repeat(33)}]),/invalid_article_title/);
+});
+test('optional normalized read uses neutral articles key and preserves raw default',async()=>{
+ const raw={news_item:[{article_type:'newspic',title:'Fixture'}],create_time:1,update_time:2};
+ const r=setup([token,raw,raw]);
+ const n=await r.callWechatDraftTool('wechat_get_draft',{mediaId:'draft',normalized:true});
+ assert.equal(n.articles[0].article_type,'newspic');assert.equal(n.mediaId,'draft');
+ const a=await r.callWechatDraftTool('wechat_get_draft',{mediaId:'draft'});assert.equal(a.news_item[0].title,'Fixture');
+});
+test('wechat business error permission 48001 is preserved and never reports successful publication',async()=>{
+ const r=setup([token,{errcode:48001,errmsg:'permission denied'}]);
+ await assert.rejects(r.callWechatDraftTool('wechat_publish_draft',{requestId:'denied-pub',mediaId:'draft',confirmPublish:true}),e=>e.code===48001);
+ assert.equal((await r.callWechatDraftTool('wechat_draft_request_status',{requestId:'denied-pub'})).state,'failed');
 });

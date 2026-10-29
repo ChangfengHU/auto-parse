@@ -37,3 +37,7 @@
 
 ## v2阶段更新（2026-10-29）
 永久图片上传允许GIF/JPEG/PNG并按文件签名检查，正文图片仍仅JPEG/PNG；GIF能否通过微信上传以及在贴图内播放均待真实验收。新增图片下载HTTP错误码和提示，贴图批量上传错误返回1起始图片序号；错误覆盖尚非完整统一。能力声明增加建议120秒超时与现有标题限制；未知结果继续先查询原requestId，禁止更换ID盲重提。其他v2需求和草稿ID单独发表尚未完成。
+
+## v2b阶段更新（2026-10-29）
+公众号MCP实际serverVersion0.2.0，10工具。wechat_delete_draft指定mediaId、稳定requestId、confirmDelete=true，已对本次专用测试稿创建/删除/回查实测；不得删除其他草稿。wechat_publish_draft按mediaId单独调用官方freepublish/submit，需confirmPublish=true和独立requestId，同一账号与草稿具有持久防重；wechat_publish_status查询publish_id。当前公众号官方权限只读探测返回48001，尚不可使用官方发表，无浏览器回退，无公开发表测试。提交不代表发表成功。
+wechat_get_draft/list_drafts新增normalized:true中性articles包装，默认保持兼容原结构。标题按官方文档上限32码点；贴图正文取消本地1000限制，少于20000 UTF-16代码单元及1MiB则发给微信，超限拒绝不截断。真实1400字测试被微信45166拒绝；错误原因及微信实际文字上限不能仅凭一次响应判断。
