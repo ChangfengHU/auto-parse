@@ -15,8 +15,11 @@ const defaultHosts=['resource.vyibc.com','cdn.vyibc.com','mmbiz.qpic.cn'];
 let tokenCache:{appId:string;secretHash:string;transportKey:string;token:string;expires:number}|undefined;
 let tokenFlight:Promise<string>|undefined;
 
+export class WechatImageError extends Error{
+ constructor(public readonly code:string,public readonly hint:string,public readonly imageIndex?:number,public readonly httpStatus?:number){super(code);this.name='WechatImageError';}
+}
 export class WechatApiError extends Error{
- constructor(public readonly code:number,public readonly message:string,public readonly egressIp?:string){super(message);this.name='WechatApiError';}
+ constructor(public readonly code:number,public readonly message:string,public readonly egressIp?:string,public imageIndex?:number){super(message);this.name='WechatApiError';}
 }
 function config():Config{
  let value:Config;
@@ -84,7 +87,8 @@ function writeLedger(file:string,data:Ledger){
  writeFileSync(tmp,JSON.stringify(data),{mode:0o600,flag:'wx'});renameSync(tmp,file);
 }
 function errorResult(error:unknown):Json{
- return error instanceof WechatApiError?{error:'wechat_api_error',code:error.code,message:error.message,...error.egressIp?{egressIp:error.egressIp}:{}}:
+ return error instanceof WechatApiError?{error:'wechat_api_error',code:error.code,message:error.message,...error.egressIp?{egressIp:error.egressIp}:{},...error.imageIndex?{imageIndex:error.imageIndex}:{}}:
+  error instanceof WechatImageError?{error:error.code,code:error.code,hint:error.hint,...error.imageIndex?{imageIndex:error.imageIndex}:{},...error.httpStatus?{httpStatus:error.httpStatus}:{}}:
   {error:error instanceof Error&&/^wechat_[a-z_]+$/.test(error.message)?error.message:'wechat_operation_failed'};
 }
 async function mutate(c:Config,id:string,operation:string,input:unknown,work:()=>Promise<Json>):Promise<Json>{
@@ -104,7 +108,7 @@ async function mutate(c:Config,id:string,operation:string,input:unknown,work:()=
    return {...result,requestId:id,replayed:false};
   }catch(error){
    // Business API rejection is definitive. Network/server/parse/write failures are not.
-   const uncertain=!(error instanceof WechatApiError)&&!(error instanceof Error&&/^wechat_(invalid_|unsupported_|untrusted_|image_|html_|article_|cover_|empty_|too_)/.test(error.message));
+   const uncertain=!(error instanceof WechatApiError)&&!(error instanceof WechatImageError)&&!(error instanceof Error&&/^wechat_(invalid_|unsupported_|untrusted_|image_|html_|article_|cover_|empty_|too_)/.test(error.message));
    writeLedger(file,{...entry,state:uncertain?'unknown':'failed',updatedAt:new Date().toISOString(),error:errorResult(error)});
    throw error;
   }
@@ -124,16 +128,18 @@ async function imageBytes(c:Config,value:unknown,limit:number){
   let res:Response;
   try{res=await wechatFetch(url,{redirect:'manual',signal:AbortSignal.timeout(20000)});}catch{throw Error('wechat_image_download_failed');}
   if(res.status>=300&&res.status<400){const next=res.headers.get('location');await res.body?.cancel();if(!next)throw Error('wechat_image_redirect_invalid');url=assetUrl(c,new URL(next,url).href);continue;}
-  if(!res.ok||!res.body)throw Error('wechat_image_download_failed');
-  if(Number(res.headers.get('content-length'))>limit){await res.body.cancel();throw Error('wechat_image_too_large');}
+  if(!res.ok)throw new WechatImageError('wechat_image_download_http_error','检查图片链接和素材服务器状态。',undefined,res.status);
+  if(!res.body)throw new WechatImageError('wechat_image_download_empty','图片响应为空，请检查链接。');
+  if(Number(res.headers.get('content-length'))>limit){await res.body.cancel();throw new WechatImageError('wechat_image_too_large','图片大小超过上传限制。');}
   const reader=res.body.getReader(),chunks:Uint8Array[]=[];let size=0;
-  try{while(true){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>limit){await reader.cancel();throw Error('wechat_image_too_large');}chunks.push(part.value);}}
+  try{while(true){const part=await reader.read();if(part.done)break;size+=part.value.length;if(size>limit){await reader.cancel();throw new WechatImageError('wechat_image_too_large','图片大小超过上传限制。');}chunks.push(part.value);}}
   finally{reader.releaseLock();}
   const bytes=Buffer.concat(chunks);
   const jpeg=bytes[0]===0xff&&bytes[1]===0xd8&&bytes[2]===0xff;
   const png=bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
-  if(!jpeg&&!png)throw Error('wechat_unsupported_image_format_jpeg_png_only');
-  return {bytes,type:jpeg?'image/jpeg':'image/png',ext:jpeg?'jpg':'png'};
+  const gif=bytes.subarray(0,6).equals(Buffer.from('GIF87a'))||bytes.subarray(0,6).equals(Buffer.from('GIF89a'));
+  if(!jpeg&&!png&&!(gif&&limit===IMAGE_LIMIT))throw new WechatImageError('wechat_unsupported_image_format','图片格式不受支持或文件内容不是有效图片。');
+  return {bytes,type:jpeg?'image/jpeg':png?'image/png':'image/gif',ext:jpeg?'jpg':png?'png':'gif'};
  }
  throw Error('wechat_image_too_many_redirects');
 }
@@ -201,7 +207,8 @@ async function createDraft(c:Config,input:Json){
     const imageList:Json[]=[];
     for(let image=0;image<a.images!.length;image++){
      const source=a.images![image];
-     const mediaId=source.imageMediaId||String((await upload(c,source.imageUrl!,'newspic',id+':image:'+index+':'+image)).media_id);
+     let mediaId=source.imageMediaId;
+     if(!mediaId){try{mediaId=String((await upload(c,source.imageUrl!,'newspic',id+':image:'+index+':'+image)).media_id);}catch(error){if(error instanceof WechatImageError)throw new WechatImageError(error.code,error.hint,image+1,error.httpStatus);if(error instanceof WechatApiError)error.imageIndex=image+1;throw error;}}
      imageList.push({image_media_id:mediaId});
     }
     prepared.push({article_type:'newspic',title:a.title,content:a.content,image_info:{image_list:imageList},...(a.author?{author:a.author}:{}),...(a.needOpenComment!==undefined?{need_open_comment:a.needOpenComment?1:0}:{}),...(a.onlyFansCanComment!==undefined?{only_fans_can_comment:a.onlyFansCanComment?1:0}:{})});
@@ -226,7 +233,7 @@ async function createDraft(c:Config,input:Json){
 }
 export async function callWechatDraftTool(name:string,input:Json):Promise<Json>{
  const c=config();
- if(name==='wechat_capabilities')return {platform:'wechat',account:{appId:c.appId,name:c.name},transport:'official_https_api',network:wechatNetworkInfo(),browserRequired:false,draftOnly:true,publicPublish:false,massSend:false,formats:['news_html','newspic'],newspic:{imageLimit:20,contentMaxChars:1000,firstImageIsCover:true,animatedGifVerified:false,livePhoto:false},inlineImageMaxBytes:INLINE_IMAGE_LIMIT,articleLimit:8,imageMaxBytes:IMAGE_LIMIT,imageFormats:['jpeg','png'],assetHosts:c.assetHosts||defaultHosts,tokenStrategy:'stable_token_force_refresh_false',requestLedger:'restart_durable_single_host',unknownResult:'Check original request and official draft list; never blindly resubmit.',limits:'Account official API permissions and service egress IP whitelist are required. Draft saved is not public publication.'};
+ if(name==='wechat_capabilities')return {platform:'wechat',account:{appId:c.appId,name:c.name},transport:'official_https_api',network:wechatNetworkInfo(),browserRequired:false,draftOnly:true,publicPublish:false,massSend:false,formats:['news_html','newspic'],newspic:{imageLimit:20,contentMaxChars:1000,firstImageIsCover:true,animatedGifVerified:false,livePhoto:false},inlineImageMaxBytes:INLINE_IMAGE_LIMIT,articleLimit:8,imageMaxBytes:IMAGE_LIMIT,imageFormats:['jpeg','png','gif'],inlineImageFormats:['jpeg','png'],recommendedTimeoutMs:120000,titleMaxChars:{news:64,newspic:32},assetHosts:c.assetHosts||defaultHosts,tokenStrategy:'stable_token_force_refresh_false',requestLedger:'restart_durable_single_host',unknownResult:'Check original request and official draft list; never blindly resubmit.',limits:'Account official API permissions and service egress IP whitelist are required. Draft saved is not public publication.'};
  if(name==='wechat_account_status'){const count=await api(c,'draft/count');return {ok:true,account:{appId:c.appId,name:c.name},draftCount:count.total_count,checkedAt:new Date().toISOString()};}
  if(name==='wechat_upload_image'){
   if(input.purpose!=='cover'&&input.purpose!=='inline'&&input.purpose!=='newspic')throw Error('wechat_invalid_image_purpose');

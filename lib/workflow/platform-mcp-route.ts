@@ -1,4 +1,4 @@
-import {WechatApiError} from '../wechat/draft-service';
+import {WechatApiError,WechatImageError} from '../wechat/draft-service';
 import {validToolArguments} from './mcp-contract';
 import {authorizePlatformMcp,isPublicationPlatform,platformMcpTools} from './platform-mcp-contract';
 import {callPlatformTool} from './platform-mcp-service';
@@ -55,7 +55,7 @@ export async function handlePlatformMcp(req:Request,platform:string) {
       result = { content, isError: false };
     } catch (error) {
       const safe = error instanceof WorkflowInputError || error instanceof WorkflowConflictError || (error instanceof Error && /^[a-z0-9_]+$/.test(error.message));
-      result = { isError: true, content: [{ type: 'text', text: JSON.stringify(error instanceof WechatApiError?{error:'wechat_api_error',code:error.code,message:error.message,...error.egressIp?{egressIp:error.egressIp}:{}}:{ error: safe && error instanceof Error ? error.message : 'workflow_operation_failed' }) }] };
+      result = { isError: true, content: [{ type: 'text', text: JSON.stringify(error instanceof WechatImageError?{error:error.code,code:error.code,message:error.message,hint:error.hint,...error.imageIndex?{imageIndex:error.imageIndex}:{},...error.httpStatus?{httpStatus:error.httpStatus}:{}}:error instanceof WechatApiError?{error:'wechat_api_error',code:error.code,message:error.message,...error.egressIp?{egressIp:error.egressIp}:{},...error.imageIndex?{imageIndex:error.imageIndex}:{}}:{ error: safe && error instanceof Error ? error.message : 'workflow_operation_failed' }) }] };
     }
   } else return rpcError(id, -32601, 'Method not found');
   return Response.json({ jsonrpc: '2.0', id, result }, { headers });

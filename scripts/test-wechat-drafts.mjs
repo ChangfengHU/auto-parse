@@ -278,3 +278,18 @@ test('advertised native schema passes actual MCP recursive argument validation',
  assert.equal(validate(def.inputSchema,{requestId:'schema-native',confirmDraft:true,articles:[newspic]}),true);
  assert.equal(validate(def.inputSchema,{requestId:'schema-native',confirmDraft:true,articles:[{...newspic,images:[{imageUrl:'https://resource.vyibc.com/a.png',extra:1}]}]}),false);
 });
+
+test('permanent GIF uploads preserve media type; inline GIF is rejected',async()=>{
+ const gif=Buffer.concat([Buffer.from('GIF89a'),Buffer.alloc(32)]);
+ const r=setup([token,()=>new Response(gif),{media_id:'gif-id'}]);
+ assert.equal((await r.callWechatDraftTool('wechat_upload_image',{requestId:'gif-one',imageUrl:'https://resource.vyibc.com/a.gif',purpose:'newspic'})).media_id,'gif-id');
+ assert.equal(r.calls[2].init.body.get('media').type,'image/gif');
+ const q=setup([token,()=>new Response(gif)]);
+ await assert.rejects(q.callWechatDraftTool('wechat_upload_image',{requestId:'gif-inline',imageUrl:'https://resource.vyibc.com/a.gif',purpose:'inline'}),/unsupported_image_format/);
+});
+test('failed image URL reports exact index and HTTP status without poisoning replay state',async()=>{
+ const r=setup([token,()=>new Response('missing',{status:404})]);
+ const a={...newspic,images:[{imageMediaId:'valid-id'},{imageUrl:'https://resource.vyibc.com/missing.png'}]};
+ await assert.rejects(create(r,'bad-url',[a]),e=>e.code==='wechat_image_download_http_error'&&e.imageIndex===2&&e.httpStatus===404);
+ assert.equal((await r.callWechatDraftTool('wechat_draft_request_status',{requestId:'bad-url'})).state,'failed');
+});
