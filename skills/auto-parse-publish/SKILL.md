@@ -9,14 +9,14 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 依赖与授权
 
-插件0.3.2按自媒体平台包含四个MCP（公众号0.1.1，其他各0.1.0），公众号当前仅草稿箱，不再把研究工具或通用工作流编辑器作为发布依赖：
+插件0.3.3按自媒体平台包含四个MCP（公众号0.2.0，其他各0.1.0），公众号草稿箱与依赖账号接口权限的官方发表，不再把研究工具或通用工作流编辑器作为发布依赖：
 
 | 自媒体平台 | MCP服务器 | 专用端点 |
 | --- | --- | --- |
 | 抖音 | auto-parse-douyin-publish | https://auto-parse-v2.vyibc.com/api/publish/mcp/douyin |
 | 小红书 | auto-parse-xiaohongshu-publish | https://auto-parse-v2.vyibc.com/api/publish/mcp/xiaohongshu |
 | X | auto-parse-x-publish | https://auto-parse-v2.vyibc.com/api/publish/mcp/x |
-| 微信公众号（仅草稿） | auto-parse-wechat-publish | https://auto-parse-v2.vyibc.com/api/publish/mcp/wechat |
+| 微信公众号 | auto-parse-wechat-publish | https://auto-parse-v2.vyibc.com/api/publish/mcp/wechat |
 
 四个端点独立认证，连接凭据由客户端安全配置；运维引用分别为service:auto-parse-douyin-publish、service:auto-parse-xiaohongshu-publish、service:auto-parse-x-publish、service:auto-parse-wechat-publish。不能互换凭据或使用通用工作流令牌。客户端工具前缀因安装方式变化，按服务器身份与实际tools/list定位，不猜前缀。
 - 插件安装与服务认证是两步。缺连接时说明缺哪个服务；不索取或输出 Cookie、管理员令牌，不把秘密放入工具参数、工作流或日志。
@@ -34,7 +34,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 路由
 
-- 微信公众号：读 [官方草稿箱工具](references/wechat-drafts.md)，创建、查询图文与原生贴图草稿和上传所需图片；没有公开发表、群发或删除工具。不能把草稿media_id当作公开文章链接。
+- 微信公众号：读 [官方草稿箱工具](references/wechat-drafts.md)，创建、查询图文与原生贴图草稿和上传所需图片；支持指定草稿删除和单独的官方发表工具；当前账号发表权限返回48001，网页发表尚未实现，不支持群发。不能把草稿media_id当作公开文章链接。
 
 - 抖音视频：读 [专用发布工具](references/douyin-video.md)，使用 auto-parse-douyin-publish 的 prepare_video / publish_video / get_video_task / reconcile_video_task。禁止通过旧 publish.sh、匿名接口或通用调试器执行受保护抖音视频流程。
 - X 文字／单图、小红书视频、抖音／小红书图文：读 [工作流调用](references/workflows.md)，使用各自平台的发布MCP。
