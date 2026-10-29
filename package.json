@@ -23,6 +23,7 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "undici": "6.29.1",
     "ws": "^8.20.0"
   },
   "devDependencies": {

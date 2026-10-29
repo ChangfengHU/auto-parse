@@ -9,7 +9,7 @@
   Owner: codex
   Updated: 2026-10-29
   Log: dev-log/2026-10-29-wechat-drafts.md
-  Next: 文章草稿MCP已上线；用户指定push站文章为来源，已调研静态newspic、GIF与Live方案并展示静态版式示意，尚未新增执行代码。待白名单后真实草稿验收，优先静态贴图与GIF，再验证两平台原生Live。
+  Next: 显式代理修复已上线；43项回归/类型/Lint/构建通过，文章草稿已真实创建并回读，稳定请求重放不重复。贴图/GIF/原生Live仍需按调研方案继续实现，当前不冒充已支持。
 
 - [WORKFLOW-006] X 文字发推工作流与安全预览
   Status: In Progress

@@ -35,7 +35,7 @@ bash <(curl -fsSL 'https://fleet.vyibc.com/api/hub/onboarding/packages/vyibc-aut
 
 ## 0.3.0公众号扩展
 
-新增auto-parse-wechat-publish 0.1.0，插件与入口Skill固定0.3.0，4 MCP + 1 Skill。公众号7工具部署后公网initialize、tools/list、capabilities通过；account_status真实返回40164，尚待IP白名单及草稿创建/读取验收。38项组合回归、独立类型检查、重点Lint和生产构建通过。专用Token对其他三个平台均返回401。
+新增auto-parse-wechat-publish 0.1.0，插件与入口Skill固定0.3.0，4 MCP + 1 Skill。公众号7工具部署后公网initialize、tools/list、capabilities通过。初次直连account_status返回40164；后续显式代理修复已完成生产认证、永久封面上传、一次测试草稿创建和同ID官方回读，稳定请求重放不重复创建。新增代理故障关闭验证后组合回归43项通过，独立类型/Lint/构建通过。专用Token对其他三个平台均返回401。草稿不等于公开发表。
 
 固定插件ZIP SHA256：cbff4d2ceb9ad36e1854c7b87b355989ef448fbe9c9e25e789862404a3f30947。
 固定Skill ZIP SHA256：97e0f642fd40b1c325d54fa6d21740745b38b806d73586042e27f325faedde1d。
