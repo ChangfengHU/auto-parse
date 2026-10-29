@@ -8,7 +8,7 @@
 
 运行账本位于.data/wechat-drafts/<AppID>/，不是临时缓存。原子写入、同请求排他锁、内容指纹、submitting/completed/failed/unknown。网络超时/HTTP异常/无法解析响应按unknown保留，不自动重试。已确认微信业务拒绝允许原意图重试；进程中断遗留锁需先回查。多媒体子请求各有稳定账本，不把完成的上传重复执行。不要删除账本、换请求号或在多机器复制运行来绕过去重。
 
-素材只接受受信任域名HTTPS URL，下载不携带微信Token，重定向逐跳重新校验，流式2MiB上限且检查JPEG/PNG签名。平台调用Token只发往api.weixin.qq.com，官方请求禁止重定向；所有上游错误脱敏。正文图片导入完成后才写草稿。账号权限和上游校验仍可能拒绝内容。
+素材只接受受信任域名HTTPS URL，下载不携带微信Token，重定向逐跳重新校验，流式永久素材10MiB/正文图片1MiB上限且检查JPEG/PNG签名。平台调用Token只发往api.weixin.qq.com，官方请求禁止重定向；所有上游错误脱敏。正文图片导入完成后才写草稿。账号权限和上游校验仍可能拒绝内容。
 
 官方文档入口：
 - https://developers.weixin.qq.com/doc/offiaccount/Draft_Box/Add_draft.html
@@ -30,3 +30,7 @@
 ## 回滚
 
 空闲时将NEXT_BUILD_DIR切回保留的上一构建，只重启AutoParse；不要删除.data/wechat-drafts或既有平台发布账本。公众号专用EnvironmentFile可保留供回滚后重新启用，不覆盖其他平台凭据。
+
+## 原生贴图补齐（2026-10-29）
+同一wechat_create_draft新增articleType=newspic，images为1至20项有序imageMediaId或imageUrl；生成官方image_info.image_list，首张为封面，content纯文本。news默认行为、专用认证与账本保持兼容。七个工具身份不变，新增上传purpose=newspic；仅JPEG/PNG，不承诺GIF或Live。官方最新API文档已通过实际浏览器读取并核对字段：https://developers.weixin.qq.com/doc/service/api/draftbox/draftmanage/api_draft_add 。
+生产早报8张静态贴图已真实创建，官方回读newspic、8项顺序及首图封面通过，同请求回放同media_id且草稿仅增加1；没有公开发表。50项回归、独立类型/Lint、生产构建通过。通用静态导出：node scripts/render-newspic-cards.mjs input.json output-directory；输入brand/date/source/cards，每卡title/label/points/source，自动检查溢出，输出1080x1440 PNG、manifest和联系表；仅受信任维护调用，不是MCP任意脚本执行。

@@ -1,6 +1,6 @@
 # 自动发布插件：按自媒体平台分类
 
-稳定插件ID：vyibc-auto-publish，当前版本0.3.1。统一入口Skill为auto-parse-publish 0.3.1。
+稳定插件ID：vyibc-auto-publish，当前版本0.3.2。统一入口Skill为auto-parse-publish 0.3.2。
 能力广场：https://fleet.vyibc.com/#/hub?view=plugins&plugin=vyibc-auto-publish
 
 ## 四个平台，四个MCP
@@ -10,12 +10,12 @@
 | 抖音 | auto-parse-douyin-publish | /api/publish/mcp/douyin | 视频、图文、视频任务查询和对账 |
 | 小红书 | auto-parse-xiaohongshu-publish | /api/publish/mcp/xiaohongshu | 视频、图文及任务会话回查 |
 | X | auto-parse-x-publish | /api/publish/mcp/x | 文字、单图及持久创建回执查询 |
-| 微信公众号 | auto-parse-wechat-publish | /api/publish/mcp/wechat | 官方API图文草稿、素材上传和查询；无群发或公开发表 |
+| 微信公众号 | auto-parse-wechat-publish | /api/publish/mcp/wechat | 官方API图文及原生贴图草稿、素材上传和查询；无群发或公开发表 |
 
-四个端点均在https://auto-parse-v2.vyibc.com。各MCP固定版本为0.1.0，插件版本与组件版本独立。
+四个端点均在https://auto-parse-v2.vyibc.com。公众号MCP固定版本0.1.1，其他MCP各0.1.0；插件版本与组件版本独立。
 三个连接复用原AutoParse发布节点、正式Supabase工作流、上传与去重执行器。没有复制独立发布器。新版包内已移除通用auto-parse-workflow和带研究工具的vyibc-douyin连接；这些既有服务保留供其他用途，不被删除或撤销。
 
-公众号使用官方API而非浏览器工作流，详见[公众号草稿箱](wechat-drafts.md)。新增连接不影响既有三个MCP版本；新版客户端需安装0.3.1并配置对应安全连接。40164白名单与真实草稿验收状态见专项日志，不因入驻即视为草稿创建通过。
+公众号使用官方API而非浏览器工作流，详见[公众号草稿箱](wechat-drafts.md)。新增连接不影响既有三个MCP版本；新版客户端需安装0.3.2并配置对应安全连接。40164白名单与真实草稿验收状态见专项日志，不因入驻即视为草稿创建通过。
 
 ## 认证与权限边界
 
@@ -27,11 +27,15 @@
 ## 安装与升级
 
 ~~~bash
-bash <(curl -fsSL 'https://fleet.vyibc.com/api/hub/onboarding/packages/vyibc-auto-publish/0.3.1/install') codex
+bash <(curl -fsSL 'https://fleet.vyibc.com/api/hub/onboarding/packages/vyibc-auto-publish/0.3.2/install') codex
 ~~~
 
 当前插件保留同一ID，旧0.1.0固定包与历史回执仍可读。旧版客户端需按原生安装器提示只卸载此插件的旧版本，再安装新版；不删除其他市场、插件或配置。安装器不会自动替用户卸载。
 服务认证使用客户端安全连接，完整包有四个无密钥MCP模板；平台凭据不能互换，旧的通用连接令牌也不能用于新平台端点。安装与认证仍分开。Claude目标只提供plugin-dir启动方式；Dots、ChatGPT等客户端未在本次验收中实际安装，不据此声称已同步。
+
+## 0.3.2原生贴图补齐
+
+同一公众号MCP七个工具新增newspic草稿格式，Hub能力版本0.1.1，Skill与插件0.3.2。早报8张有序图片通过真实MCP保存，官方回读类型、顺序、首图封面及同请求重放通过，草稿仅增加1。微信后台草稿箱“贴图”页签也已看到准确标题；点击原生预览进入微信验证码页，未绕过验证，不把它记为完整原生预览成功。无公开发表、群发、GIF或Live验收。固定插件归档SHA256：a30ebe79bc287f0e72a157a58e79be9ef8c9e375ea5ee5f50ac5a2fd5795929d；插件登记d14d8956-7424-4577-85b8-e02037d3975b，MCP登记8a8912af-857c-425f-937f-cfeeb7863f37，Skill登记0e14e16e-ca6a-4b8a-97ff-3186d6688ad7。固定归档下载与无密钥模板检查记录在专项日志。
 
 ## 0.3.1验收说明补丁
 
