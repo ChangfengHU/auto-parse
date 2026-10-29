@@ -114,6 +114,13 @@
 
 ## Done
 
+- [WORKFLOW-010] 公众号草稿MCP验收与插件补丁发布
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-29
+  Log: dev-log/2026-10-29-wechat-hub-release.md
+  Result: 沿用公众号7工具与4平台插件，Skill/插件0.3.1已发布；固定包校验、Hub回执及隔离原生安装通过，无新业务草稿。
+
 - [RUNTIME-006] 小红书分析页扫码登录与读取恢复
   Status: Done
   Owner: codex
