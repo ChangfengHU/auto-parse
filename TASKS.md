@@ -9,7 +9,7 @@
   Owner: codex
   Updated: 2026-10-29
   Log: dev-log/2026-10-29-wechat-web-publish.md
-  Next: 贴图标题20字约束已部署，网页按草稿ID发表尚未实现。
+  Next: 贴图标题20字约束已部署；网页登录态单项发表预检查实测ret=0，网页按草稿ID发表尚未实现。
 
 
 - [API-003]公众号官方接口草稿箱与平台MCP
