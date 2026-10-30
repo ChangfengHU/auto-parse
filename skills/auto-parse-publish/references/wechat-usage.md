@@ -1,6 +1,6 @@
 # 公众号格式选择与验收清单
 
-核验日期：2026-10-30。服务端 MCP 0.3.1；本指南区分真实生产样例、代码/自动化边界测试、仅界面观察和未验证事项。未验证不写成可用承诺。测试样例保存草稿，不公开发表。
+核验日期：2026-10-30。服务端 MCP 0.4.0；本指南区分真实生产样例、代码/自动化边界测试、仅界面观察和未验证事项。未验证不写成可用承诺。测试样例保存草稿，不公开发表。
 
 ## 先选模式
 
@@ -9,8 +9,8 @@
 | 图文文章 | wechat_create_draft，articleType=news，HTML content，thumbMediaId 或 coverImageUrl 二选一 | 已真实建草稿、按同 media_id 回读、防重复重放。正文外部导入 JPEG/PNG；已上传到微信的 GIF URL 可复用，已真实创建草稿并回读，编辑器显示已确认，但四帧截图静止，未证实播放 |
 | 贴图/图片消息 | 同一工具，articleType=newspic，纯文本 content，images 有序数组 | 已真实创建 8 张静态图早报；首图GIF和静态封面+第二张GIF两种组合均已在后台播放 |
 | 文字配图片 | 选择以上一种内容结构 | 没有独立“纯文字发布”工具；不能省略必需封面或图片假装纯文字类型 |
-| 视频 | 网页“视频”入口 | 网页6秒视频草稿已获成功保存回执；专用 MCP 创建工具尚未实现，回读结果见末尾 |
-| 播客（音频） | 网页“播客”入口 | 界面是播客，不是博客；12秒MP3网页草稿已获保存回执，专用 MCP 创建工具尚未实现 |
+| 视频 | wechat_create_video_draft | 专用异步工作流；仅保存草稿，实际验收结果见末尾 |
+| 播客（音频） | wechat_create_podcast_draft | 界面是播客，不是博客；专用异步工作流，验收结果见末尾 |
 | Live Photo | 无 | liveCoverVideoUrl 仅存本地台账，不上传视频、不生成实况照片 |
 | 正式发表 | 独立 wechat_publish_draft 或 wechat_web_publish_draft | 官方通道当前账号权限 48001；网页只验证到管理员扫码，最终公开提交未验收。草稿成功不代表发表成功 |
 
@@ -120,7 +120,7 @@
 
 ## 网页视频与播客：本轮实际操作路线
 
-这些步骤是84已登录账号的受信任维护操作，目前不是远程MCP专用创建工具。现有wechat_create_draft不接受video/audio类型、videoUrl或audioUrl。工作流Supabase配置尚未增加这两种草稿节点，不能用通用任意点击伪装已交付的正式工作流。
+以下是封装前的网页验证记录。0.4.0新增专用工具和Supabase正式工作流，调用说明见后文。原有wechat_create_draft仍不接受video/audio类型、videoUrl或audioUrl。
 
 视频素材路线：主页“视频”→素材选择窗口“本地上传”→独立视频素材页→上传6秒H.264/AAC MP4→等待上传成功→选择一张推荐封面→封面裁剪窗口“完成”→填写素材标题及确认上传规则→点“保存”。必须实际选定封面，仅生成6张候选时保存会提示“请设置封面”。“保存并发表”是不同按钮，本轮没有使用。素材保存后到素材库确认同标题及状态，等待转码后重新打开视频选择窗口，不能依赖旧窗口缓存。
 
@@ -136,3 +136,70 @@
 - 插入媒体后填写草稿标题，点击“保存为草稿”，检查operate_appmsg成功回执和appMsgId，随后用同ID重新打开。公开“发表”未点击。
 
 重新打开验证已完成：视频同appmsgid与标题保留，原生视频介绍/视频贴片界面仍在，页面含视频标识wxv_4760536732620472328；播客同appmsgid与标题保留，并显示12秒和音频时间轴入口。官方列表与原生编辑器两路核对通过。本轮没有把播放器最终播放、手机预览或正式发表算作验收通过。
+
+## 视频与播客专用 MCP
+
+0.4.0新增3个工具，正式工作流为 `a5844b00-cd7b-442d-9e4f-8a5a18338b82`。运行在84机器的浏览器1，必须已经登录目标公众号。
+
+1. 视频调用 `wechat_create_video_draft`，播客调用 `wechat_create_podcast_draft`。保存草稿需要用户授权；不需另开任意点击工作流。
+2. 参数共用 `requestId`、`expectedAccount`、`title`、可选 `description`、`confirmDraft:true`。视频传 `videoUrl`，播客传 `audioUrl`。expectedAccount 是后台 gh_ 原始ID，不是昵称或AppID；当前唯伊不可为 `gh_8dfb3900381c`。
+3. 创建立即返回 `reserved`。每5秒调用 `wechat_media_draft_status({requestId,expectedAccount})`，读取 phase、error、receipt；单次调用建议30秒超时，后台任务期限10分钟。不要等创建HTTP连接持续到媒体转码结束。
+4. `completed` 必须同时包含保存成功回执、网页appMsgId、硬刷新后标题和原生媒体编辑器核对。它不等于播放器已播放、手机已预览或正式发表。
+5. 相同请求及参数重放返回已有记录，不再上传或建稿。相同requestId改变参数报冲突。服务重启保留完成回执；未完成请求显示unknown，不自动重放。
+6. `failed` 表示保存前失败，可能已上传临时文件；`unknown` 表示保存可能发生或执行中断。检查materialSaved、素材标题、appMsgId等已有证据。未知结果禁止换ID重提；先人工/维护方对账。任务不自动恢复登录或绕过管理员验证。
+7. 并发为1，与其他浏览器1任务共用非阻塞锁。忙时安全失败，不抢占别人的页面。结束后关闭任务自己的页签和弹窗并释放锁，不关闭用户已有页签。
+8. 工具不接收公开发表参数。图文/贴图API的media_id与网页appMsgId不是同一种ID；不能把appMsgId直接传给wechat_publish_draft。视频/播客公开发表仍未验收。
+
+本地输入限制（不是微信平台保证的最大容量）：
+
+| 字段 | 限制/行为 |
+| --- | --- |
+| title | 1–20个Unicode码点；不得首尾空白或换行；拒绝超限，不截断 |
+| description | 视频最多300码点；播客最多140码点；可不填 |
+| 视频 | H.264 MP4，可含AAC音轨 |
+| 播客 | MP3 |
+| 文件 | 不超过100MiB，时长大于0、不超过3600秒；真实样例远小于上限 |
+| 素材URL | HTTPS，resource.vyibc.com或cdn.vyibc.com；无用户名、密码、端口、查询参数或片段；重定向仍逐次核对域名 |
+| 视频封面 | 选择微信生成的第一张推荐帧；暂无自定义封面参数 |
+| 播客封面 | 使用当前公众号头像；暂无自定义封面参数 |
+| requestId | 1–96字符，以字母/数字起始，仅字母、数字、点、下划线和连字符 |
+
+下载后先用ffprobe检查真实编码、容器、时长，再交给浏览器；文件名或扩展名本身不是格式证明。临时媒体文件在任务结束后清理。请求台账保留结果，不记录Cookie或后台登录URL。
+
+视频示例（将URL和requestId替换为自己的实际素材和稳定请求）：
+
+~~~json
+{
+  "requestId": "MY_VIDEO_DRAFT_REQUEST",
+  "expectedAccount": "gh_8dfb3900381c",
+  "title": "视频草稿示例",
+  "description": "实际视频介绍",
+  "videoUrl": "https://cdn.vyibc.com/REPLACE_ACTUAL_VIDEO.mp4",
+  "confirmDraft": true
+}
+~~~
+
+播客示例：
+
+~~~json
+{
+  "requestId": "MY_PODCAST_DRAFT_REQUEST",
+  "expectedAccount": "gh_8dfb3900381c",
+  "title": "播客草稿示例",
+  "description": "实际音频介绍",
+  "audioUrl": "https://cdn.vyibc.com/REPLACE_ACTUAL_AUDIO.mp3",
+  "confirmDraft": true
+}
+~~~
+
+用对应的requestId及expectedAccount查询状态，不传素材URL、标题或密码。不可把另一条请求的状态当成本次结果。
+
+状态查询读取持久回执，不会每次重新打开浏览器。verifiedAt是创建时实际回读时间；之后若在后台手动修改，需另行核对，不能把旧回执当成当前正文。
+
+### 0.4.0真实MCP验收
+
+2026-10-30：12秒MP3通过wechat_create_podcast_draft创建《MCP播客验收四（勿发布）》，网页appMsgId=100001413；description非空，保存响应成功、硬刷新后标题及富文本描述一致。相同请求重放返回同一appMsgId，不再创建。官方草稿列表另行核对标题及描述，media_id=3UL3H6nAAGfSe70jlkoNLAQwdyJkzgCiCSbI5puGggEIMu7mApmsN9dHSdAfN4Pa。未验证播放器播放或公开发表。
+
+6秒H.264/AAC MP4通过wechat_create_video_draft创建《MCP视频验收五（勿发布）》，网页appMsgId=100001421，媒体标识wxv_4760634722165506049。非空描述、标题与视频标识在硬刷新后核对通过；同请求重放返回同一appMsgId。官方列表media_id=3UL3H6nAAGfSe70jlkoNLENH6ctC--DPmWEWdvtYe3EXOxEuYXBVfAb5ruFmww7f。两种测试稿在列表中各一条。播客完成回执另经服务重启后重放验证，仍返回100001413；浏览器活动锁在结束后已确认释放。
+
+公网负例已验证：21字标题拒绝、原requestId改变标题冲突、内网HTTP素材地址拒绝，均未启动新的上传。61项相关自动化测试通过；真实视频约69秒、播客约42秒，仅是这两份小素材的观测，不承诺任意素材耗时。

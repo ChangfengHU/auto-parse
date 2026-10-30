@@ -14,6 +14,7 @@ export type NodeType =
   | 'screenshot'      // 基础：截图快照
   | 'file_upload'     // 高级：URL → 下载 → 注入 <input type=file>
   | 'image_upload'    // 图文：有序多图上传，仅认证的任务浏览器
+  | 'wechat_media_draft' // 原生视频/播客草稿：持久请求、保存和回读
   | 'wechat_web_prepare' // 公众号网页贴图核对与显式确认发表
   | 'x_publish'       // X 文字准备、单次提交与真实回执
   | 'image_text_publish' // 图文：准备/发布、账号检查、防重复及真实回执

@@ -1,8 +1,8 @@
 {
   "schema": "auto-parse-publish-routing/v1",
-  "version": "0.3.8",
+  "version": "0.4.0",
   "verifiedOn": "2026-10-30",
-  "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers; official WeChat API for drafts; non-executable index",
+  "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers and native media drafts; official WeChat API for news/newspic; non-executable index",
   "providers": [
     {
       "key": "douyin-video",
@@ -68,7 +68,7 @@
       "key": "wechat-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.3.1",
+      "capabilityVersion": "0.4.0",
       "reference": "wechat-drafts.md",
       "transport": "official_https_api",
       "browserRequired": false,
@@ -78,7 +78,7 @@
       "key": "wechat-newspic-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.3.1",
+      "capabilityVersion": "0.4.0",
       "reference": "wechat-drafts.md",
       "transport": "official_https_api",
       "browserRequired": false,
@@ -88,7 +88,7 @@
       "key": "wechat-draft-delete",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.3.1",
+      "capabilityVersion": "0.4.0",
       "reference": "wechat-drafts.md",
       "acceptance": "real_single_test_draft_created_deleted_and_readback_absent; explicit_confirmation"
     },
@@ -96,7 +96,7 @@
       "key": "wechat-official-publish",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.3.1",
+      "capabilityVersion": "0.4.0",
       "reference": "wechat-drafts.md",
       "acceptance": "implementation_and_mock_tests_only; account_official_permission_probe_48001; no_web_publish_or_real_publication"
     },
@@ -104,18 +104,44 @@
       "key": "wechat-web-newspic",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.3.1",
+      "capabilityVersion": "0.4.0",
       "reference": "wechat-drafts.md",
       "workflowId": "cea6d731-ce15-46d8-95fb-f420ebfacb93",
       "prepareWorkflowId": "9a676224-70bd-41d4-9e85-c8d2b83a00c4",
       "browserInstance": 1,
       "browserRequired": true,
       "acceptance": "real_browser_admin_verification_reached_with_final_send_blocked; final_live_submission_and_public_visibility_not_yet_verified"
+    },
+    {
+      "key": "wechat-video-draft",
+      "platform": "wechat",
+      "server": "auto-parse-wechat-publish",
+      "capabilityVersion": "0.4.0",
+      "reference": "wechat-usage.md",
+      "tool": "wechat_create_video_draft",
+      "statusTool": "wechat_media_draft_status",
+      "workflowId": "a5844b00-cd7b-442d-9e4f-8a5a18338b82",
+      "browserInstance": 1,
+      "browserRequired": true,
+      "acceptance": "real_dedicated_mcp_create_save_response_native_editor_reload_title_description_identity_and_idempotent_replay_verified_2026_10_30; no_playback_or_publication_claim"
+    },
+    {
+      "key": "wechat-podcast-draft",
+      "platform": "wechat",
+      "server": "auto-parse-wechat-publish",
+      "capabilityVersion": "0.4.0",
+      "reference": "wechat-usage.md",
+      "tool": "wechat_create_podcast_draft",
+      "statusTool": "wechat_media_draft_status",
+      "workflowId": "a5844b00-cd7b-442d-9e4f-8a5a18338b82",
+      "browserInstance": 1,
+      "browserRequired": true,
+      "acceptance": "real_dedicated_mcp_create_save_response_native_editor_reload_title_description_identity_and_idempotent_replay_verified_2026_10_30; no_playback_or_publication_claim"
     }
   ],
   "verificationNotes": {
     "wechatUsage": "wechat-usage.md",
-    "wechatVideoPodcast": "web_draft_save_and_editor_reopen_verified_2026_10_30; no_dedicated_mcp_create_tool; not_publication_verified",
+    "wechatVideoPodcast": "dedicated_mcp_tools_and_formal_supabase_workflow_verified_2026_10_30; video_6_seconds_podcast_12_seconds; restart_durable_completed_receipt_verified; no_publication_verified",
     "gifNewspic": "cover_and_second_content_image_editor_motion_verified; twenty_gifs_mobile_public_not_verified",
     "gifNewsBody": "existing_wechat_gif_url_draft_and_display_verified; animation_not_demonstrated"
   }

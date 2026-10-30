@@ -1,3 +1,5 @@
+import {callWechatMediaTool} from './wechat-media-service';
+import {MEDIA_DRAFT_CAPABILITIES} from '../wechat/media-draft';
 import {webPublishState} from '../wechat/web-publish';
 import {callWechatDraftTool} from '../wechat/draft-service';
 import {WECHAT_DRAFT_TOOLS} from '../wechat/draft-contract';
@@ -24,6 +26,7 @@ function assertVideoTask(id:unknown){
 }
 export async function callPlatformTool(platform:PublicationPlatform,name:string,input:Record<string,unknown>):Promise<unknown>{
  if(!platformMcpTools(platform).some(t=>t.name===name))throw Error('platform_tool_not_allowed');
+ if(platform==='wechat' && ['wechat_create_video_draft','wechat_create_podcast_draft','wechat_media_draft_status'].includes(name))return callWechatMediaTool(name,input);
  if(platform==='wechat' && name==='wechat_web_publish_status'){
   if(typeof input.expectedAccount!=='string'||typeof input.mediaId!=='string')throw Error('wechat_web_invalid_input');
   const record=webPublishState(input.expectedAccount,input.mediaId);
@@ -42,13 +45,13 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
  }
  if(platform==='wechat' && WECHAT_DRAFT_TOOLS.some(t=>t.name===name)){
   const value=await callWechatDraftTool(name,input);
-  return name==='wechat_capabilities'?{...value,webPublication:WECHAT_WEB_CAPABILITIES}:value;
+  return name==='wechat_capabilities'?{...value,webPublication:WECHAT_WEB_CAPABILITIES,mediaDrafts:MEDIA_DRAFT_CAPABILITIES}:value;
  }
  if(name==='workflow_capabilities'){
   const c=await callWorkflowTool(name,{}) as Record<string,unknown>;
   return {owner:'auto-parse',platform,workflows:Object.keys(PLATFORM_WORKFLOWS[platform]),browserInstances:[...new Set(Object.values(PLATFORM_WORKFLOWS[platform]))],
    sessionIdleMinutes:c.sessionIdleMinutes,sessionSurvivesRestart:false,authoring:false,
-   formats:platform==='wechat'?['newspic-preparation','newspic-web-publication']:platform==='x'?['text','single-image']:['video','image-text'],
+   formats:platform==='wechat'?['newspic-preparation','newspic-web-publication','video-draft','podcast-draft']:platform==='x'?['text','single-image']:['video','image-text'],
    wechatWebPublication:platform==='wechat'?WECHAT_WEB_CAPABILITIES:undefined,
    xPublication:platform==='x'?c.xPublication:undefined,imageTextPublication:platform==='x'||platform==='wechat'?undefined:{...(c.imageTextPublication as object),platforms:[platform==='xiaohongshu'?'xhs':'douyin']},
    video:platform==='douyin'?{workflowId:DOUYIN_WORKFLOW_ID,maxBytes:536870912,topics:'caption_text',cover:'experimental',receiptSources:['creation_response','creator_work_list']}:undefined,

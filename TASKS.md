@@ -239,3 +239,7 @@
 ## XHS MCP foundation — 2026-09-09
 
 - Production foundation implemented and verified; source committed locally only due public repository. Six-tool Fleet integration and existing95 session refresh passed. See dev-log/2026-09-09-xhs-mcp-foundation.md.
+
+
+## WECHAT-MEDIA-003 — In Progress
+Dedicated video/podcast draft MCP tools with durable request ledger, native browser save/readback, formal Supabase workflow, acceptance tests and Hub/Skill release. Owner: Codex. Completed 2026-10-30: MCP 0.4.0 / 24 tools; real video 100001421 and podcast 100001413 saved/reloaded, idempotency and restart receipts verified. No public test publication.

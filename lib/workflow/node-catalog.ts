@@ -52,6 +52,7 @@ const TIMEOUT_META: ParamMeta = {
 // ── 节点目录 ──────────────────────────────────────────────────────────────────
 
 export const NODE_CATALOG: NodeCatalogItem[] = [
+  {type:'wechat_media_draft',label:'公众号：视频 / 播客草稿',icon:'微',category:'advanced',desc:'专用 MCP 预留请求后执行。上传、保存、硬刷新回读；不发表。',defaultParams:{requestId:'{{requestId}}',expectedAccount:'{{expectedAccount}}'},paramMeta:{requestId:{label:'请求 ID',type:'template',required:true,desc:'必须由专用 MCP 预留；不能换 ID 重试未知保存。'},expectedAccount:{label:'公众号原始 ID',type:'template',required:true,desc:'与已登录网页核对 gh_ 账号。'}}},
   {type:'wechat_web_prepare',label:'公众号：贴图核对 / 网页发表',icon:'微',category:'advanced',
    desc:'按官方草稿ID精确核对。publish需要准备指纹、directPublish=true及AI来源声明；可能需要管理员扫码，持久防重复。',
    defaultParams:{mode:'prepare',mediaId:'{{mediaId}}',expectedAccount:'{{expectedAccount}}'},

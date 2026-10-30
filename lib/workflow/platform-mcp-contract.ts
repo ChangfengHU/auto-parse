@@ -1,3 +1,4 @@
+import {MEDIA_DRAFT_WORKFLOW} from '../wechat/media-draft';
 import {WECHAT_DRAFT_TOOLS} from '../wechat/draft-contract';
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import {WORKFLOW_MCP_TOOLS,workflowMcpToken} from './mcp-contract';
@@ -5,7 +6,7 @@ export const PLATFORMS=['douyin','xiaohongshu','x','wechat'] as const;
 export type PublicationPlatform=typeof PLATFORMS[number];
 export function isPublicationPlatform(value:string):value is PublicationPlatform{return (PLATFORMS as readonly string[]).includes(value);}
 export const PLATFORM_WORKFLOWS:Record<PublicationPlatform,Record<string,number>>={
- wechat:{'9a676224-70bd-41d4-9e85-c8d2b83a00c4':1,'cea6d731-ce15-46d8-95fb-f420ebfacb93':1},
+ wechat:{[MEDIA_DRAFT_WORKFLOW]:1,'9a676224-70bd-41d4-9e85-c8d2b83a00c4':1,'cea6d731-ce15-46d8-95fb-f420ebfacb93':1},
  douyin:{'53197d8e-a89d-4d1a-bb8d-fc114156f30f':2},
  xiaohongshu:{'6105efc6-7e54-4c85-acfe-1a37e0d5093f':1,'1dc07adf-65a1-48f0-98ab-31cfcafc7fd3':1},
  x:{'e3d8f5e6-d859-4424-b6b6-a85c9aefb551':2,'8b626a95-e939-4fa0-a685-7aff71cb76dd':2},
@@ -29,6 +30,8 @@ const video={accountId:string,videoUrl:string,title:string,description:{type:'st
 const tool=(name:string,description:string,properties:Record<string,unknown>,required:string[],readOnly=false)=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:readOnly,destructiveHint:!readOnly,openWorldHint:true}});
 export function platformMcpTools(platform:PublicationPlatform){
  if(platform==='wechat')return [...WECHAT_DRAFT_TOOLS,
+ ...(['video','podcast'] as const).map(kind=>tool('wechat_create_'+kind+'_draft','Asynchronously create one native '+kind+' draft through the logged-in browser. Saves only, never publishes. Stable requestId required; poll wechat_media_draft_status. Local title limit 20 characters, video description 300 / podcast 140; MP4 H264/AAC or MP3, <=100 MiB. Source must be public HTTPS resource.vyibc.com or cdn.vyibc.com without query/fragment. Cover: video recommended frame / podcast account avatar. Busy browser fails safely; unknown saves must be reconciled, never retried with another ID.',{requestId:{type:'string',pattern:'^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$'},expectedAccount:string,title:{type:'string',minLength:1},description:{type:'string'},[kind==='video'?'videoUrl':'audioUrl']:string,confirmDraft:{type:'boolean',const:true}},['requestId','expectedAccount','title',kind==='video'?'videoUrl':'audioUrl','confirmDraft'])),
+ tool('wechat_media_draft_status','Read durable video/podcast draft request state and verified receipt. completed means save response plus native editor reload, not playback or public publication. An interrupted job is unknown; do not change requestId to retry.',{requestId:string,expectedAccount:string},['requestId','expectedAccount'],true),
  tool('wechat_web_publish_draft','Publish one existing AI-generated newspic draft through the authorized browser workflow. Prepare first and supply its exact draftFingerprint. This can update the draft source declaration, save it and submit publicly. May return awaiting_admin_scan: keep session open and use workflow_get_session for QR; poll wechat_web_publish_status. Never resubmit an uncertain draft.',{mediaId:string,expectedAccount:string,requestId:string,expectedFingerprint:string,aiGenerated:{type:'boolean',const:true},confirmPublish:{type:'boolean',const:true}},['mediaId','expectedAccount','requestId','expectedFingerprint','aiGenerated','confirmPublish']),
  tool('wechat_web_publish_status','Read the durable web publication intent by account and draft. submitted means a successful submission response, not an independently verified public post. No retry or mutation.',{mediaId:string,expectedAccount:string},['mediaId','expectedAccount'],true),
  ...WORKFLOW_MCP_TOOLS.filter(t=>shared.has(t.name)).map(t=>({...t,description:'[wechat approved preparation workflows only] '+t.description}))];
