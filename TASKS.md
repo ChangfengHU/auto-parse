@@ -4,6 +4,14 @@
 
 ## In Progress
 
+- [WECHAT-GIF-001] 公众号GIF真实验收与状态声明
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-10-30
+  Log: dev-log/2026-10-30-wechat-gif.md
+  Next: 真实GIF永久上传、原生贴图草稿及编辑器动画已通过，微信返回素材保留全部30帧和原SHA256。测试稿“GIF动效验证（勿发布）”供手机验收；手机与公众页播放、真实发表未验证，不扩大已有结论。
+
+
 - [WORKFLOW-011] 公众号网页按草稿ID发表
   Status: In Progress
   Owner: codex
