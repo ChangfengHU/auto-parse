@@ -1,6 +1,6 @@
 {
   "schema": "auto-parse-publish-routing/v1",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "verifiedOn": "2026-10-30",
   "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers; official WeChat API for drafts; non-executable index",
   "providers": [
@@ -112,5 +112,11 @@
       "browserRequired": true,
       "acceptance": "real_browser_admin_verification_reached_with_final_send_blocked; final_live_submission_and_public_visibility_not_yet_verified"
     }
-  ]
+  ],
+  "verificationNotes": {
+    "wechatUsage": "wechat-usage.md",
+    "wechatVideoPodcast": "web_draft_save_and_editor_reopen_verified_2026_10_30; no_dedicated_mcp_create_tool; not_publication_verified",
+    "gifNewspic": "cover_and_second_content_image_editor_motion_verified; twenty_gifs_mobile_public_not_verified",
+    "gifNewsBody": "existing_wechat_gif_url_draft_and_display_verified; animation_not_demonstrated"
+  }
 }

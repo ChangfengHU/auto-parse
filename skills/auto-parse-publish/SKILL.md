@@ -20,13 +20,13 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 四个端点独立认证，连接凭据由客户端安全配置；运维引用分别为service:auto-parse-douyin-publish、service:auto-parse-xiaohongshu-publish、service:auto-parse-x-publish、service:auto-parse-wechat-publish。不能互换凭据或使用通用工作流令牌。客户端工具前缀因安装方式变化，按服务器身份与实际tools/list定位，不猜前缀。
 - 插件安装与服务认证是两步。缺连接时说明缺哪个服务；不索取或输出 Cookie、管理员令牌，不把秘密放入工具参数、工作流或日志。
-- 抖音、小红书、X发布使用服务端已登录浏览器；公众号草稿走官方API，不依赖浏览器；网页贴图发表使用84浏览器1，可能需要管理员扫码。AppSecret仅在服务端金库配置，不接受作为工具参数。安装插件不会在用户本机安装或登录浏览器，也不保证所有用户都能使用同一账号。
+- 抖音、小红书、X发布使用服务端已登录浏览器；现有公众号MCP图文/贴图草稿走官方API，不依赖浏览器；视频与播客的网页草稿实测步骤见格式指南，尚无专用MCP创建工具；网页贴图发表使用84浏览器1，可能需要管理员扫码。AppSecret仅在服务端金库配置，不接受作为工具参数。安装插件不会在用户本机安装或登录浏览器，也不保证所有用户都能使用同一账号。
 - 本插件有浏览器账号操作及公开发布权限；仅在用户授权的账号、内容、目标平台内执行。询问支持情况不构成发布许可。当前任务已经明确授权时无需重复确认。
 
 ## 每次任务
 
 1. 明确平台、账号、素材、正文及模式（仅准备／保存草稿／公开发布）。已有上下文能确定则直接复用。语言按用户要求；当前所有者要求 X 正文全英文、日常回复中文，不虚构个人经历。
-2. 公众号先读 [公众号草稿箱](references/wechat-drafts.md)，调用 wechat_capabilities、wechat_account_status；其他平台在目标平台MCP查实际 workflow_capabilities、workflow_list 和 workflow_get；抖音视频能力也由同平台 workflow_capabilities.video说明。读取目标节点的账号绑定、条件分支和参数。不能只凭工作流名称判断账号或安全性。
+2. 公众号先读 [格式选择与验收清单](references/wechat-usage.md) 和 [公众号草稿箱](references/wechat-drafts.md)，调用 wechat_capabilities、wechat_account_status；其他平台在目标平台MCP查实际 workflow_capabilities、workflow_list 和 workflow_get；抖音视频能力也由同平台 workflow_capabilities.video说明。读取目标节点的账号绑定、条件分支和参数。不能只凭工作流名称判断账号或安全性。
 3. 根据 references/targets.json 选已验证路由。未列出或新增工具按 [扩展约定](references/adding-provider.md) 发现、核实后再使用，不因工具存在就宣称已验收。
 4. 同一次意图保留稳定 requestId、sessionId/taskId、素材顺序、账号和源URL；不在网络失败后换请求号或从头重跑。
 5. 执行前检查用户授权与实际节点：仅准备不能包含无条件发布按钮；上传和保存草稿本身也会产生外部影响。公开发布应使用带回执保护的专用节点/工具，不改成任意 click 绕过。
@@ -34,7 +34,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 路由
 
-- 微信公众号：读 [官方草稿箱工具](references/wechat-drafts.md)，创建、查询图文与原生贴图草稿和上传所需图片；支持指定草稿删除和单独的官方发表工具；当前账号发表权限返回48001，网页贴图发表已实现并验证至管理员扫码阶段，最终真实公开提交尚未验收，不支持群发。不能把草稿media_id当作公开文章链接。
+- 微信公众号：先按 [格式与实测范围](references/wechat-usage.md) 区分图文、贴图、GIF位置和网页视频/播客样例；读 [官方草稿箱工具](references/wechat-drafts.md)，创建、查询图文与原生贴图草稿和上传所需图片；支持指定草稿删除和单独的官方发表工具；当前账号发表权限返回48001，网页贴图发表已实现并验证至管理员扫码阶段，最终真实公开提交尚未验收，不支持群发。不能把草稿media_id当作公开文章链接。
 
 - 抖音视频：读 [专用发布工具](references/douyin-video.md)，使用 auto-parse-douyin-publish 的 prepare_video / publish_video / get_video_task / reconcile_video_task。禁止通过旧 publish.sh、匿名接口或通用调试器执行受保护抖音视频流程。
 - X 文字／单图、小红书视频、抖音／小红书图文：读 [工作流调用](references/workflows.md)，使用各自平台的发布MCP。

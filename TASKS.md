@@ -139,6 +139,14 @@
 
 ## Done
 
+- [WECHAT-FORMATS-002] 公众号格式、GIF位置和视频播客草稿实测指南
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-30
+  Log: dev-log/2026-10-30-wechat-format-usage.md
+  Result: 首图/第二张贴图GIF后台动效、图文微信GIF引用与静态显示、视频/播客网页草稿保存及重新打开已实测；52项回归、4个示例结构校验通过。8文件Skill与插件0.3.8已发布且19项固定包逐源核对；MCP仍0.3.1，音视频专用创建工具未封装，公开发表和手机动效不算验收通过。
+
+
 - [WORKFLOW-010] 公众号草稿MCP验收与插件补丁发布
   Status: Done
   Owner: codex
