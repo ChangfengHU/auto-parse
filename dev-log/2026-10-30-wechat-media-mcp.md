@@ -26,4 +26,13 @@
 
 当前构建.next-wechat-media-v040f-20261030，auto-parse.service监听11007；本地健康及公网MCP工具清单已验证。原构建配置备份在.runtime/wechat-media-v040/previous-build.env，对应.next-wechat-gif-v031-20261030。回滚只恢复build.env并在两浏览器锁可获取、任务空闲时重启；保留持久请求台账，不能通过删除台账重放未知保存。回滚版本没有新节点；不要执行新工作流。Supabase配置是正式来源，目录索引不是运行时JSON替代。
 
-Git仅提交本任务文件，不包含其他任务的.materials.json、parse路由、上传模块、音频配置、tsconfig及构建产物。Skill和Hub固定版本发布回执在完成发布后补录；不自动升级调用方客户端。
+Git仅提交本任务文件，不包含其他任务的.materials.json、parse路由、上传模块、音频配置、tsconfig及构建产物。Skill和Hub固定版本发布已完成，回执见下；不自动升级调用方客户端。
+
+## 发布回执
+
+代码提交59bbffb876fe82e1ddc75863761d30609c710f27已立即推送feature/wechat-rea-prepare-20261029。
+MCP 0.4.0：98c1d66b-85b2-4564-93b7-793332f7eae0（24工具）；Skill 0.4.0：c72d0d53-1f42-4bdc-806b-ed542c687176；插件0.4.0：2b02ef31-cb8c-48a9-9d3b-b6468fb5b6de。
+Skill包8文件，下载SHA256 9fd5cee37c9347357d78e7a6fb951be24d035ba23cb94299feef89c87e8a623d。插件包19项，SHA256 ad851500a46f54e8603b0e0fdf89000cc4beb0773886620c10d343c2282ad4b2，8份Skill文件逐一哈希与发布源一致。Hub卡片及固定依赖版本已回读；未执行客户端安装，也没有向ChatGPT发布。
+插件入口：https://fleet.vyibc.com/#/hub?view=plugins&plugin=vyibc-auto-publish
+固定包：https://fleet.vyibc.com/api/hub/onboarding/packages/vyibc-auto-publish/0.4.0/archive
+安装指南：bash <(curl -fsSL https://skill.vyibc.com/install-auto-parse-publish.sh?ts=20261030082040)
