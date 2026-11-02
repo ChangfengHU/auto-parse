@@ -147,14 +147,14 @@ test('all four platform MCPs expose self version, backed by matching release met
  const file=path.join(dir,'release.json');
  try{
   const versions={wechat:'0.4.1',douyin:'0.1.1',xiaohongshu:'0.1.1',x:'0.1.1'};
-  fs.writeFileSync(file,JSON.stringify({versions,deploy_id:'release-test-1',git_commit:'a'.repeat(40),deployed_at:'2026-11-02T03:22:27+08:00'}));
+  fs.writeFileSync(file,JSON.stringify({versions,deploy_id:'release-test-1',working_tree_dirty:true,git_commit:'a'.repeat(40),deployed_at:'2026-11-02T03:22:27+08:00'}));
   const l=loader({}, {process:{...process,env:{AUTO_PARSE_RELEASE_METADATA:file}}});
   const c=l('lib/workflow/platform-mcp-contract.ts'),r=l('lib/workflow/platform-release.ts');
   for(const platform of Object.keys(versions)){
    const tool=c.platformMcpTools(platform).find(x=>x.name==='get_version');
    assert(tool);assert.equal(tool.annotations.readOnlyHint,true);
    const info=r.platformReleaseInfo(platform);
-   assert.equal(info.version,versions[platform]);assert.equal(info.git_commit,'a'.repeat(40));assert.equal(info.deploy_id,'release-test-1');assert.equal(info.deployed_at,'2026-11-02T03:22:27+08:00');assert.equal(info.metadata_verified,true);
+   assert.equal(info.version,versions[platform]);assert.equal(info.working_tree_dirty,true);assert.equal(info.git_commit,'a'.repeat(40));assert.equal(info.deploy_id,'release-test-1');assert.equal(info.deployed_at,'2026-11-02T03:22:27+08:00');assert.equal(info.metadata_verified,true);
   }
   fs.writeFileSync(file,JSON.stringify({versions:{wechat:'9.9.9'},deploy_id:'old',git_commit:'b'.repeat(40),deployed_at:'2026-11-02T03:22:27+08:00'}));
   const mismatch=r.platformReleaseInfo('wechat');assert.equal(mismatch.metadata_verified,false);assert.equal(mismatch.deploy_id,null);assert.equal(mismatch.git_commit,null);
