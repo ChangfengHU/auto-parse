@@ -1,3 +1,4 @@
+import {platformReleaseInfo} from './platform-release';
 import {callWechatMediaTool} from './wechat-media-service';
 import {MEDIA_DRAFT_CAPABILITIES} from '../wechat/media-draft';
 import {webPublishState} from '../wechat/web-publish';
@@ -12,7 +13,8 @@ import {PLATFORM_WORKFLOWS,platformMcpTools,type PublicationPlatform} from './pl
 import type {DouyinWorkflowInput} from './douyin-workflow-service';
 import {isRecord} from './validation';
 declare global {var __publicationPlatformSessions:Map<string,PublicationPlatform>|undefined;}
-const WECHAT_WEB_CAPABILITIES={prepareWorkflow:'9a676224-70bd-41d4-9e85-c8d2b83a00c4',publishWorkflow:'cea6d731-ce15-46d8-95fb-f420ebfacb93',publishTool:'wechat_web_publish_draft',statusTool:'wechat_web_publish_status',maxTitleCharacters:20,aiGeneratedOnly:true,requiresPreparedFingerprint:true,administratorVerification:'may require administrator scan; poll the same workflow session for screenshot',recommendedTimeoutMs:120000,submittedMeaning:'WeChat accepted the final request; public visibility not independently verified',verifiedThrough:'real logged-in page reached administrator verification; final live submission not yet acceptance-tested',concurrency:1};
+const WECHAT_OPERATOR_VNC='https://vnc-84-8-217-45.vyibc.com/vnc.html?autoconnect=1&resize=scale';
+const WECHAT_WEB_CAPABILITIES={operatorVncUrl:WECHAT_OPERATOR_VNC,prepareWorkflow:'9a676224-70bd-41d4-9e85-c8d2b83a00c4',publishWorkflow:'cea6d731-ce15-46d8-95fb-f420ebfacb93',publishTool:'wechat_web_publish_draft',statusTool:'wechat_web_publish_status',maxTitleCharacters:20,aiGeneratedOnly:true,requiresPreparedFingerprint:true,administratorVerification:'may require administrator scan; poll the same workflow session for screenshot',recommendedTimeoutMs:120000,submittedMeaning:'WeChat accepted the final request; public visibility not independently verified',verifiedThrough:'real logged-in page reached administrator verification; final live submission not yet acceptance-tested',concurrency:1};
 const owners=()=>global.__publicationPlatformSessions??=new Map<string,PublicationPlatform>();
 function assertWorkflow(platform:PublicationPlatform,id:unknown){
  if(typeof id!=='string'||!Object.hasOwn(PLATFORM_WORKFLOWS[platform],id))throw Error('platform_workflow_not_allowed');
@@ -26,6 +28,7 @@ function assertVideoTask(id:unknown){
 }
 export async function callPlatformTool(platform:PublicationPlatform,name:string,input:Record<string,unknown>):Promise<unknown>{
  if(!platformMcpTools(platform).some(t=>t.name===name))throw Error('platform_tool_not_allowed');
+ if(name==='get_version')return platformReleaseInfo(platform);
  if(platform==='wechat' && ['wechat_create_video_draft','wechat_create_podcast_draft','wechat_media_draft_status'].includes(name))return callWechatMediaTool(name,input);
  if(platform==='wechat' && name==='wechat_web_publish_status'){
   if(typeof input.expectedAccount!=='string'||typeof input.mediaId!=='string')throw Error('wechat_web_invalid_input');
@@ -40,7 +43,7 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
   const sid=String(opened.sessionId);owners().set(sid,platform);
   try{
    await callWorkflowTool('workflow_run',{sessionId:sid,expectedRevision:opened.sessionRevision,requestId:input.requestId,confirmExecution:true});
-   return {status:'running',sessionId:sid,requestId:input.requestId,poll:'workflow_get_session',publicationStatus:'wechat_web_publish_status',note:'Keep session open through administrator verification. No retry under a new ID.'};
+   return {status:'running',sessionId:sid,requestId:input.requestId,operatorVncUrl:WECHAT_OPERATOR_VNC,poll:'workflow_get_session',publicationStatus:'wechat_web_publish_status',note:'Keep session open through administrator verification. No retry under a new ID.'};
   }catch(error){await callWorkflowTool('workflow_close_session',{sessionId:sid}).catch(()=>{});owners().delete(sid);throw error;}
  }
  if(platform==='wechat' && WECHAT_DRAFT_TOOLS.some(t=>t.name===name)){

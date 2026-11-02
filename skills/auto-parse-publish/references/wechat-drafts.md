@@ -31,7 +31,7 @@
 ## 已验证范围与网络
 2026-10-29已完成官方认证、永久封面上传、一篇接入验证文章草稿创建、同media_id官方回读，以及同requestId重放返回原回执。同日已通过同一生产MCP创建8张早报原生贴图草稿，官方回读article_type=newspic；逐项比对8个永久图片ID顺序与首图封面，同请求重放返回原media_id，草稿仅增加1。此验证不代表已成功公开发表、群发、GIF播放或原生Live Photo。不得为了确认连接反复创建测试草稿，优先查询账号状态与已有回执。
 服务端通过WECHAT_HTTPS_PROXY显式代理调用；代理缺失、配置无效或连接失败均不回退直连。代理地址及其认证配置由受信任服务端维护，不能作为MCP工具参数修改，不向普通输出回显。公众号AppSecret与MCP Bearer令牌是两种不同凭据。
-插件0.4.0包含格式选择、GIF位置、已上传微信GIF复用与逐项验收指南；公众号Hub组件固定0.4.0，其他三个组件仍为0.1.0。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
+插件0.4.1包含格式选择、GIF位置、已上传微信GIF复用与逐项验收指南；公众号Hub组件固定0.4.1，其他三个组件为0.1.1。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
 
 ## 原生贴图调用示例
 ~~~json
@@ -86,3 +86,6 @@ wechat_web_publish_status({expectedAccount,mediaId})读取重启持久账本。s
 ## 原生视频和播客草稿
 
 0.4.0新增 wechat_create_video_draft、wechat_create_podcast_draft、wechat_media_draft_status，使用已登录浏览器，与本页官方图文/贴图API路径独立。必须先阅读[专用工具的输入、异步状态和验收边界](wechat-usage.md#视频与播客专用-mcp)。不要把 videoUrl/audioUrl 传给 wechat_create_draft。
+
+
+管理员扫码地址由wechat_web_publish_draft回传operatorVncUrl；当前84浏览器1入口为 https://vnc-84-8-217-45.vyibc.com/vnc.html?autoconnect=1&resize=scale 。先轮询原workflow_get_session确认出现扫码页面，用户自行扫码；保持会话并继续查询wechat_web_publish_status，收到submitted回执也要单独核验后台实际状态。只发表用户指定并授权的稿件，勿发表标注勿发布的测试稿。最终扫码后真实提交尚未验收。

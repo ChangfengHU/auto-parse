@@ -57,7 +57,7 @@ const create=(r,id='create-1',articles=[article])=>r.callWechatDraftTool('wechat
 test.after(()=>{for(const r of suites)fs.rmSync(r.cwd,{recursive:true,force:true});});
 test('wechat catalog has independent auth and only approved preparation workflow',()=>{
  const c=loader()('lib/workflow/platform-mcp-contract.ts'),names=c.platformMcpTools('wechat').map(x=>x.name);
- assert.equal(names.length,24);assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(names.includes('workflow_open_session'));assert(!names.includes('workflow_create'));assert(!names.includes('workflow_update'));
+ assert.equal(names.length,25);assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(names.includes('workflow_open_session'));assert(!names.includes('workflow_create'));assert(!names.includes('workflow_update'));
  const env={WORKFLOW_MCP_TOKEN:'fixture'};
  for(const other of ['douyin','xiaohongshu','x']){
   const req=new Request('https://auto-parse-v2.vyibc.com/api/publish/mcp/wechat',{headers:{authorization:'Bearer '+c.platformMcpToken(other,env)}});

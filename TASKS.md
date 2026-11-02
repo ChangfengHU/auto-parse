@@ -243,3 +243,7 @@
 
 ## WECHAT-MEDIA-003 — Done
 Dedicated video/podcast draft MCP tools with durable request ledger, native browser save/readback, formal Supabase workflow, acceptance tests and Hub/Skill release. Owner: Codex. Completed 2026-10-30: MCP 0.4.0 / 24 tools; real video 100001421 and podcast 100001413 saved/reloaded, idempotency and restart receipts verified. No public test publication.
+
+
+## WECHAT-HUB-VERSION-004 — In Progress
+Add release-version tool for all four publication MCPs and verify Hub 1.4.1 admission; inspect existing authorized WeChat browser publication and administrator-scan continuation. Started 2026-11-02.
