@@ -166,6 +166,7 @@ test('all four platform MCPs expose self version, backed by matching release met
 test('WeChat assistance hands off the owned scan session without publication',async()=>{
  const r=runtime();
  const none=await r.call('wechat','wechat_web_assistance',{});assert.equal(none.sessionStatus,'no_active_session');assert.match(none.operatorVncUrl,/vnc-84-8-217-45/);
+ const lost=await r.call('wechat','wechat_web_assistance',{sessionId:'lost-after-restart'});assert.equal(lost.sessionStatus,'unavailable');assert.match(lost.operatorVncUrl,/vnc-84-8-217-45/);
  const opened=await r.call('wechat','workflow_open_session',{workflowId:'cea6d731-ce15-46d8-95fb-f420ebfacb93',browserInstance:1});
  r.sessions.get(opened.sessionId).testObservation='扫码后，请联系管理员进行验证';
  const handoff=await r.call('wechat','wechat_web_assistance',{sessionId:opened.sessionId});assert.equal(handoff.handoffState,'awaiting_admin_scan');assert.equal(handoff.sessionId,opened.sessionId);

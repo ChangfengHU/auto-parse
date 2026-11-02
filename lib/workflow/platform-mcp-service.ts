@@ -34,7 +34,9 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
   const active=[...owners()].filter(([sid,owner])=>owner==='wechat'&&!!getSession(sid)).map(([sid])=>sid);
   const sid=typeof input.sessionId==='string'?input.sessionId:active.length===1?active[0]:undefined;
   if(!sid)return {operatorVncUrl:WECHAT_OPERATOR_VNC,sessionStatus:active.length?'session_id_required':'no_active_session',activeSessionIds:active,note:'No scan is asserted. Supply the original publication sessionId; do not resubmit an unknown publication.'};
-  if(owners().get(sid)!=='wechat')throw Error('platform_session_not_owned');
+  const owner=owners().get(sid);
+  if(owner&&owner!=='wechat')throw Error('platform_session_not_owned');
+  if(!owner)return {operatorVncUrl:WECHAT_OPERATOR_VNC,sessionId:sid,sessionStatus:'unavailable',note:'The session is unavailable or the service restarted. Check original publication status and reconcile before retrying.'};
   const session=getSession(sid);
   if(!session)return {operatorVncUrl:WECHAT_OPERATOR_VNC,sessionId:sid,sessionStatus:'expired',note:'The original session is gone; check publication status and reconcile before any retry.'};
   assertWorkflow(platform,session.workflowId);
