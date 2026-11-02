@@ -247,3 +247,6 @@ Dedicated video/podcast draft MCP tools with durable request ledger, native brow
 
 ## WECHAT-HUB-VERSION-004 — In Progress
 Add release-version tool for all four publication MCPs and verify Hub 1.4.1 admission; inspect existing authorized WeChat browser publication and administrator-scan continuation. Started 2026-11-02.
+
+## WECHAT-ASSIST-005 — In Progress
+WeChat manual VNC handoff MCP, task-owned popup draft navigation and real read-only preflight; await user-selected publishable draft and final acceptance. Started 2026-11-02.

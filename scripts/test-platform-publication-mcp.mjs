@@ -52,6 +52,7 @@ function runtime(deferClose=false){
   calls.push({name,input});
   if(name==='workflow_get')return{id:input.workflowId,name:'fixture',nodes:[],vars:[],updatedAt:'fixture'};
   if(name==='workflow_capabilities')return{sessionIdleMinutes:20,imageTextPublication:{platforms:['xhs','douyin']},xPublication:{maxImages:1}};
+  if(name==='workflow_get_session'&&sessions.get(input.sessionId)?.testObservation)return {status:'done',expiresAt:123,observation:{text:sessions.get(input.sessionId).testObservation},history:[]};
   if(name==='workflow_open_session'){const id='session-'+(++serial);sessions.set(id,{workflowId:input.workflowId});return{sessionId:id};}
   if(name==='workflow_close_session'||name==='workflow_stop'){if(!deferClose)sessions.delete(input.sessionId);return{status:deferClose?'stopping':'closed'};}
   return{name,...input};
@@ -146,7 +147,7 @@ test('all four platform MCPs expose self version, backed by matching release met
  const dir=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'platform-version-test-'));
  const file=path.join(dir,'release.json');
  try{
-  const versions={wechat:'0.4.1',douyin:'0.1.1',xiaohongshu:'0.1.1',x:'0.1.1'};
+  const versions={wechat:'0.4.2',douyin:'0.1.1',xiaohongshu:'0.1.1',x:'0.1.1'};
   fs.writeFileSync(file,JSON.stringify({versions,deploy_id:'release-test-1',working_tree_dirty:true,git_commit:'a'.repeat(40),deployed_at:'2026-11-02T03:22:27+08:00'}));
   const l=loader({}, {process:{...process,env:{AUTO_PARSE_RELEASE_METADATA:file}}});
   const c=l('lib/workflow/platform-mcp-contract.ts'),r=l('lib/workflow/platform-release.ts');
@@ -159,4 +160,17 @@ test('all four platform MCPs expose self version, backed by matching release met
   fs.writeFileSync(file,JSON.stringify({versions:{wechat:'9.9.9'},deploy_id:'old',git_commit:'b'.repeat(40),deployed_at:'2026-11-02T03:22:27+08:00'}));
   const mismatch=r.platformReleaseInfo('wechat');assert.equal(mismatch.metadata_verified,false);assert.equal(mismatch.deploy_id,null);assert.equal(mismatch.git_commit,null);
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
+});
+
+
+test('WeChat assistance hands off the owned scan session without publication',async()=>{
+ const r=runtime();
+ const none=await r.call('wechat','wechat_web_assistance',{});assert.equal(none.sessionStatus,'no_active_session');assert.match(none.operatorVncUrl,/vnc-84-8-217-45/);
+ const opened=await r.call('wechat','workflow_open_session',{workflowId:'cea6d731-ce15-46d8-95fb-f420ebfacb93',browserInstance:1});
+ r.sessions.get(opened.sessionId).testObservation='扫码后，请联系管理员进行验证';
+ const handoff=await r.call('wechat','wechat_web_assistance',{sessionId:opened.sessionId});assert.equal(handoff.handoffState,'awaiting_admin_scan');assert.equal(handoff.sessionId,opened.sessionId);
+ assert.equal(r.calls.filter(x=>x.name==='workflow_run').length,0);
+ const other=await r.call('x','workflow_open_session',{workflowId:Object.keys(contract.PLATFORM_WORKFLOWS.x)[0],browserInstance:2});
+ await assert.rejects(r.call('wechat','wechat_web_assistance',{sessionId:other.sessionId}),/platform_session_not_owned/);
+ await r.call('wechat','workflow_close_session',{sessionId:opened.sessionId});await r.call('x','workflow_close_session',{sessionId:other.sessionId});
 });
