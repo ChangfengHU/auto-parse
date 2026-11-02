@@ -47,3 +47,17 @@ test('fingerprint ignores rotating preview link and object order but binds conte
    assert.notEqual(x.fingerprint(a),x.fingerprint([{...a[0],...patch}]));
  }finally{fs.rmSync(x.root,{recursive:true,force:true})}
 });
+
+
+test('after administrator scan a retained session records one final submission',async()=>{
+ const x=setup();try{
+  let handler,close,fetches=0;
+  const loc={click:async()=>{},filter(){return this},locator(){return this},getByRole(){return this},isChecked:async()=>true,waitFor:async()=>{}};
+  const page={once:(event,fn)=>{if(event==='close')close=fn},route:async(_,fn)=>{handler=fn},locator:()=>loc,getByText:()=>({isVisible:async()=>true})};
+  const wait=await x.api.publishVerifiedEditor(page,input,1,'fingerprint');assert.equal(wait.status,'awaiting_admin_scan');
+  const req={request:()=>({url:()=> 'https://mp.weixin.qq.com/cgi-bin/masssend?is_release_publish_page=1',method:()=> 'POST',postData:()=> 'appmsgid=1'}),fetch:async()=>{fetches++;return {json:async()=>({base_resp:{ret:0},msg_id:'after-scan'}),status:()=>200,ok:()=>true}},fulfill:async()=>{},abort:async()=>{}};
+  await handler(req);
+  const record=x.api.webPublishState(input.expectedAccount,input.mediaId);assert.equal(record.state,'submitted');assert.equal(record.receipt.messageId,'after-scan');
+  await handler(req);assert.equal(fetches,1);close();assert.equal(x.api.webPublishState(input.expectedAccount,input.mediaId).state,'submitted');
+ }finally{fs.rmSync(x.root,{recursive:true,force:true})}
+});
