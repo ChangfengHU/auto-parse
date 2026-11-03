@@ -31,7 +31,7 @@
 ## 已验证范围与网络
 2026-10-29已完成官方认证、永久封面上传、一篇接入验证文章草稿创建、同media_id官方回读，以及同requestId重放返回原回执。同日已通过同一生产MCP创建8张早报原生贴图草稿，官方回读article_type=newspic；逐项比对8个永久图片ID顺序与首图封面，同请求重放返回原media_id，草稿仅增加1。此验证不代表已成功公开发表、群发、GIF播放或原生Live Photo。不得为了确认连接反复创建测试草稿，优先查询账号状态与已有回执。
 服务端通过WECHAT_HTTPS_PROXY显式代理调用；代理缺失、配置无效或连接失败均不回退直连。代理地址及其认证配置由受信任服务端维护，不能作为MCP工具参数修改，不向普通输出回显。公众号AppSecret与MCP Bearer令牌是两种不同凭据。
-插件0.5.0包含格式选择、GIF位置、扫码直达与逐项验收指南；公众号Hub组件固定0.5.0，其他三个组件为0.1.1。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
+插件0.5.2包含格式选择、GIF位置、扫码直达、账号校验与逐项验收指南；公众号Hub组件固定0.5.2，其他三个组件为0.1.1。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
 
 ## 原生贴图调用示例
 ~~~json
@@ -65,15 +65,15 @@ newspic可传liveCoverVideoUrl（受信任素材域名HTTPS）；此值仅保存
 本地校验和图片错误返回code、message、hint；贴图相关图片校验或上传错误可含1起始imageIndex；下载HTTP失败可含httpStatus。微信业务错误保留微信code并返回中文说明，仍须参照具体场景。
 
 
-## 网页贴图发表（0.3.0）
+## 网页图文与贴图发表
 
-同一公众号MCP新增wechat_web_publish_draft和wechat_web_publish_status。先用workflow_open_session打开准备流程9a676224-70bd-41d4-9e85-c8d2b83a00c4，browserInstance=1，vars={mediaId,expectedAccount}，运行后从history.output取得draftFingerprint，再关闭准备会话释放浏览器。expectedAccount必须是已登录公众号gh_原始ID，不是AppID。
+同一公众号MCP新增wechat_web_publish_draft和wechat_web_publish_status。先用workflow_open_session打开准备流程9a676224-70bd-41d4-9e85-c8d2b83a00c4，browserInstance=1，vars={mediaId,expectedAccount}，运行后从history.output取得draftFingerprint，再关闭准备会话释放浏览器。expectedAccount必须是后台确认的公众号原始 ID（gh_ 加 12 位字母或数字），不是显示名称或 AppID。已核验的「唯伊不可」为 gh_8dfb3900381c；其他账号应先在公众号后台确认，不能猜测。0.5.2 起格式错误在浏览器打开前返回 wechat_web_invalid_account，不能据此判断掉线。
 
-只有用户已授权公开的具体草稿才能调用wechat_web_publish_draft({mediaId,expectedAccount,expectedFingerprint,requestId,aiGenerated:true,confirmPublish:true})。当前仅支持单篇newspic、20字标题和明确AI来源声明。工具会保存声明并走微信原生发表确认；Supabase正式发表流程为cea6d731-ce15-46d8-95fb-f420ebfacb93。异步返回sessionId后轮询workflow_get_session，awaiting_admin_scan时向管理员展示返回截图并保留同一任务页。不要看到节点done就关闭等待扫码的会话。
+只有用户已授权公开的具体草稿才能调用wechat_web_publish_draft({mediaId,expectedAccount,expectedFingerprint,requestId,aiGenerated:true,confirmPublish:true})。当前支持单篇 news 或 newspic 和明确 AI 来源声明；贴图标题最多20字，图文标题最多32字。工具会保存声明并走微信原生发表确认；Supabase正式发表流程为cea6d731-ce15-46d8-95fb-f420ebfacb93。异步返回sessionId后轮询workflow_get_session，awaiting_admin_scan时向管理员展示返回截图并保留同一任务页。不要看到节点done就关闭等待扫码的会话。
 
 wechat_web_publish_status({expectedAccount,mediaId})读取重启持久账本。submitting/unknown均需查原会话和微信后台，禁止换requestId重发；submitted只证明最终请求获微信成功应答，不证明审核或公众可见。会话20分钟空闲失效；轮询刷新期限，重启不保留网页会话。账号+草稿意图不得删除以强行重发。
 
-真实验证已到管理员扫码页面，测试未公开发表；最终真实提交和公众可见性尚未验收。两个入口共用活动锁与账本；REA CLI也依赖已登录浏览器，并非纯HTTP发布。完整服务端调用、恢复和CLI环境说明见仓库docs/wechat-web-prepare.md。
+图文测试已获微信提交成功回执，公开可见性尚未核实；贴图最终提交尚未验收。两个入口共用活动锁与账本；REA CLI也依赖已登录浏览器，并非纯HTTP发布。完整服务端调用、恢复和CLI环境说明见仓库docs/wechat-web-prepare.md。
 
 
 ## GIF实际验收（2026-10-30）

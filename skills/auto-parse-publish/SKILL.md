@@ -9,7 +9,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 依赖与授权
 
-统一插件按自媒体平台包含四个MCP（运行时公众号0.5.0，其他各0.1.1；安装包版本以Hub回执为准），公众号支持草稿箱、依赖账号权限的官方发表及网页图文和贴图发表，不再把研究工具或通用工作流编辑器作为发布依赖：
+统一插件按自媒体平台包含四个MCP（运行时公众号0.5.2，其他各0.1.1；安装包版本以Hub回执为准），公众号支持草稿箱、依赖账号权限的官方发表及网页图文和贴图发表，不再把研究工具或通用工作流编辑器作为发布依赖：
 
 | 自媒体平台 | MCP服务器 | 专用端点 |
 | --- | --- | --- |
@@ -24,6 +24,8 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 - 本插件有浏览器账号操作及公开发布权限；仅在用户授权的账号、内容、目标平台内执行。询问支持情况不构成发布许可。当前任务已经明确授权时无需重复确认。
 
 ## 每次任务
+
+公众号网页发表的 `expectedAccount` 必须是后台确认的公众号原始 ID（`gh_` 加 12 位字母或数字），不能填公众号名称或 AppID；当前已核验的「唯伊不可」为 `gh_8dfb3900381c`。不确定时先向公众号后台核实，不猜测映射。格式错误在开会话前被拒绝，不代表浏览器退出登录。
 
 1. 明确平台、账号、素材、正文及模式（仅准备／保存草稿／公开发布）。已有上下文能确定则直接复用。语言按用户要求；当前所有者要求 X 正文全英文、日常回复中文，不虚构个人经历。
 2. 公众号先读 [格式选择与验收清单](references/wechat-usage.md) 和 [公众号草稿箱](references/wechat-drafts.md)，调用 wechat_capabilities、wechat_account_status；其他平台在目标平台MCP查实际 workflow_capabilities、workflow_list 和 workflow_get；抖音视频能力也由同平台 workflow_capabilities.video说明。读取目标节点的账号绑定、条件分支和参数。不能只凭工作流名称判断账号或安全性。
@@ -44,7 +46,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 结果与恢复
 
-公众号遵循稳定requestId与重启持久账本；未知提交先查 wechat_draft_request_status 与官方草稿列表。此前的业务拒绝可在修复原因后以同一请求重试；unknown/submitting不能盲重建。官方草稿工具没有浏览器sessionId，不套用20分钟会话限制。网页发表使用wechat_web_publish_draft和wechat_web_publish_status；会话保留管理员验证页；publish_draft 返回限时 verificationUrl（10分钟）给管理员扫码，wechat_web_assistance 可重新获取，VNC 仅作备用。不得分享链接或写入普通日志；扫码后继续查原会话和状态，细节见公众号参考文档。详见对应参考文档。
+公众号遵循稳定requestId与重启持久账本；未知提交先查 wechat_draft_request_status 与官方草稿列表。此前的业务拒绝可在修复原因后以同一请求重试；unknown/submitting不能盲重建。官方草稿工具没有浏览器sessionId，不套用20分钟会话限制。网页发表使用wechat_web_publish_draft和wechat_web_publish_status；会话保留管理员验证页；publish_draft 返回限时 verificationUrl（10分钟）给管理员扫码，wechat_web_assistance 可重新获取，VNC 仅作备用。仅将链接提供给本次授权的管理员，不写入普通日志或公开页面；扫码后继续查原会话和状态，细节见公众号参考文档。详见对应参考文档。
 
 给出实际账号、模式、taskId/sessionId、状态、真实作品ID/链接及验证范围。区分 prepared、draft_saved、creation_confirmed、visibility_verified、submission_unknown；这些是交付分类，不冒充服务端统一状态枚举。
 - 准备完成不等于草稿保存，创建回执不等于审核通过，账号内回查不等于匿名可见。

@@ -147,7 +147,7 @@ test('all four platform MCPs expose self version, backed by matching release met
  const dir=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'platform-version-test-'));
  const file=path.join(dir,'release.json');
  try{
-  const versions={wechat:'0.5.1',douyin:'0.1.1',xiaohongshu:'0.1.1',x:'0.1.1'};
+  const versions={wechat:'0.5.2',douyin:'0.1.1',xiaohongshu:'0.1.1',x:'0.1.1'};
   fs.writeFileSync(file,JSON.stringify({versions,deploy_id:'release-test-1',working_tree_dirty:true,git_commit:'a'.repeat(40),deployed_at:'2026-11-02T03:22:27+08:00'}));
   const l=loader({}, {process:{...process,env:{AUTO_PARSE_RELEASE_METADATA:file}}});
   const c=l('lib/workflow/platform-mcp-contract.ts'),r=l('lib/workflow/platform-release.ts');
@@ -167,11 +167,25 @@ test('WeChat assistance hands off the owned scan session without publication',as
  const r=runtime();
  const none=await r.call('wechat','wechat_web_assistance',{});assert.equal(none.sessionStatus,'no_active_session');assert.match(none.operatorVncUrl,/vnc-84-8-217-45/);
  const lost=await r.call('wechat','wechat_web_assistance',{sessionId:'lost-after-restart'});assert.equal(lost.sessionStatus,'unavailable');assert.match(lost.operatorVncUrl,/vnc-84-8-217-45/);
- const opened=await r.call('wechat','workflow_open_session',{workflowId:'cea6d731-ce15-46d8-95fb-f420ebfacb93',browserInstance:1});
+ const opened=await r.call('wechat','workflow_open_session',{workflowId:'cea6d731-ce15-46d8-95fb-f420ebfacb93',browserInstance:1,vars:{expectedAccount:'gh_123456789abc'}});
  r.sessions.get(opened.sessionId).testObservation='扫码后，请联系管理员进行验证';
  const handoff=await r.call('wechat','wechat_web_assistance',{sessionId:opened.sessionId});assert.equal(handoff.handoffState,'awaiting_admin_scan');assert.equal(handoff.sessionId,opened.sessionId);
  assert.equal(r.calls.filter(x=>x.name==='workflow_run').length,0);
  const other=await r.call('x','workflow_open_session',{workflowId:Object.keys(contract.PLATFORM_WORKFLOWS.x)[0],browserInstance:2});
  await assert.rejects(r.call('wechat','wechat_web_assistance',{sessionId:other.sessionId}),/platform_session_not_owned/);
  await r.call('wechat','workflow_close_session',{sessionId:opened.sessionId});await r.call('x','workflow_close_session',{sessionId:other.sessionId});
+});
+
+test('wechat web rejects display name before browser use and accepts original ID',async()=>{
+ const r=runtime(), id='9a676224-70bd-41d4-9e85-c8d2b83a00c4';
+ const args={workflowId:id,browserInstance:1,vars:{expectedAccount:'唯伊不可'}};
+ await assert.rejects(r.call('wechat','workflow_open_session',args),/wechat_web_invalid_account/);
+ assert.equal(r.calls.filter(x=>x.name==='workflow_open_session').length,0);
+ await assert.rejects(r.call('wechat','wechat_web_publish_status',{expectedAccount:'唯伊不可',mediaId:'fixture'}),/wechat_web_invalid_account/);
+ await assert.rejects(r.call('wechat','wechat_web_publish_draft',{expectedAccount:'唯伊不可'}),/wechat_web_invalid_account/);
+ const ok=await r.call('wechat','workflow_open_session',{...args,vars:{expectedAccount:'gh_123456789abc'}});
+ assert.ok(ok.sessionId);
+ await r.call('wechat','workflow_close_session',{sessionId:ok.sessionId});
+ const open=contract.platformMcpTools('wechat').find(x=>x.name==='workflow_open_session');
+ assert.match(open.description,/original ID/);
 });

@@ -17,6 +17,9 @@ declare global {var __publicationPlatformSessions:Map<string,PublicationPlatform
 const WECHAT_OPERATOR_VNC='https://vnc-84-8-217-45.vyibc.com/vnc.html?autoconnect=1&resize=scale';
 const WECHAT_WEB_CAPABILITIES={operatorVncUrl:WECHAT_OPERATOR_VNC,assistanceTool:'wechat_web_assistance',prepareWorkflow:'9a676224-70bd-41d4-9e85-c8d2b83a00c4',publishWorkflow:'cea6d731-ce15-46d8-95fb-f420ebfacb93',publishTool:'wechat_web_publish_draft',statusTool:'wechat_web_publish_status',maxTitleCharacters:{newspic:20,news:32},aiGeneratedOnly:true,requiresPreparedFingerprint:true,administratorVerification:'may require administrator scan; poll the same workflow session for screenshot',recommendedTimeoutMs:120000,submittedMeaning:'WeChat accepted the final request; public visibility not independently verified',verifiedThrough:'news live submission received WeChat ret=0 and appeared in publication records; review and public visibility require separate confirmation; newspic final submission unverified',concurrency:1};
 const owners=()=>global.__publicationPlatformSessions??=new Map<string,PublicationPlatform>();
+function assertWechatWebAccount(account: unknown): asserts account is string {
+ if(typeof account !== 'string' || !/^gh_[a-zA-Z0-9]{12}$/.test(account)) throw Error('wechat_web_invalid_account');
+}
 function assertWorkflow(platform:PublicationPlatform,id:unknown){
  if(typeof id!=='string'||!Object.hasOwn(PLATFORM_WORKFLOWS[platform],id))throw Error('platform_workflow_not_allowed');
  return id;
@@ -54,11 +57,13 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
    screenshotTool:'workflow_get_session',publicationStatusTool:'wechat_web_publish_status'};
  }
  if(platform==='wechat' && name==='wechat_web_publish_status'){
+  assertWechatWebAccount(input.expectedAccount);
   if(typeof input.expectedAccount!=='string'||typeof input.mediaId!=='string')throw Error('wechat_web_invalid_input');
   const record=webPublishState(input.expectedAccount,input.mediaId);
   return record?{found:true,...record}:{found:false};
  }
  if(platform==='wechat' && name==='wechat_web_publish_draft'){
+  assertWechatWebAccount(input.expectedAccount);
   if(input.confirmPublish!==true||input.aiGenerated!==true||typeof input.expectedFingerprint!=='string'||!/^[a-f0-9]{64}$/.test(input.expectedFingerprint)||typeof input.requestId!=='string'||!input.requestId||typeof input.expectedAccount!=='string'||typeof input.mediaId!=='string')throw Error('wechat_web_confirmation_and_preparation_required');
   const old=webPublishState(input.expectedAccount,input.mediaId);
   if(old)return {reused:true,...old,note:'Existing intent; no second click. Query status.'};
@@ -98,6 +103,7 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
  if(name==='workflow_open_session'){
   const id=assertWorkflow(platform,input.workflowId);
   if(input.browserInstance!==PLATFORM_WORKFLOWS[platform][id])throw Error('platform_browser_mismatch');
+  if(platform==='wechat' && (id==='9a676224-70bd-41d4-9e85-c8d2b83a00c4' || id==='cea6d731-ce15-46d8-95fb-f420ebfacb93')) assertWechatWebAccount(isRecord(input.vars)?input.vars.expectedAccount:undefined);
   for(const sid of owners().keys())if(!getSession(sid))owners().delete(sid);
   const result=await callWorkflowTool(name,input);
   if(!isRecord(result)||typeof result.sessionId!=='string')throw Error('platform_session_not_created');
