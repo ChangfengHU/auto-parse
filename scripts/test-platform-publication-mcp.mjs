@@ -147,7 +147,7 @@ test('all four platform MCPs expose self version, backed by matching release met
  const dir=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'platform-version-test-'));
  const file=path.join(dir,'release.json');
  try{
-  const versions={wechat:'0.5.0',douyin:'0.1.1',xiaohongshu:'0.1.1',x:'0.1.1'};
+  const versions={wechat:'0.5.1',douyin:'0.1.1',xiaohongshu:'0.1.1',x:'0.1.1'};
   fs.writeFileSync(file,JSON.stringify({versions,deploy_id:'release-test-1',working_tree_dirty:true,git_commit:'a'.repeat(40),deployed_at:'2026-11-02T03:22:27+08:00'}));
   const l=loader({}, {process:{...process,env:{AUTO_PARSE_RELEASE_METADATA:file}}});
   const c=l('lib/workflow/platform-mcp-contract.ts'),r=l('lib/workflow/platform-release.ts');

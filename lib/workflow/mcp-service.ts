@@ -185,7 +185,7 @@ export async function callWorkflowTool(name: string, input: Record<string, unkno
     assertWorkflowShape(workflow);
     const initialVars = vars(input.vars);
     const port = 9221 + Number(input.browserInstance);
-    const release = await acquireManagedBrowserActivity(`http://127.0.0.1:${port}`);
+    const release = await acquireManagedBrowserActivity(`http://127.0.0.1:${port}`, undefined, 12);
     let browser: Browser | undefined;
     let page: Page | undefined;
     try {
