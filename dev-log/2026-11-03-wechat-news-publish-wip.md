@@ -24,3 +24,10 @@
 - 用户明确要求将公众号 MCP 和扫码入口发布到能力广场。已移除图文发布实验门禁；发布工具返回短时 verificationUrl 和 VNC 备用，二维码仅可由当前扫码页提取。微信图文默认关闭群发通知，用户授权并扫码后微信返回 ret=0。公开可见性仍未核实。
 - 2026-11-03 生产构建通过，37 项相关测试通过；隔离 11008 MCP 0.5.0 工具列表、草稿箱连接、二维码页和无效凭据拒绝检查通过。第一次非特权构建因旧 runtime 目录权限失败；以项目既定权限重新构建。清除了构建追加到 tsconfig 的两项，保留原有修改。
 - 截至此条记录尚未切换生产或登记 Hub。仍需上线后实际验证、更新固定版本插件和 Skill、追踪扫码直达全链路。
+
+## 生产与能力广场 0.5.0
+- 生产部署 auto-parse-3c815691-6343-4f08-9a3d-0ed54308c611；构建 HEAD 11be423315c2df34c02411a71cfa1df72cc5d0f8，含未提交改动，working_tree_dirty=true。现网 get_version、26 个工具、公众号账号与扫码页正常；新构建保留旧构建及回退环境配置。
+- Hub 公众号 MCP 0.5.0 回执 fad6872f-cb94-4da8-8e04-464c37a4445d；Skill 0.5.0 回执 fff7af63-314e-44ce-ae26-661f93033080；插件 0.5.0 回执 4887a59c-edea-4aaa-ae95-12081c40c292。Hub 下发的四个平台专用认证配置分别调用 get_version 成功。
+- 插件 Hub 登记成功，但系统自动向 ChatGPT 推送的网关冒烟报 gateway_api_smoke_failed，四成员均 upstream_probe_unavailable，未自动推送；不等同 Hub 未登记或直连不可用。
+- 线上 MCP 对图文草稿完成 45 条列表唯一预检、打开已授权发布测试，并从 wechat_web_publish_draft 取得限时入口；真实微信二维码 HTTP 200 image/png，wechat_web_assistance 返回 awaiting_admin_scan。当前测试保留原会话和发布意图，扫描与最终结果待核对；不写入二维码链接。
+- 代码提交 5586d8904118d84438c70833f06d73a64a62f646 已推送独立 feature/wechat-qr-20261103 分支；远端 main 与本机 main 未确认一致，未覆盖远端 main。
