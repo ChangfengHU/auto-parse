@@ -1,6 +1,6 @@
 ---
 name: auto-parse-publish
-description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用户准备、发布并回查抖音、小红书及 X 内容，通过官方API保存公众号图文与原生贴图草稿，并通过已登录网页提交获授权的AI贴图发表；也用于查询支持的平台、账号要求和发布状态。不负责采集素材、生图、登录或绕过平台风控。
+description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用户准备、发布并回查抖音、小红书及 X 内容，通过官方API保存公众号图文与原生贴图草稿，并通过已登录网页提交获授权的AI图文或贴图发表；也用于查询支持的平台、账号要求和发布状态。不负责采集素材、生图、登录或绕过平台风控。
 ---
 
 # 自动发布
@@ -9,7 +9,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 依赖与授权
 
-统一插件按自媒体平台包含四个MCP（运行时公众号0.4.2，其他各0.1.1；安装包版本以Hub回执为准），公众号支持草稿箱、依赖账号权限的官方发表及网页贴图发表，不再把研究工具或通用工作流编辑器作为发布依赖：
+统一插件按自媒体平台包含四个MCP（运行时公众号0.5.0，其他各0.1.1；安装包版本以Hub回执为准），公众号支持草稿箱、依赖账号权限的官方发表及网页图文和贴图发表，不再把研究工具或通用工作流编辑器作为发布依赖：
 
 | 自媒体平台 | MCP服务器 | 专用端点 |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 四个端点独立认证，连接凭据由客户端安全配置；运维引用分别为service:auto-parse-douyin-publish、service:auto-parse-xiaohongshu-publish、service:auto-parse-x-publish、service:auto-parse-wechat-publish。不能互换凭据或使用通用工作流令牌。客户端工具前缀因安装方式变化，按服务器身份与实际tools/list定位，不猜前缀。
 - 插件安装与服务认证是两步。缺连接时说明缺哪个服务；不索取或输出 Cookie、管理员令牌，不把秘密放入工具参数、工作流或日志。
-- 抖音、小红书、X发布使用服务端已登录浏览器；现有公众号MCP图文/贴图草稿走官方API，不依赖浏览器；视频与播客使用专用异步MCP创建草稿，复用84浏览器1并核对账号，调用与验收见格式指南；网页贴图发表使用84浏览器1，可能需要管理员扫码。AppSecret仅在服务端金库配置，不接受作为工具参数。安装插件不会在用户本机安装或登录浏览器，也不保证所有用户都能使用同一账号。
+- 抖音、小红书、X发布使用服务端已登录浏览器；现有公众号MCP图文/贴图草稿走官方API，不依赖浏览器；视频与播客使用专用异步MCP创建草稿，复用84浏览器1并核对账号，调用与验收见格式指南；网页图文与贴图发表使用84浏览器1，可能需要管理员扫码。AppSecret仅在服务端金库配置，不接受作为工具参数。安装插件不会在用户本机安装或登录浏览器，也不保证所有用户都能使用同一账号。
 - 本插件有浏览器账号操作及公开发布权限；仅在用户授权的账号、内容、目标平台内执行。询问支持情况不构成发布许可。当前任务已经明确授权时无需重复确认。
 
 ## 每次任务
@@ -34,7 +34,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 路由
 
-- 微信公众号：先按 [格式与实测范围](references/wechat-usage.md) 区分图文、贴图、GIF位置和网页视频/播客样例；读 [官方草稿箱工具](references/wechat-drafts.md)，创建、查询图文与原生贴图草稿和上传所需图片；支持指定草稿删除和单独的官方发表工具；当前账号发表权限返回48001，网页贴图发表已实现并验证至管理员扫码阶段，最终真实公开提交尚未验收，不支持群发。不能把草稿media_id当作公开文章链接。
+- 微信公众号：先按 [格式与实测范围](references/wechat-usage.md) 区分图文、贴图、GIF位置和网页视频/播客样例；读 [官方草稿箱工具](references/wechat-drafts.md)，创建、查询图文与原生贴图草稿和上传所需图片；支持指定草稿删除和单独的官方发表工具；当前账号发表权限返回48001，网页图文与贴图发表使用同一MCP；图文已真实提交并进入发表记录，公开可见性尚未核实，贴图最终发表未验收。图文默认关闭群发通知。不能把草稿media_id当作公开文章链接。
 
 - 抖音视频：读 [专用发布工具](references/douyin-video.md)，使用 auto-parse-douyin-publish 的 prepare_video / publish_video / get_video_task / reconcile_video_task。禁止通过旧 publish.sh、匿名接口或通用调试器执行受保护抖音视频流程。
 - X 文字／单图、小红书视频、抖音／小红书图文：读 [工作流调用](references/workflows.md)，使用各自平台的发布MCP。
@@ -44,7 +44,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 结果与恢复
 
-公众号遵循稳定requestId与重启持久账本；未知提交先查 wechat_draft_request_status 与官方草稿列表。此前的业务拒绝可在修复原因后以同一请求重试；unknown/submitting不能盲重建。官方草稿工具没有浏览器sessionId，不套用20分钟会话限制。网页发表使用wechat_web_publish_draft和wechat_web_publish_status；会话保留管理员验证页，需20分钟内操作或轮询续期，细节见公众号参考文档。详见对应参考文档。
+公众号遵循稳定requestId与重启持久账本；未知提交先查 wechat_draft_request_status 与官方草稿列表。此前的业务拒绝可在修复原因后以同一请求重试；unknown/submitting不能盲重建。官方草稿工具没有浏览器sessionId，不套用20分钟会话限制。网页发表使用wechat_web_publish_draft和wechat_web_publish_status；会话保留管理员验证页；publish_draft 返回限时 verificationUrl（10分钟）给管理员扫码，wechat_web_assistance 可重新获取，VNC 仅作备用。不得分享链接或写入普通日志；扫码后继续查原会话和状态，细节见公众号参考文档。详见对应参考文档。
 
 给出实际账号、模式、taskId/sessionId、状态、真实作品ID/链接及验证范围。区分 prepared、draft_saved、creation_confirmed、visibility_verified、submission_unknown；这些是交付分类，不冒充服务端统一状态枚举。
 - 准备完成不等于草稿保存，创建回执不等于审核通过，账号内回查不等于匿名可见。

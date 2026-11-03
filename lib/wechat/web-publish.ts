@@ -5,7 +5,7 @@ export const webPublicationRoot=()=>path.join(process.cwd(),'.data/wechat-web-pu
 export type WebPublishInput={mediaId:string;expectedAccount:string;requestId:string;expectedFingerprint:string;aiGenerated:boolean};
 export function webPublishState(account:string,mediaId:string){return readWebPublication(webPublicationRoot(),account,mediaId);}
 export function isFinalWechatPublish(url:string,method:string){try{const u=new URL(url);return u.origin==='https://mp.weixin.qq.com'&&u.pathname==='/cgi-bin/masssend'&&method==='POST'&&u.searchParams.get('is_release_publish_page')==='1'&&u.searchParams.get('for_check')!=='1'&&!u.searchParams.get('action');}catch{return false}}
-export async function publishVerifiedEditor(page:Page,input:WebPublishInput,appId:number,fingerprint:string){
+export async function publishVerifiedEditor(page:Page,input:WebPublishInput,appId:number,fingerprint:string,kind:'news'|'newspic'='newspic'){
  if(input.aiGenerated!==true)throw Error('wechat_web_ai_declared_content_only');
  if(input.expectedFingerprint!==fingerprint)throw Error('wechat_web_draft_changed_prepare_again');
  const root=webPublicationRoot();
@@ -44,9 +44,22 @@ export async function publishVerifiedEditor(page:Page,input:WebPublishInput,appI
   if(!await ai.locator('input').isChecked())await ai.click();
   await source.getByRole('button',{name:'确认',exact:true}).click();
   await page.locator('button.mass_send:visible').click();
-  const dialog=page.locator('.weui-desktop-dialog:visible').filter({hasText:'发表贴图无需开启群发通知'});
-  await dialog.waitFor({state:'visible',timeout:30000});
-  await dialog.getByRole('button',{name:'发表',exact:true}).click();
+  if(kind==='news'){
+   const dialog=page.locator('.weui-desktop-dialog:visible').filter({hasText:'群发通知'});
+   await dialog.waitFor({state:'visible',timeout:30000});
+   const notify=dialog.locator('.mass_send__notify input[type=checkbox]');
+   if(await notify.count()!==1)throw Error('wechat_web_news_notification_ambiguous');
+   if(await notify.isChecked())await dialog.locator('.mass_send__notify label.weui-desktop-switch').click();
+   if(await notify.isChecked())throw Error('wechat_web_news_notification_still_enabled');
+   await dialog.getByRole('button',{name:'发表',exact:true}).click();
+   const warning=page.locator('.weui-desktop-dialog:visible').filter({hasText:'未开启群发通知'});
+   await warning.waitFor({state:'visible',timeout:30000});
+   await warning.getByRole('button',{name:'继续发表',exact:true}).click();
+  }else{
+   const dialog=page.locator('.weui-desktop-dialog:visible').filter({hasText:'发表贴图无需开启群发通知'});
+   await dialog.waitFor({state:'visible',timeout:30000});
+   await dialog.getByRole('button',{name:'发表',exact:true}).click();
+  }
   for(let n=0;n<45;n++){
    const record=readWebPublication(root,input.expectedAccount,input.mediaId);
    if(record?.state==='submitted'||record?.state==='unknown')return {status:record.state,submitted:record.state==='submitted',receipt:record.receipt,requestId:input.requestId};

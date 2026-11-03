@@ -250,3 +250,5 @@ Add release-version tool for all four publication MCPs and verify Hub 1.4.1 admi
 
 ## WECHAT-ASSIST-005 — In Progress
 WeChat manual VNC handoff MCP, task-owned popup draft navigation and real read-only preflight; await user-selected publishable draft and final acceptance. Started 2026-11-02.
+
+- [ ] 公众号图文与贴图 MCP 发布适配（2026-11-03）：进行中，详见 dev-log/2026-11-03-wechat-news-publish-wip.md。

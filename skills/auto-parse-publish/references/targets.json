@@ -1,6 +1,6 @@
 {
   "schema": "auto-parse-publish-routing/v1",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "verifiedOn": "2026-10-30",
   "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers and native media drafts; official WeChat API for news/newspic; non-executable index",
   "providers": [
@@ -68,7 +68,7 @@
       "key": "wechat-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.4.2",
+      "capabilityVersion": "0.5.0",
       "reference": "wechat-drafts.md",
       "transport": "official_https_api",
       "browserRequired": false,
@@ -78,7 +78,7 @@
       "key": "wechat-newspic-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.4.2",
+      "capabilityVersion": "0.5.0",
       "reference": "wechat-drafts.md",
       "transport": "official_https_api",
       "browserRequired": false,
@@ -88,7 +88,7 @@
       "key": "wechat-draft-delete",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.4.2",
+      "capabilityVersion": "0.5.0",
       "reference": "wechat-drafts.md",
       "acceptance": "real_single_test_draft_created_deleted_and_readback_absent; explicit_confirmation"
     },
@@ -96,7 +96,7 @@
       "key": "wechat-official-publish",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.4.2",
+      "capabilityVersion": "0.5.0",
       "reference": "wechat-drafts.md",
       "acceptance": "implementation_and_mock_tests_only; account_official_permission_probe_48001; no_web_publish_or_real_publication"
     },
@@ -104,7 +104,7 @@
       "key": "wechat-web-newspic",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.4.2",
+      "capabilityVersion": "0.5.0",
       "reference": "wechat-drafts.md",
       "workflowId": "cea6d731-ce15-46d8-95fb-f420ebfacb93",
       "prepareWorkflowId": "9a676224-70bd-41d4-9e85-c8d2b83a00c4",
@@ -116,7 +116,7 @@
       "key": "wechat-video-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.4.2",
+      "capabilityVersion": "0.5.0",
       "reference": "wechat-usage.md",
       "tool": "wechat_create_video_draft",
       "statusTool": "wechat_media_draft_status",
@@ -129,7 +129,7 @@
       "key": "wechat-podcast-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.4.2",
+      "capabilityVersion": "0.5.0",
       "reference": "wechat-usage.md",
       "tool": "wechat_create_podcast_draft",
       "statusTool": "wechat_media_draft_status",
@@ -137,6 +137,18 @@
       "browserInstance": 1,
       "browserRequired": true,
       "acceptance": "real_dedicated_mcp_create_save_response_native_editor_reload_title_description_identity_and_idempotent_replay_verified_2026_10_30; no_playback_or_publication_claim"
+    },
+    {
+      "key": "wechat-web-news",
+      "platform": "wechat",
+      "server": "auto-parse-wechat-publish",
+      "capabilityVersion": "0.5.0",
+      "reference": "wechat-usage.md",
+      "workflowId": "cea6d731-ce15-46d8-95fb-f420ebfacb93",
+      "prepareWorkflowId": "9a676224-70bd-41d4-9e85-c8d2b83a00c4",
+      "browserInstance": 1,
+      "browserRequired": true,
+      "acceptance": "real_news_admin_scan_and_submission_ret_0; publication_record_then_deleted; public_visibility_not_confirmed"
     }
   ],
   "verificationNotes": {

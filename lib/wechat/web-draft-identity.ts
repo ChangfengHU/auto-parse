@@ -14,9 +14,9 @@ function imageKey(value: string): string {
   // These strings are compared only, never fetched; the official API may use http while the UI uses https.
   return u.pathname;
 }
-export function matchWebNewspic(official: OfficialNewspic, cards: WebDraftCard[], complete: boolean) {
+function matchWebDraft(official: OfficialNewspic, cards: WebDraftCard[], complete: boolean, kind: 'newspic' | 'news') {
   if (complete !== true) throw Error('wechat_web_incomplete_draft_scan');
-  if (!official.title || Array.from(official.title).length > 20) throw Error('wechat_web_invalid_newspic_title');
+  if (!official.title || Array.from(official.title).length > (kind === 'news' ? 32 : 20)) throw Error(kind === 'news' ? 'wechat_web_invalid_news_title' : 'wechat_web_invalid_newspic_title');
   if (!Number.isSafeInteger(official.createdAt) || official.createdAt <= 0) throw Error('wechat_web_invalid_create_time');
   const cover = imageKey(official.thumbUrl);
   const matches = cards.filter(card => {
@@ -27,3 +27,6 @@ export function matchWebNewspic(official: OfficialNewspic, cards: WebDraftCard[]
   if (matches.length !== 1) throw Error('wechat_web_draft_ambiguous');
   return { appId: positiveInt(matches[0].app_id), fileId: positiveInt(matches[0].file_id, true) };
 }
+
+export function matchWebNewspic(official: OfficialNewspic, cards: WebDraftCard[], complete: boolean) { return matchWebDraft(official, cards, complete, 'newspic'); }
+export function matchWebArticle(official: OfficialNewspic, cards: WebDraftCard[], complete: boolean) { return matchWebDraft(official, cards, complete, 'news'); }

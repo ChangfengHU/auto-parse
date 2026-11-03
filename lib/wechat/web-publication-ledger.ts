@@ -15,7 +15,8 @@ function recordPath(root:string,account:string,mediaId:string) {
 function syncDir(root:string) { const fd=openSync(root,'r'); try{fsyncSync(fd);}finally{closeSync(fd);} }
 function validRequestId(id:string) {return /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,159}$/.test(id);}
 export function readWebPublication(root:string,account:string,mediaId:string):WebPublicationRecord|undefined {
- try{return JSON.parse(readFileSync(recordPath(root,account,mediaId),'utf8')) as WebPublicationRecord;}
+ const file=recordPath(root,account,mediaId);
+ try{return JSON.parse(readFileSync(file,'utf8')) as WebPublicationRecord;}
  catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw Error('wechat_web_ledger_unreadable');}
 }
 /** Atomic create prevents duplicate clicks across processes and across changed request IDs. */

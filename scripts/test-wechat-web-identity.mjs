@@ -16,3 +16,12 @@ test('refuses changed title, time or cover',()=>{for(const patch of [{title:'其
 test('refuses untrusted cover, bad ids and titles beyond 20 code points',()=>{assert.throws(()=>match({...official,thumbUrl:'https://evil.test/a/b'},[card],true),/invalid_cover/);assert.throws(()=>match(official,[{...card,app_id:0}],true),/invalid_internal_id/);assert.throws(()=>match({...official,title:'字'.repeat(21)},[card],true),/invalid_newspic_title/);});
 
 test('web-saved drafts may have file_id zero while app_id remains mandatory',()=>{assert.equal(match(official,[{...card,file_id:0}],true).fileId,0);assert.throws(()=>match(official,[{...card,app_id:0,file_id:0}],true),/invalid_internal_id/)});
+
+test('article identity allows longer titles but still refuses ambiguity and incomplete scans',()=>{
+ const article={...official,title:'字'.repeat(24)};
+ const item={...card,title:article.title};
+ assert.equal(mod.exports.matchWebArticle(article,[item],true).appId,12);
+ assert.throws(()=>mod.exports.matchWebArticle(article,[item,item],true),/ambiguous/);
+ assert.throws(()=>mod.exports.matchWebArticle(article,[item],false),/incomplete/);
+ assert.throws(()=>mod.exports.matchWebArticle({...article,title:'字'.repeat(33)},[item],true),/invalid_news_title/);
+});

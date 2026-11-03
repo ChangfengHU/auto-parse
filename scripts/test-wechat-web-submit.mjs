@@ -61,3 +61,16 @@ test('after administrator scan a retained session records one final submission',
   await handler(req);assert.equal(fetches,1);close();assert.equal(x.api.webPublishState(input.expectedAccount,input.mediaId).state,'submitted');
  }finally{fs.rmSync(x.root,{recursive:true,force:true})}
 });
+
+test('article publish disables default mass notification before confirmation and retains QR session',async()=>{
+ const x=setup();try{
+  const clicks=[];let checked=true;
+  const loc={click:async()=>{},filter(){return this},locator(){return this},getByRole(){return this},isChecked:async()=>true,waitFor:async()=>{}};
+  const notify={count:async()=>1,isChecked:async()=>checked};
+  const dialog={waitFor:async()=>{},locator:(selector)=>selector.includes('input')?notify:{click:async()=>{clicks.push('disable');checked=false}},getByRole:()=>({click:async()=>{clicks.push('dialog-publish')}})};
+  const warning={waitFor:async()=>{},getByRole:()=>({click:async()=>{clicks.push('continue')}})};
+  const page={once(){},route:async()=>{},locator:(selector)=>selector.includes('dialog')?{filter:({hasText})=>hasText==='群发通知'?dialog:hasText==='未开启群发通知'?warning:loc}:loc,getByText:()=>({isVisible:async()=>true})};
+  const r=await x.api.publishVerifiedEditor(page,input,1,'fingerprint','news');
+  assert.equal(checked,false);assert.deepEqual(clicks,['disable','dialog-publish','continue']);assert.equal(r.status,'awaiting_admin_scan');
+ }finally{fs.rmSync(x.root,{recursive:true,force:true})}
+});

@@ -31,7 +31,7 @@
 ## 已验证范围与网络
 2026-10-29已完成官方认证、永久封面上传、一篇接入验证文章草稿创建、同media_id官方回读，以及同requestId重放返回原回执。同日已通过同一生产MCP创建8张早报原生贴图草稿，官方回读article_type=newspic；逐项比对8个永久图片ID顺序与首图封面，同请求重放返回原media_id，草稿仅增加1。此验证不代表已成功公开发表、群发、GIF播放或原生Live Photo。不得为了确认连接反复创建测试草稿，优先查询账号状态与已有回执。
 服务端通过WECHAT_HTTPS_PROXY显式代理调用；代理缺失、配置无效或连接失败均不回退直连。代理地址及其认证配置由受信任服务端维护，不能作为MCP工具参数修改，不向普通输出回显。公众号AppSecret与MCP Bearer令牌是两种不同凭据。
-插件0.4.2包含格式选择、GIF位置、已上传微信GIF复用与逐项验收指南；公众号Hub组件固定0.4.2，其他三个组件为0.1.1。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
+插件0.5.0包含格式选择、GIF位置、扫码直达与逐项验收指南；公众号Hub组件固定0.5.0，其他三个组件为0.1.1。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
 
 ## 原生贴图调用示例
 ~~~json
@@ -53,7 +53,7 @@
 
 ## 单独删除与官方发表
 wechat_delete_draft({requestId,mediaId,confirmDelete:true})只删除精确指定草稿，稳定请求可回放；测试草稿已真实创建、删除并回读不存在。
-wechat_publish_draft({requestId,mediaId,confirmPublish:true})调用官方freepublish/submit，创建草稿和提交发表是两个动作；同一账号+mediaId持久防重复。wechat_publish_status({publishId})查询官方状态；submitted不等于发表成功。当前公众号实际账号只读权限检查返回48001，官方发表接口无权限；网页单篇贴图发表另用wechat_web_publish_draft，不自动回退或替代官方工具。禁止对未获授权内容提交公开发表。
+wechat_publish_draft({requestId,mediaId,confirmPublish:true})调用官方freepublish/submit，创建草稿和提交发表是两个动作；同一账号+mediaId持久防重复。wechat_publish_status({publishId})查询官方状态；submitted不等于发表成功。当前公众号实际账号只读权限检查返回48001，官方发表接口无权限；网页单篇AI图文或贴图发表另用wechat_web_publish_draft，不自动回退或替代官方工具；图文真实提交微信ret=0，公众可见尚未确认。禁止对未获授权内容提交公开发表。
 wechat_get_draft和wechat_list_drafts可传normalized:true返回中性articles结构；默认保留原样。
 能力声明的recommendedTimeoutMs为120000。超时后先查询原requestId状态和官方草稿箱；unknown或submitting不得更换ID盲目重试。
 1400字测试返回微信45166，不能只凭这个错误判定长度上限。不得静默截断，微信如拒绝则原样返回错误码。
@@ -88,7 +88,7 @@ wechat_web_publish_status({expectedAccount,mediaId})读取重启持久账本。s
 0.4.0新增 wechat_create_video_draft、wechat_create_podcast_draft、wechat_media_draft_status，使用已登录浏览器，与本页官方图文/贴图API路径独立。必须先阅读[专用工具的输入、异步状态和验收边界](wechat-usage.md#视频与播客专用-mcp)。不要把 videoUrl/audioUrl 传给 wechat_create_draft。
 
 
-管理员扫码地址由wechat_web_publish_draft回传operatorVncUrl；当前84浏览器1入口为 https://vnc-84-8-217-45.vyibc.com/vnc.html?autoconnect=1&resize=scale 。先轮询原workflow_get_session确认出现扫码页面，用户自行扫码；保持会话并继续查询wechat_web_publish_status，收到submitted回执也要单独核验后台实际状态。只发表用户指定并授权的稿件，勿发表标注勿发布的测试稿。最终扫码后真实提交尚未验收。
+管理员扫码直达链接由wechat_web_publish_draft回传verificationUrl；operatorVncUrl是备用。当前84浏览器1入口为 https://vnc-84-8-217-45.vyibc.com/vnc.html?autoconnect=1&resize=scale 。先轮询原workflow_get_session确认出现扫码页面，用户自行扫码；保持会话并继续查询wechat_web_publish_status，收到submitted回执也要单独核验后台实际状态。只发表用户指定并授权的稿件，勿发表标注勿发布的测试稿。图文扫码后已真实提交并获微信ret=0；公开可见性未核实，贴图最终提交未验收。
 
 
 人工处理工具：wechat_web_assistance({sessionId}) 查询已有公众号会话，返回operatorVncUrl、会话状态与识别出的扫码/登录/验证状态；无sessionId时仅在恰有一个活动公众号会话时自动选择。没有活动会话时不声称有二维码；失效或未知结果先查原发布状态，不能换请求ID重发。需要图片时用workflow_get_session原会话截图。此工具不发起发表或重试；应让用户在VNC完成微信要求的验证，随后继续查询原任务。
