@@ -365,3 +365,14 @@ test('newspic title allows 20 codepoints and rejects 21 before contacting WeChat
  await assert.rejects(create(r,'title-21',[{...newspic,title:'字'.repeat(21)}]),/invalid_newspic_title_max_20/);
  assert.equal(r.calls.length,2);
 });
+
+test('comment defaults are explicit for news and newspic and callers can disable or restrict',async()=>{
+ const r=setup([token,{media_id:'comment-default'},{media_id:'comment-explicit'}]);
+ await create(r,'comments-default',[article,newspic]);
+ let sent=JSON.parse(r.calls.find(c=>new URL(c.url).pathname.endsWith('/draft/add')).init.body).articles;
+ for(const a of sent){assert.equal(a.need_open_comment,1);assert.equal(a.only_fans_can_comment,0);}
+ await create(r,'comments-explicit',[{...article,needOpenComment:false},{...newspic,needOpenComment:true,onlyFansCanComment:true}]);
+ sent=JSON.parse(r.calls.filter(c=>new URL(c.url).pathname.endsWith('/draft/add'))[1].init.body).articles;
+ assert.equal(sent[0].need_open_comment,0);assert.equal(sent[0].only_fans_can_comment,0);
+ assert.equal(sent[1].need_open_comment,1);assert.equal(sent[1].only_fans_can_comment,1);
+});

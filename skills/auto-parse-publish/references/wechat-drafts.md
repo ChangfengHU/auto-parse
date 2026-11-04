@@ -9,7 +9,7 @@
 1. wechat_capabilities：确认目标账号、draftOnly、可接受素材域名/格式。
 2. wechat_account_status：实查官方接口与草稿总数；40164需要在公众号后台IP白名单添加返回的egressIp，该地址必须来自预期代理路径，不能直接填写机器IP；48001表示接口权限问题。不得反复猜密钥或改走未授权浏览器。
 3. wechat_create_draft：requestId保持稳定，confirmDraft=true，articles为1至8篇。
-   图文：articleType=news（默认）。每篇填写title、HTML content，另提供 thumbMediaId（本公众号永久封面素材ID）或 coverImageUrl，二选一。可选author、digest、contentSourceUrl、needOpenComment、onlyFansCanComment。
+   图文：articleType=news（默认）。每篇填写title、HTML content，另提供 thumbMediaId（本公众号永久封面素材ID）或 coverImageUrl，二选一。可选author、digest、contentSourceUrl、needOpenComment、onlyFansCanComment。0.5.3 新建图文和贴图默认请求开启留言；显式 needOpenComment:false 可关闭，onlyFansCanComment:true 可设为仅粉丝。具体生效受微信账号权限和内容类型限制，需回读或在后台确认；不影响既有内容。
    coverImageUrl会自动上传永久图片；正文img必须是带引号的https src，来自实际允许的素材域名，非微信图片会自动通过微信正文图片接口上传并替换。data-src、srcset、活动脚本和不支持的嵌入标签会拒绝。
    贴图：articleType=newspic，title不超过20字，content为纯文本，本地拒绝20000 UTF-16单元或1MiB及以上；微信的真实上限未确认；images按展示顺序传1至20项，每项imageMediaId（本公众号永久图片素材ID）或imageUrl二选一，首张自动作为封面，不传thumbMediaId/coverImageUrl。服务使用官方image_info.image_list，不是把图片塞进HTML。
 4. wechat_get_draft(mediaId)：使用创建回执media_id实查；列表用 wechat_list_drafts(offset,count,includeContent)，count为1至20。
@@ -31,7 +31,7 @@
 ## 已验证范围与网络
 2026-10-29已完成官方认证、永久封面上传、一篇接入验证文章草稿创建、同media_id官方回读，以及同requestId重放返回原回执。同日已通过同一生产MCP创建8张早报原生贴图草稿，官方回读article_type=newspic；逐项比对8个永久图片ID顺序与首图封面，同请求重放返回原media_id，草稿仅增加1。此验证不代表已成功公开发表、群发、GIF播放或原生Live Photo。不得为了确认连接反复创建测试草稿，优先查询账号状态与已有回执。
 服务端通过WECHAT_HTTPS_PROXY显式代理调用；代理缺失、配置无效或连接失败均不回退直连。代理地址及其认证配置由受信任服务端维护，不能作为MCP工具参数修改，不向普通输出回显。公众号AppSecret与MCP Bearer令牌是两种不同凭据。
-插件0.5.2包含格式选择、GIF位置、扫码直达、账号校验与逐项验收指南；公众号Hub组件固定0.5.2，其他三个组件为0.1.1。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
+插件0.5.3包含格式选择、GIF位置、扫码直达、账号校验与逐项验收指南；公众号Hub组件固定0.5.3，其他三个组件为0.1.1。已配置旧0.3.0专用连接的调用方继续使用同一服务凭据；需要更新包内指南时按安装器升级此插件，不删除其他插件或市场。
 
 ## 原生贴图调用示例
 ~~~json

@@ -221,7 +221,7 @@ async function createDraft(c:Config,input:Json){
      if(!mediaId){try{mediaId=String((await upload(c,source.imageUrl!,'newspic',id+':image:'+index+':'+image)).media_id);}catch(error){if(error instanceof WechatImageError)throw new WechatImageError(error.code,error.hint,image+1,error.httpStatus);if(error instanceof WechatApiError)error.imageIndex=image+1;else if(error instanceof Error&&/^wechat_(image_|unsupported_|untrusted_|invalid_image_)/.test(error.message))throw new WechatImageError(error.message,'请检查该图片链接、格式和大小。',image+1);throw error;}}
      imageList.push({image_media_id:mediaId});
     }
-    prepared.push({article_type:'newspic',title:a.title,content:a.content,image_info:{image_list:imageList},...(a.author?{author:a.author}:{}),...(a.needOpenComment!==undefined?{need_open_comment:a.needOpenComment?1:0}:{}),...(a.onlyFansCanComment!==undefined?{only_fans_can_comment:a.onlyFansCanComment?1:0}:{})});
+    prepared.push({article_type:'newspic',title:a.title,content:a.content,image_info:{image_list:imageList},...(a.author?{author:a.author}:{}),need_open_comment:a.needOpenComment===false?0:1,only_fans_can_comment:a.onlyFansCanComment?1:0});
     continue;
    }
    let thumb=a.thumbMediaId;
@@ -234,7 +234,7 @@ async function createDraft(c:Config,input:Json){
     if(typeof saved.url!=='string'||new URL(saved.url).hostname!=='mmbiz.qpic.cn')throw Error('wechat_image_upload_url_invalid');
     content=content.split(source).join(saved.url);
    }
-   prepared.push({title:a.title,content,author:a.author||'',digest:a.digest||'',thumb_media_id:thumb,content_source_url:a.contentSourceUrl||'',need_open_comment:a.needOpenComment?1:0,only_fans_can_comment:a.onlyFansCanComment?1:0});
+   prepared.push({title:a.title,content,author:a.author||'',digest:a.digest||'',thumb_media_id:thumb,content_source_url:a.contentSourceUrl||'',need_open_comment:a.needOpenComment===false?0:1,only_fans_can_comment:a.onlyFansCanComment?1:0});
   }
   const draft=await api(c,'draft/add',{articles:prepared});
   if(typeof draft.media_id!=='string'||!draft.media_id)throw Error('wechat_draft_response_result_unknown');
