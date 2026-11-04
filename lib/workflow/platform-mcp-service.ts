@@ -1,4 +1,5 @@
 import {platformReleaseInfo} from './platform-release';
+import {listWechatCollections,listWechatCollectionCandidates} from '../wechat/collections';
 import {callWechatMediaTool} from './wechat-media-service';
 import {MEDIA_DRAFT_CAPABILITIES} from '../wechat/media-draft';
 import {webPublishState} from '../wechat/web-publish';
@@ -33,6 +34,8 @@ function assertVideoTask(id:unknown){
 export async function callPlatformTool(platform:PublicationPlatform,name:string,input:Record<string,unknown>):Promise<unknown>{
  if(!platformMcpTools(platform).some(t=>t.name===name))throw Error('platform_tool_not_allowed');
  if(name==='get_version')return platformReleaseInfo(platform);
+ if(platform==='wechat' && name==='wechat_list_collections')return listWechatCollections(input);
+ if(platform==='wechat' && name==='wechat_list_collection_candidates')return listWechatCollectionCandidates(input);
  if(platform==='wechat' && ['wechat_create_video_draft','wechat_create_podcast_draft','wechat_media_draft_status'].includes(name))return callWechatMediaTool(name,input);
  if(platform==='wechat' && name==='wechat_web_assistance'){
   const active=[...owners()].filter(([sid,owner])=>owner==='wechat'&&!!getSession(sid)).map(([sid])=>sid);

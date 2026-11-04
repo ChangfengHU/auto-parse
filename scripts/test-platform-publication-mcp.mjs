@@ -147,7 +147,7 @@ test('all four platform MCPs expose self version, backed by matching release met
  const dir=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'platform-version-test-'));
  const file=path.join(dir,'release.json');
  try{
-  const versions={wechat:'0.5.3',douyin:'0.1.1',xiaohongshu:'0.1.1',x:'0.1.1'};
+  const versions={wechat:'0.5.4',douyin:'0.1.1',xiaohongshu:'0.1.1',x:'0.1.1'};
   fs.writeFileSync(file,JSON.stringify({versions,deploy_id:'release-test-1',working_tree_dirty:true,git_commit:'a'.repeat(40),deployed_at:'2026-11-02T03:22:27+08:00'}));
   const l=loader({}, {process:{...process,env:{AUTO_PARSE_RELEASE_METADATA:file}}});
   const c=l('lib/workflow/platform-mcp-contract.ts'),r=l('lib/workflow/platform-release.ts');
@@ -188,4 +188,12 @@ test('wechat web rejects display name before browser use and accepts original ID
  await r.call('wechat','workflow_close_session',{sessionId:ok.sessionId});
  const open=contract.platformMcpTools('wechat').find(x=>x.name==='workflow_open_session');
  assert.match(open.description,/original ID/);
+});
+
+test('wechat collection tools are exposed read-only with account identity and no mutation',()=>{
+ const entries=contract.platformMcpTools('wechat');
+ for(const name of ['wechat_list_collections','wechat_list_collection_candidates']){
+  const t=entries.find(x=>x.name===name);assert.ok(t);assert.equal(t.annotations.readOnlyHint,true);
+  assert.ok(t.inputSchema.required.includes('expectedAccount'));
+ }
 });
