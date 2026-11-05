@@ -32,7 +32,7 @@ function loader(mocks = {}, globals = {}) {
 }
 
 
-const fixture={appId:'wx0123456789abcdef',appSecret:'0'.repeat(32),name:'Fixture account'};
+const fixture={appId:'wx0123456789abcdef',appSecret:'0'.repeat(32),name:'Fixture'};
 const suites=[];
 function setup(replies=[]){
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'wechat-draft-tests-'));
@@ -57,7 +57,7 @@ const create=(r,id='create-1',articles=[article])=>r.callWechatDraftTool('wechat
 test.after(()=>{for(const r of suites)fs.rmSync(r.cwd,{recursive:true,force:true});});
 test('wechat catalog has independent auth and only approved preparation workflow',()=>{
  const c=loader()('lib/workflow/platform-mcp-contract.ts'),names=c.platformMcpTools('wechat').map(x=>x.name);
- assert.equal(names.length,26);assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(names.includes('workflow_open_session'));assert(!names.includes('workflow_create'));assert(!names.includes('workflow_update'));
+ assert.equal(names.length,28);assert(names.includes('wechat_list_collections'));assert(names.includes('wechat_list_collection_candidates'));assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(names.includes('workflow_open_session'));assert(!names.includes('workflow_create'));assert(!names.includes('workflow_update'));
  const env={WORKFLOW_MCP_TOKEN:'fixture'};
  for(const other of ['douyin','xiaohongshu','x']){
   const req=new Request('https://auto-parse-v2.vyibc.com/api/publish/mcp/wechat',{headers:{authorization:'Bearer '+c.platformMcpToken(other,env)}});
@@ -375,4 +375,26 @@ test('comment defaults are explicit for news and newspic and callers can disable
  sent=JSON.parse(r.calls.filter(c=>new URL(c.url).pathname.endsWith('/draft/add'))[1].init.body).articles;
  assert.equal(sent[0].need_open_comment,0);assert.equal(sent[0].only_fans_can_comment,0);
  assert.equal(sent[1].need_open_comment,1);assert.equal(sent[1].only_fans_can_comment,1);
+});
+
+
+test('account author default and explicit settings are returned without claiming upstream verification',async()=>{
+ const r=setup([token,{media_id:'default-author'},{media_id:'override-author'}]);
+ const first=await create(r,'default-author',[article,newspic]);
+ const sent=JSON.parse(r.calls.find(c=>new URL(c.url).pathname.endsWith('/draft/add')).init.body).articles;
+ assert.equal(sent[0].author,'Fixture');assert.equal(sent[1].author,'Fixture');
+ assert.equal(first.submittedSettings[0].author,'Fixture');assert.equal(first.submittedSettings[0].needOpenComment,true);assert.equal(first.submittedSettings[0].verification,'submitted_not_read_back');
+ const second=await create(r,'override-author',[{...article,author:'Other',needOpenComment:false}]);
+ assert.equal(second.submittedSettings[0].author,'Other');assert.equal(second.submittedSettings[0].needOpenComment,false);assert(second.submittedSettings[0].warnings.includes('comments_explicitly_disabled'));assert(second.submittedSettings[0].warnings.includes('author_differs_from_account_name'));
+});
+
+
+test('oversized account default author fails before network',async()=>{
+ const r=setup();fs.writeFileSync(path.join(r.cwd,'.runtime/wechat-drafts/config.json'),JSON.stringify({...fixture,name:'A'.repeat(9)}));
+ await assert.rejects(create(r),/wechat_invalid_default_author/);assert.equal(r.calls.length,0);
+});
+test('wechat version reports the actual tools list digest',async()=>{
+ const load=loader(),service=load('lib/workflow/platform-mcp-service.ts'),catalog=load('lib/workflow/platform-mcp-contract.ts');
+ const result=await service.callPlatformTool('wechat','get_version',{});const list=catalog.platformMcpTools('wechat');
+ assert.equal(result.toolCount,list.length);assert.equal(result.toolListSha256,require('node:crypto').createHash('sha256').update(JSON.stringify(list)).digest('hex'));
 });

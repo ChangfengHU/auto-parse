@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {platformReleaseInfo} from './platform-release';
 import {listWechatCollections,listWechatCollectionCandidates} from '../wechat/collections';
 import {callWechatMediaTool} from './wechat-media-service';
@@ -33,7 +34,7 @@ function assertVideoTask(id:unknown){
 }
 export async function callPlatformTool(platform:PublicationPlatform,name:string,input:Record<string,unknown>):Promise<unknown>{
  if(!platformMcpTools(platform).some(t=>t.name===name))throw Error('platform_tool_not_allowed');
- if(name==='get_version')return platformReleaseInfo(platform);
+ if(name==='get_version'){const info=platformReleaseInfo(platform);if(platform!=='wechat')return info;const toolList=platformMcpTools(platform);return {...info,toolCount:toolList.length,toolListSha256:createHash('sha256').update(JSON.stringify(toolList)).digest('hex'),toolListHashAlgorithm:'sha256-json-tools-list-v1'};}
  if(platform==='wechat' && name==='wechat_list_collections')return listWechatCollections(input);
  if(platform==='wechat' && name==='wechat_list_collection_candidates')return listWechatCollectionCandidates(input);
  if(platform==='wechat' && ['wechat_create_video_draft','wechat_create_podcast_draft','wechat_media_draft_status'].includes(name))return callWechatMediaTool(name,input);

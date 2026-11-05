@@ -207,12 +207,15 @@ async function createDraft(c:Config,input:Json){
  const id=requestId(input.requestId);
  if(input.confirmDraft!==true)throw Error('wechat_draft_confirmation_required');
  const articles=validateArticles(input.articles,c);
+ if(articles.some(a=>a.author===undefined)&&(typeof c.name!=='string'||Array.from(c.name).length>8))throw Error('wechat_invalid_default_author');
  // Whitelist/auth failures cause no ledger mutation or image upload.
  await accessToken(c);
  return mutate(c,id,'create_draft',articles,async()=>{
   const prepared:Json[]=[];
   for(let index=0;index<articles.length;index++){
    const a=articles[index];
+   const author=a.author===undefined?c.name:a.author;
+   if(typeof author!=='string'||Array.from(author).length>8)throw Error('wechat_invalid_default_author');
    if(a.articleType==='newspic'){
     const imageList:Json[]=[];
     for(let image=0;image<a.images!.length;image++){
@@ -221,7 +224,7 @@ async function createDraft(c:Config,input:Json){
      if(!mediaId){try{mediaId=String((await upload(c,source.imageUrl!,'newspic',id+':image:'+index+':'+image)).media_id);}catch(error){if(error instanceof WechatImageError)throw new WechatImageError(error.code,error.hint,image+1,error.httpStatus);if(error instanceof WechatApiError)error.imageIndex=image+1;else if(error instanceof Error&&/^wechat_(image_|unsupported_|untrusted_|invalid_image_)/.test(error.message))throw new WechatImageError(error.message,'请检查该图片链接、格式和大小。',image+1);throw error;}}
      imageList.push({image_media_id:mediaId});
     }
-    prepared.push({article_type:'newspic',title:a.title,content:a.content,image_info:{image_list:imageList},...(a.author?{author:a.author}:{}),need_open_comment:a.needOpenComment===false?0:1,only_fans_can_comment:a.onlyFansCanComment?1:0});
+    prepared.push({article_type:'newspic',title:a.title,content:a.content,image_info:{image_list:imageList},...(author?{author}:{}),need_open_comment:a.needOpenComment===false?0:1,only_fans_can_comment:a.onlyFansCanComment?1:0});
     continue;
    }
    let thumb=a.thumbMediaId;
@@ -234,11 +237,11 @@ async function createDraft(c:Config,input:Json){
     if(typeof saved.url!=='string'||new URL(saved.url).hostname!=='mmbiz.qpic.cn')throw Error('wechat_image_upload_url_invalid');
     content=content.split(source).join(saved.url);
    }
-   prepared.push({title:a.title,content,author:a.author||'',digest:a.digest||'',thumb_media_id:thumb,content_source_url:a.contentSourceUrl||'',need_open_comment:a.needOpenComment===false?0:1,only_fans_can_comment:a.onlyFansCanComment?1:0});
+   prepared.push({title:a.title,content,author,digest:a.digest||'',thumb_media_id:thumb,content_source_url:a.contentSourceUrl||'',need_open_comment:a.needOpenComment===false?0:1,only_fans_can_comment:a.onlyFansCanComment?1:0});
   }
   const draft=await api(c,'draft/add',{articles:prepared});
   if(typeof draft.media_id!=='string'||!draft.media_id)throw Error('wechat_draft_response_result_unknown');
-  return {status:'draft_saved',media_id:draft.media_id,account:{appId:c.appId,name:c.name},articleCount:articles.length,...articles.some(a=>a.liveCoverVideoUrl)?{auxiliaryMetadata:articles.map((a,index)=>a.liveCoverVideoUrl?{articleIndex:index,liveCoverVideoUrl:a.liveCoverVideoUrl,storedOnly:true}:null).filter(Boolean)}:{},createdAt:new Date().toISOString(),published:false};
+  return {status:'draft_saved',media_id:draft.media_id,account:{appId:c.appId,name:c.name},articleCount:articles.length,submittedSettings:articles.map((a,index)=>({articleIndex:index,author:a.author===undefined?c.name:a.author,needOpenComment:a.needOpenComment!==false,onlyFansCanComment:a.onlyFansCanComment===true,verification:'submitted_not_read_back',warnings:[...(a.needOpenComment===false?['comments_explicitly_disabled']:[]),...(a.author!==undefined&&a.author!==c.name?['author_differs_from_account_name']:[])]})),...articles.some(a=>a.liveCoverVideoUrl)?{auxiliaryMetadata:articles.map((a,index)=>a.liveCoverVideoUrl?{articleIndex:index,liveCoverVideoUrl:a.liveCoverVideoUrl,storedOnly:true}:null).filter(Boolean)}:{},createdAt:new Date().toISOString(),published:false};
  });
 }
 export async function callWechatDraftTool(name:string,input:Json):Promise<Json>{
