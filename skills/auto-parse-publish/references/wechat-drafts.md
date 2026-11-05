@@ -103,3 +103,12 @@ wechat_web_publish_status({expectedAccount,mediaId})读取重启持久账本。s
 - `declareOriginal:true` 仅图文试验支持，需要 `originalAuthor` 和用户明确同意协议后的 `confirmOriginalAgreement:true`。不能替用户擅自同意；尚未通过实际发表验收。
 - `wechat_create_collection` 用于创建文章合集，须用户确认、账号原始 ID 和稳定 `requestId`；创建结果未知时查 `wechat_collection_request_status` 和合集列表，不换 ID 重试。该工具尚未真实创建验收。发表时绑定合集、添加文章尚未实现。
 - 管理员扫码时保留原会话，优先提供工具返回的限时二维码链接；`wechat_web_assistance` 查询当前状态。微信受理不等于公开可见。
+
+
+## 独立草稿批量扫码发表（MCP 0.5.8，真实端到端待验收）
+
+选择 2–8 条已经授权公开发表的独立、单篇图文或贴图草稿。先用 `wechat_web_batch_prepare` 输入公众号 gh_ 原始 ID 和 mediaIds，核对返回的标题、类型与 fingerprint。批次工具不合并草稿，每篇是一次独立发表。
+
+再调用 `wechat_web_batch_publish`，使用稳定 requestId、expectedAccount、confirmPublish:true 和 items；每个 item 含 mediaId、预检 fingerprint、真实 aiGenerated，以及需要时的 articleStatement、notifyFollowers、declareOriginal、originalAuthor、confirmOriginalAgreement。所有草稿会在启动前重新核对指纹。原创协议须用户明确同意。贴图不支持通知和原创开关。
+
+轮询 `wechat_web_batch_status`；当前文章的 assistance 显示 awaiting_admin_scan 时，把 verificationUrl 发给管理员并保持原任务。扫码后自动继续下一篇；微信可以要求再次扫码，不能保证一次扫码适用于整批。submitted 仅表示微信受理，公开状态需另查。任何 unknown、工作流失败或服务重启都会停止自动继续，不换请求号重试；先对账当前文章。单篇等待上限 20 分钟。真实多文章连续发表和微信扫码复用尚未实测。

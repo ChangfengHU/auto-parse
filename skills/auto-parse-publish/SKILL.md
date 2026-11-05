@@ -25,6 +25,8 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 每次任务
 
+公众号独立草稿批量发表：先 `wechat_web_batch_prepare` 核对 2–8 篇，再以授权参数调用 `wechat_web_batch_publish`，轮询 `wechat_web_batch_status` 取得当前扫码协助。每篇独立发表，扫码次数由微信决定；真实批量发表尚待验收，详见 [公众号草稿箱](references/wechat-drafts.md)。
+
 公众号合集：调用 `wechat_list_collections` 查询合集 ID、类型与数量；调用 `wechat_list_collection_candidates` 按合集 ID 查询可加入的已发表内容及其 contentId。返回 `complete:false` 表示只观察到部分分页，不能断言其余内容不存在。可用时通过 `wechat_create_collection` 创建文章合集，并通过 `wechat_collection_request_status` 对账；创建为实验能力，尚未真实创建验收。发表时指定合集和向合集添加文章尚未实现，不可声称已加入。
 
 公众号新建图文和贴图草稿默认请求开启留言，调用 `wechat_create_draft` 的每篇文章可传 `needOpenComment:false` 关闭，或传 `onlyFansCanComment:true` 限粉丝；微信可能因账号权限或内容类型不支持，需以草稿回读及后台实际状态为准。已有草稿和已发布文章不会因默认值变化而改变。

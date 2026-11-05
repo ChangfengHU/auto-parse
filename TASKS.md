@@ -4,6 +4,15 @@
 
 ## In Progress
 
+
+- [WECHAT-BATCH-001] 独立草稿顺序发表与扫码接力
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-11-05
+  Log: dev-log/2026-11-05-wechat-batch-publish.md
+  Next: 预检 2–8 篇并以持久台账顺序发表；微信可能逐篇要求扫码，任何未知结果停止。模拟测试与真实非发表预检后部署；指定实际文章与管理员扫码后验收真实批次。
+
+
 - [WECHAT-GIF-001] 公众号GIF真实验收与状态声明
   Status: In Progress
   Owner: codex
