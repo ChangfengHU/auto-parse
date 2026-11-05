@@ -40,7 +40,25 @@ export function reserveMediaDraft(input:MediaDraftInput):{reused:boolean;record:
  fs.mkdirSync(dir(),{recursive:true,mode:0o700});
  const fingerprint=hash(JSON.stringify(input)),p=file(input.expectedAccount,input.requestId);
  const existing=getMediaDraft(input.expectedAccount,input.requestId);
- if(existing){if(existing.fingerprint!==fingerprint)throw Error('media_request_id_conflict');return {reused:true,record:existing}}
+ if(existing){
+  if(existing.fingerprint!==fingerprint)throw Error('media_request_id_conflict');
+  // Only a failed lease acquisition, before opening the session or any media operation,
+  // is safe to reserve again under the same ID. Serialize concurrent retries.
+  if(existing.state==='failed'&&existing.phase==='reserved'&&existing.error?.code==='managed_browser_busy'&&!existing.sessionId&&!existing.materialSaved&&!existing.receipt){
+   const lock=p+'.lock';let fd:number;
+   try{fd=fs.openSync(lock,'wx',0o600)}catch(e){if((e as NodeJS.ErrnoException).code==='EEXIST')return {reused:true,record:getMediaDraft(input.expectedAccount,input.requestId)!};throw e}
+   try{
+    const latest=getMediaDraft(input.expectedAccount,input.requestId);
+    if(!latest||latest.fingerprint!==fingerprint)throw Error('media_request_id_conflict');
+    if(latest.state==='failed'&&latest.phase==='reserved'&&latest.error?.code==='managed_browser_busy'&&!latest.sessionId&&!latest.materialSaved&&!latest.receipt){
+     const record:MediaDraftRecord={input:latest.input,fingerprint,owner:owner(),state:'reserved',phase:'reserved',updatedAt:new Date().toISOString()};
+     atomicSave(p,record);return {reused:false,record};
+    }
+    return {reused:true,record:latest};
+   }finally{fs.closeSync(fd);fs.rmSync(lock,{force:true})}
+  }
+  return {reused:true,record:existing}
+ }
  const record:MediaDraftRecord={input,fingerprint,owner:owner(),state:'reserved',phase:'reserved',updatedAt:new Date().toISOString()};
  let fd:number;try{fd=fs.openSync(p,'wx',0o600)}catch(e){if((e as NodeJS.ErrnoException).code==='EEXIST')return reserveMediaDraft(input);throw e}
  try{fs.writeFileSync(fd,JSON.stringify(record));fs.fsyncSync(fd)}finally{fs.closeSync(fd)}

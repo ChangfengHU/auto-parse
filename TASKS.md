@@ -4,6 +4,11 @@
 
 ## In Progress
 
+- [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
+  Status: In Progress
+  Log: dev-log/2026-11-05-wechat-operations.md
+  Next: 验证合集添加入口和幂等保护，排查播客上传确认及合集创建回执；发布实测须锁定准确草稿。
+
 
 - [WECHAT-BATCH-001] 独立草稿顺序发表与扫码接力
   Status: In Progress

@@ -103,3 +103,13 @@ test('placeholder workflow fails without opening browser',async()=>{
  const service=load('lib/workflow/wechat-media-service.ts');await service.callWechatMediaTool('wechat_create_video_draft',input);await delay(20);
  const status=await service.callWechatMediaTool('wechat_media_draft_status',input);assert.equal(status.status,'failed');assert.equal(status.error.code,'media_workflow_not_ready');assert.equal(opens,0);
 });
+
+test('same media request safely retries only a pre-session browser busy failure',()=>{
+ const {m}=setup(),data=m.mediaDraftInput('video',input);
+ m.reserveMediaDraft(data);m.updateMediaDraft(data.expectedAccount,data.requestId,{state:'failed',error:{code:'managed_browser_busy',message:'busy',hint:'retry'}});
+ const retry=m.reserveMediaDraft(data);assert.equal(retry.reused,false);assert.equal(retry.record.state,'reserved');
+ assert.equal(m.reserveMediaDraft(data).reused,true);
+ m.updateMediaDraft(data.expectedAccount,data.requestId,{state:'running',phase:'saving_material'});
+ m.updateMediaDraft(data.expectedAccount,data.requestId,{state:'unknown',error:{code:'managed_browser_busy',message:'busy',hint:'reconcile'}});
+ assert.equal(m.reserveMediaDraft(data).record.state,'unknown');
+});
