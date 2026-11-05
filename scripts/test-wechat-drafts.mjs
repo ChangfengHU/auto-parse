@@ -446,7 +446,7 @@ test('collection item add rejects malformed identity and missing confirmation be
 test('batch publishes independent prepared drafts in order, exactly once, and replays same request',async()=>{
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'wechat-batch-'));try{
   const api=loader({}, {process:{...process,cwd:()=>cwd}})('lib/wechat/web-batch.ts'),records=new Map(),calls=[],closed=[];
-  const deps={getDraft:async id=>({news_item:[{title:id,article_type:'news',content:'body',thumb_url:'cover'}]}),publication:(a,id)=>records.get(id),publish:async item=>{calls.push(item.mediaId);records.set(item.mediaId,{state:'submitted'});return {sessionId:'s'+calls.length}},session:async()=>({status:'running'}),close:async sid=>closed.push(sid),assistance:async()=>({})};
+  const deps={getDraft:async id=>({news_item:[{title:id,article_type:'news',content:'body',thumb_url:'cover',thumb_media_id:'cover-id'}]}),publication:(a,id)=>records.get(id),publish:async item=>{calls.push(item.mediaId);records.set(item.mediaId,{state:'submitted'});return {sessionId:'s'+calls.length}},session:async()=>({status:'running'}),close:async sid=>closed.push(sid),assistance:async()=>({})};
   const account='gh_123456789abc',prepared=await api.prepareBatch({expectedAccount:account,mediaIds:['a','b','c']},deps);
   const items=prepared.items.map(x=>({mediaId:x.mediaId,expectedFingerprint:x.fingerprint,aiGenerated:true}));
   await api.startBatch({expectedAccount:account,requestId:'batch-test-0001',confirmPublish:true,items},deps);
@@ -459,7 +459,7 @@ test('batch publishes independent prepared drafts in order, exactly once, and re
 test('batch stops on unknown first submission and does not publish the next draft',async()=>{
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'wechat-batch-'));try{
   const api=loader({}, {process:{...process,cwd:()=>cwd}})('lib/wechat/web-batch.ts'),records=new Map(),calls=[];
-  const deps={getDraft:async id=>({news_item:[{title:id,article_type:'news',content:'body'}]}),publication:(a,id)=>records.get(id),publish:async item=>{calls.push(item.mediaId);records.set(item.mediaId,{state:'unknown'});return {sessionId:'s1'}},session:async()=>({status:'running'}),close:async()=>{},assistance:async()=>({})};
+  const deps={getDraft:async id=>({news_item:[{title:id,article_type:'news',content:'body',thumb_url:'cover',thumb_media_id:'cover-id'}]}),publication:(a,id)=>records.get(id),publish:async item=>{calls.push(item.mediaId);records.set(item.mediaId,{state:'unknown'});return {sessionId:'s1'}},session:async()=>({status:'running'}),close:async()=>{},assistance:async()=>({})};
   const account='gh_123456789abc',prepared=await api.prepareBatch({expectedAccount:account,mediaIds:['a','b']},deps);
   const items=prepared.items.map(x=>({mediaId:x.mediaId,expectedFingerprint:x.fingerprint,aiGenerated:true}));
   await api.startBatch({expectedAccount:account,requestId:'batch-test-0002',confirmPublish:true,items},deps);
@@ -470,7 +470,7 @@ test('batch stops on unknown first submission and does not publish the next draf
 test('batch validates every fingerprint before any publication',async()=>{
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'wechat-batch-'));try{
   const api=loader({}, {process:{...process,cwd:()=>cwd}})('lib/wechat/web-batch.ts');let calls=0;
-  const deps={getDraft:async id=>({news_item:[{title:id,article_type:'news',content:'body'}]}),publication:()=>undefined,publish:async()=>{calls++;return {}},session:async()=>({}),close:async()=>{},assistance:async()=>({})};
+  const deps={getDraft:async id=>({news_item:[{title:id,article_type:'news',content:'body',thumb_url:'cover',thumb_media_id:'cover-id'}]}),publication:()=>undefined,publish:async()=>{calls++;return {}},session:async()=>({}),close:async()=>{},assistance:async()=>({})};
   const account='gh_123456789abc',prepared=await api.prepareBatch({expectedAccount:account,mediaIds:['a','b']},deps);
   const items=prepared.items.map(x=>({mediaId:x.mediaId,expectedFingerprint:x.fingerprint,aiGenerated:true}));items[1].expectedFingerprint='0'.repeat(64);
   await assert.rejects(api.startBatch({expectedAccount:account,requestId:'batch-test-0003',confirmPublish:true,items},deps),/draft_changed/);assert.equal(calls,0);
@@ -480,7 +480,7 @@ test('batch validates every fingerprint before any publication',async()=>{
 test('batch exposes the current scan and resumes the next independent article after approval',async()=>{
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'wechat-batch-'));try{
   const api=loader({}, {process:{...process,cwd:()=>cwd},setTimeout:(fn,ms)=>setTimeout(fn,Math.min(ms,10))})('lib/wechat/web-batch.ts'),records=new Map(),calls=[];
-  const deps={getDraft:async id=>({news_item:[{title:id,article_type:'news',content:'body'}]}),publication:(a,id)=>records.get(id),publish:async item=>{calls.push(item.mediaId);if(item.mediaId==='b')records.set('b',{state:'submitted'});return {sessionId:'s'+calls.length}},session:async()=>({status:'done'}),close:async()=>{},assistance:async()=>({handoffState:'awaiting_admin_scan',verificationUrl:'https://example.test/qr'})};
+  const deps={getDraft:async id=>({news_item:[{title:id,article_type:'news',content:'body',thumb_url:'cover',thumb_media_id:'cover-id'}]}),publication:(a,id)=>records.get(id),publish:async item=>{calls.push(item.mediaId);if(item.mediaId==='b')records.set('b',{state:'submitted'});return {sessionId:'s'+calls.length}},session:async()=>({status:'done'}),close:async()=>{},assistance:async()=>({handoffState:'awaiting_admin_scan',verificationUrl:'https://example.test/qr'})};
   const account='gh_123456789abc',prepared=await api.prepareBatch({expectedAccount:account,mediaIds:['a','b']},deps),items=prepared.items.map(x=>({mediaId:x.mediaId,expectedFingerprint:x.fingerprint,aiGenerated:true}));
   await api.startBatch({expectedAccount:account,requestId:'batch-scan-0001',confirmPublish:true,items},deps);
   let status;for(let n=0;n<100;n++){status=await api.batchStatus({expectedAccount:account,requestId:'batch-scan-0001'},deps);if(status.assistance?.handoffState==='awaiting_admin_scan')break;await delay(5)}
@@ -489,4 +489,9 @@ test('batch exposes the current scan and resumes the next independent article af
   for(let n=0;n<100;n++){status=await api.batchStatus({expectedAccount:account,requestId:'batch-scan-0001'},deps);if(status.status==='completed')break;await delay(5)}
   assert.equal(status.status,'completed');assert.deepEqual(calls,['a','b']);
  }finally{fs.rmSync(cwd,{recursive:true,force:true})}
+});
+
+test('batch preview refuses video-shaped draft missing a cover media ID',async()=>{
+ const api=loader()('lib/wechat/web-batch.ts'),deps={getDraft:async id=>({news_item:[{title:id,article_type:'news',content:'video',thumb_media_id:'',thumb_url:''}]} )};
+ await assert.rejects(api.prepareBatch({expectedAccount:'gh_123456789abc',mediaIds:['a','b']},deps),/unsupported_draft/);
 });
