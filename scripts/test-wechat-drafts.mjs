@@ -495,3 +495,11 @@ test('batch preview refuses video-shaped draft missing a cover media ID',async()
  const api=loader()('lib/wechat/web-batch.ts'),deps={getDraft:async id=>({news_item:[{title:id,article_type:'news',content:'video',thumb_media_id:'',thumb_url:''}]} )};
  await assert.rejects(api.prepareBatch({expectedAccount:'gh_123456789abc',mediaIds:['a','b']},deps),/unsupported_draft/);
 });
+
+test('collection receipt polling waits for eventual readback and preserves uncertainty',async()=>{
+ const check=loader()('lib/wechat/collections.ts').pollCollectionReceipt;let reads=0,refreshes=0;
+ const got=await check(0,['1'],'New',async()=>({items:++reads===1?[{id:'1',title:'Old'}]:[{id:'1',title:'Old'},{id:'2',title:'New'}],complete:true}),async()=>{refreshes++},3);
+ assert.equal(got,'2');assert.equal(refreshes,1);
+ await assert.rejects(check(0,['1'],'New',async()=>({items:[{id:'1',title:'Old'}],complete:true}),async()=>{},2),/result_unknown/);
+ await assert.rejects(check(1,['1'],'New',async()=>{throw Error('must not read')},async()=>{},2),/result_unknown/);
+});

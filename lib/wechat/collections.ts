@@ -116,6 +116,17 @@ export function validateCollectionReceipt(ret:unknown,before:string[],after:{id:
  if(added.length!==1||!/^[0-9]{1,30}$/.test(added[0].id))throw Error('wechat_collection_result_unknown');
  return added[0].id;
 }
+export async function pollCollectionReceipt(ret:unknown,before:string[],name:string,snapshot:()=>Promise<{items:{id:string;title:string}[];complete:boolean}>,refresh:()=>Promise<void>,attempts=6){
+ if(!(ret===0||ret==='0'))throw Error('wechat_collection_result_unknown');
+ for(let attempt=0;attempt<attempts;attempt++){
+  const after=await snapshot();
+  try{return validateCollectionReceipt(ret,before,after.items,name,after.complete)}catch{
+   if(attempt===attempts-1)throw Error('wechat_collection_result_unknown');
+   await refresh();
+  }
+ }
+ throw Error('wechat_collection_result_unknown');
+}
 export async function createWechatCollection(input:Record<string,unknown>){
  const expected=account(input.expectedAccount),id=String(input.requestId||''),name=typeof input.name==='string'?input.name.trim():'',description=input.description===undefined?'':input.description;
  if(input.confirmCreate!==true)throw Error('wechat_collection_confirmation_required');
@@ -156,7 +167,10 @@ export async function createWechatCollection(input:Record<string,unknown>){
     const result=await response.json() as Record<string,unknown>,base=result.base_resp as Record<string,unknown>|undefined;
     const code=base?.ret??result.ret;await page.reload({waitUntil:'domcontentloaded',timeout:30000});
     await page.waitForFunction(()=>Array.from(document.querySelectorAll('div')).some(e=>{const d=(e as unknown as {__vue__?:{$data?:Record<string,unknown>}}).__vue__?.$data;return d&&Array.isArray(d.totalList)&&typeof d.totalAll==='number';}),null,{timeout:30000});
-    const after=await snapshot(),collectionId=validateCollectionReceipt(code,before.items.map(x=>x.id),after.items,name,after.complete);
+    const collectionId=await pollCollectionReceipt(code,before.items.map(x=>x.id),name,snapshot,async()=>{
+     await page.waitForTimeout(2000);await page.reload({waitUntil:'domcontentloaded',timeout:30000});
+     await page.waitForFunction(()=>Array.from(document.querySelectorAll('div')).some(e=>{const d=(e as unknown as {__vue__?:{$data?:Record<string,unknown>}}).__vue__?.$data;return d&&Array.isArray(d.totalList)&&typeof d.totalAll==='number';}),null,{timeout:30000});
+    });
     const receipt={collectionId,name,type:'article',account:expected,httpStatus:response.status()};
     finishCollectionIntent(root,expected,id,'created',receipt);return {status:'created',requestId:id,...receipt,verified:'response_and_list_readback'};
    }catch(error){try{finishCollectionIntent(root,expected,id,'unknown');}catch{};return {status:'unknown',requestId:id,error:error instanceof Error&&/^wechat_[a-z_]+$/.test(error.message)?error.message:'wechat_collection_result_unknown',note:'Check the original request and WeChat collection list. Never resubmit an unknown request.'};}
