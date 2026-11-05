@@ -2,7 +2,7 @@
 
 先读[格式选择、GIF位置与逐项验收](wechat-usage.md)。那里区分真实样例、本地边界和未验证事项；本页是完整参数、恢复和发表通道参考。
 
-本平台支持图文草稿与原生贴图草稿，可删除指定草稿，另有依赖账号权限的官方发表工具；当前账号发表权限返回48001。不能群发。服务器为 auto-parse-wechat-publish，独立认证端点 /api/publish/mcp/wechat。公众号名称/环境由服务端配置，先读实际 wechat_capabilities 确认，不允许工具参数替换AppID、密钥或账号。
+本平台支持图文草稿与原生贴图草稿，可删除指定草稿，另有依赖账号权限的官方发表工具；当前账号官方发表 API 的权限曾返回48001；网页发表与群发通知需按实际账号权限和服务能力确认。服务器为 auto-parse-wechat-publish，独立认证端点 /api/publish/mcp/wechat。公众号名称/环境由服务端配置，先读实际 wechat_capabilities 确认，不允许工具参数替换AppID、密钥或账号。
 
 ## 调用
 
@@ -69,7 +69,7 @@ newspic可传liveCoverVideoUrl（受信任素材域名HTTPS）；此值仅保存
 
 同一公众号MCP新增wechat_web_publish_draft和wechat_web_publish_status。先用workflow_open_session打开准备流程9a676224-70bd-41d4-9e85-c8d2b83a00c4，browserInstance=1，vars={mediaId,expectedAccount}，运行后从history.output取得draftFingerprint，再关闭准备会话释放浏览器。expectedAccount必须是后台确认的公众号原始 ID（gh_ 加 12 位字母或数字），不是显示名称或 AppID。已核验的「唯伊不可」为 gh_8dfb3900381c；其他账号应先在公众号后台确认，不能猜测。0.5.2 起格式错误在浏览器打开前返回 wechat_web_invalid_account，不能据此判断掉线。
 
-只有用户已授权公开的具体草稿才能调用wechat_web_publish_draft({mediaId,expectedAccount,expectedFingerprint,requestId,aiGenerated:true,confirmPublish:true})。当前支持单篇 news 或 newspic 和明确 AI 来源声明；贴图标题最多20字，图文标题最多32字。工具会保存声明并走微信原生发表确认；Supabase正式发表流程为cea6d731-ce15-46d8-95fb-f420ebfacb93。异步返回sessionId后轮询workflow_get_session，awaiting_admin_scan时向管理员展示返回截图并保留同一任务页。不要看到节点done就关闭等待扫码的会话。
+只有用户已授权公开的具体草稿才能调用wechat_web_publish_draft({mediaId,expectedAccount,expectedFingerprint,requestId,aiGenerated,confirmPublish:true})。当前支持单篇 news 或 newspic，按内容真实情况选择 AI 或非 AI 来源声明；贴图标题最多20字，图文标题最多32字。工具会保存声明并走微信原生发表确认；Supabase正式发表流程为cea6d731-ce15-46d8-95fb-f420ebfacb93。异步返回sessionId后轮询workflow_get_session，awaiting_admin_scan时向管理员展示返回截图并保留同一任务页。不要看到节点done就关闭等待扫码的会话。
 
 wechat_web_publish_status({expectedAccount,mediaId})读取重启持久账本。submitting/unknown均需查原会话和微信后台，禁止换requestId重发；submitted只证明最终请求获微信成功应答，不证明审核或公众可见。会话20分钟空闲失效；轮询刷新期限，重启不保留网页会话。账号+草稿意图不得删除以强行重发。
 
@@ -92,3 +92,14 @@ wechat_web_publish_status({expectedAccount,mediaId})读取重启持久账本。s
 
 
 人工处理工具：wechat_web_assistance({sessionId}) 查询已有公众号会话，返回operatorVncUrl、会话状态与识别出的扫码/登录/验证状态；无sessionId时仅在恰有一个活动公众号会话时自动选择。没有活动会话时不声称有二维码；失效或未知结果先查原发布状态，不能换请求ID重发。需要图片时用workflow_get_session原会话截图。此工具不发起发表或重试；应让用户在VNC完成微信要求的验证，随后继续查询原任务。
+
+
+## 网页发表设置（公众号 MCP 0.5.6）
+
+实际参数以 MCP 的 tools/list 和 capabilities 为准。准备阶段先核对账号原始 ID、草稿及 fingerprint，再由用户授权发布；请求 ID 必须稳定，结果不明时通过原请求状态对账，不能换 ID 重发。
+
+- `aiGenerated` 须如实填写。微信创作来源是单选：`articleStatement` 支持 `ai_generated`、`official_media`、`fiction`、`personal_opinion`、`health`、`investment`、`none`。AI 内容必须选 `ai_generated`；非 AI 默认 `personal_opinion`。不支持转载或广告选项，也不能同时选 AI 和个人观点。页面选择经浏览器检查，完整发表尚未验收。
+- 图文可传 `notifyFollowers`，默认 false；贴图暂不支持开启。草稿作者与留言设置在建稿时指定，需回读验证。
+- `declareOriginal:true` 仅图文试验支持，需要 `originalAuthor` 和用户明确同意协议后的 `confirmOriginalAgreement:true`。不能替用户擅自同意；尚未通过实际发表验收。
+- `wechat_create_collection` 用于创建文章合集，须用户确认、账号原始 ID 和稳定 `requestId`；创建结果未知时查 `wechat_collection_request_status` 和合集列表，不换 ID 重试。该工具尚未真实创建验收。发表时绑定合集、添加文章尚未实现。
+- 管理员扫码时保留原会话，优先提供工具返回的限时二维码链接；`wechat_web_assistance` 查询当前状态。微信受理不等于公开可见。

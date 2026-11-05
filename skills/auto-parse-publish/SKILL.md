@@ -1,6 +1,6 @@
 ---
 name: auto-parse-publish
-description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用户准备、发布并回查抖音、小红书及 X 内容，通过官方API保存公众号图文与原生贴图草稿，并通过已登录网页提交获授权的AI图文或贴图发表；也用于查询支持的平台、账号要求和发布状态。不负责采集素材、生图、登录或绕过平台风控。
+description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用户准备、发布并回查抖音、小红书及 X 内容，通过官方API保存公众号图文与原生贴图草稿，并通过已登录网页提交获授权的图文或贴图发表；也用于查询支持的平台、账号要求和发布状态。不负责采集素材、生图、登录或绕过平台风控。
 ---
 
 # 自动发布
@@ -9,7 +9,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 依赖与授权
 
-统一插件按自媒体平台包含四个MCP（运行时公众号0.5.4，其他各0.1.1；安装包版本以Hub回执为准），公众号支持草稿箱、依赖账号权限的官方发表及网页图文和贴图发表，不再把研究工具或通用工作流编辑器作为发布依赖：
+统一插件按自媒体平台包含四个MCP（运行时版本和功能以各 MCP 的 get_version、tools/list 和 capabilities 为准；安装包版本以 Hub 回执为准），公众号支持草稿箱、依赖账号权限的官方发表及网页图文和贴图发表，不再把研究工具或通用工作流编辑器作为发布依赖：
 
 | 自媒体平台 | MCP服务器 | 专用端点 |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 ## 每次任务
 
-公众号合集：调用 `wechat_list_collections` 查询合集 ID、类型与数量；调用 `wechat_list_collection_candidates` 按合集 ID 查询可加入的已发表内容及其 contentId。返回 `complete:false` 表示只观察到部分分页，不能断言其余内容不存在。目前这两个工具仅查询，不创建合集或添加内容。
+公众号合集：调用 `wechat_list_collections` 查询合集 ID、类型与数量；调用 `wechat_list_collection_candidates` 按合集 ID 查询可加入的已发表内容及其 contentId。返回 `complete:false` 表示只观察到部分分页，不能断言其余内容不存在。可用时通过 `wechat_create_collection` 创建文章合集，并通过 `wechat_collection_request_status` 对账；创建为实验能力，尚未真实创建验收。发表时指定合集和向合集添加文章尚未实现，不可声称已加入。
 
 公众号新建图文和贴图草稿默认请求开启留言，调用 `wechat_create_draft` 的每篇文章可传 `needOpenComment:false` 关闭，或传 `onlyFansCanComment:true` 限粉丝；微信可能因账号权限或内容类型不支持，需以草稿回读及后台实际状态为准。已有草稿和已发布文章不会因默认值变化而改变。
 

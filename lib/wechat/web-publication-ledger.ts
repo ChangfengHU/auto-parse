@@ -3,7 +3,7 @@ import {mkdirSync,openSync,writeFileSync,readFileSync,closeSync,renameSync,fsync
 import path from 'node:path';
 
 type State = 'submitting' | 'submitted' | 'unknown';
-export type WebPublicationRecord = {account:string;mediaIdHash:string;requestId:string;state:State;updatedAt:string;receipt?:Record<string,unknown>};
+export type WebPublicationRecord = {account:string;mediaIdHash:string;requestId:string;state:State;updatedAt:string;requestedSettings?:Record<string,unknown>;receipt?:Record<string,unknown>};
 function key(account:string,mediaId:string) {
  if (!/^gh_[a-zA-Z0-9]{12}$/.test(account)) throw Error('wechat_web_invalid_account');
  if (!mediaId || mediaId.length>256) throw Error('wechat_web_invalid_media_id');
@@ -20,9 +20,9 @@ export function readWebPublication(root:string,account:string,mediaId:string):We
  catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return undefined;throw Error('wechat_web_ledger_unreadable');}
 }
 /** Atomic create prevents duplicate clicks across processes and across changed request IDs. */
-export function reserveWebPublication(root:string,account:string,mediaId:string,requestId:string):WebPublicationRecord {
+export function reserveWebPublication(root:string,account:string,mediaId:string,requestId:string,requestedSettings?:Record<string,unknown>):WebPublicationRecord {
  if(!validRequestId(requestId))throw Error('wechat_web_invalid_request_id');
- const file=recordPath(root,account,mediaId), record:WebPublicationRecord={account,mediaIdHash:createHash('sha256').update(mediaId).digest('hex'),requestId,state:'submitting',updatedAt:new Date().toISOString()};
+ const file=recordPath(root,account,mediaId), record:WebPublicationRecord={account,mediaIdHash:createHash('sha256').update(mediaId).digest('hex'),requestId,state:'submitting',updatedAt:new Date().toISOString(),...(requestedSettings?{requestedSettings}:{})};
  let fd:number;
  try{fd=openSync(file,'wx',0o600);}catch(e){if((e as NodeJS.ErrnoException).code==='EEXIST')throw Error('wechat_web_existing_publication_check_status');throw Error('wechat_web_ledger_write_failed');}
  try{writeFileSync(fd,JSON.stringify(record));fsyncSync(fd);}finally{closeSync(fd);}

@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto';
 import {platformReleaseInfo} from './platform-release';
-import {listWechatCollections,listWechatCollectionCandidates} from '../wechat/collections';
+import {listWechatCollections,listWechatCollectionCandidates,createWechatCollection,wechatCollectionRequestStatus} from '../wechat/collections';
 import {callWechatMediaTool} from './wechat-media-service';
 import {MEDIA_DRAFT_CAPABILITIES} from '../wechat/media-draft';
 import {webPublishState} from '../wechat/web-publish';
@@ -17,7 +17,7 @@ import type {DouyinWorkflowInput} from './douyin-workflow-service';
 import {isRecord} from './validation';
 declare global {var __publicationPlatformSessions:Map<string,PublicationPlatform>|undefined;}
 const WECHAT_OPERATOR_VNC='https://vnc-84-8-217-45.vyibc.com/vnc.html?autoconnect=1&resize=scale';
-const WECHAT_WEB_CAPABILITIES={operatorVncUrl:WECHAT_OPERATOR_VNC,assistanceTool:'wechat_web_assistance',prepareWorkflow:'9a676224-70bd-41d4-9e85-c8d2b83a00c4',publishWorkflow:'cea6d731-ce15-46d8-95fb-f420ebfacb93',publishTool:'wechat_web_publish_draft',statusTool:'wechat_web_publish_status',maxTitleCharacters:{newspic:20,news:32},aiGeneratedOnly:true,requiresPreparedFingerprint:true,administratorVerification:'may require administrator scan; poll the same workflow session for screenshot',recommendedTimeoutMs:120000,submittedMeaning:'WeChat accepted the final request; public visibility not independently verified',verifiedThrough:'news live submission received WeChat ret=0 and appeared in publication records; review and public visibility require separate confirmation; newspic final submission unverified',concurrency:1};
+const WECHAT_WEB_CAPABILITIES={operatorVncUrl:WECHAT_OPERATOR_VNC,assistanceTool:'wechat_web_assistance',prepareWorkflow:'9a676224-70bd-41d4-9e85-c8d2b83a00c4',publishWorkflow:'cea6d731-ce15-46d8-95fb-f420ebfacb93',publishTool:'wechat_web_publish_draft',statusTool:'wechat_web_publish_status',maxTitleCharacters:{newspic:20,news:32},aiGeneratedOnly:false,sourceDeclarations:{singleChoice:true,aiContentRequires:'ai_generated',nonAiDefault:'personal_opinion',choices:['ai_generated','official_media','fiction','personal_opinion','health','investment','none'],editorSelectionVerified:true,publicSubmissionVerified:false},originalDeclaration:{news:'experimental_requires_author_and_explicit_user_agreement',newspic:'unsupported',endToEndVerified:false},followerNotification:{news:'optional_default_off',newspic:'unsupported',endToEndVerified:false},collections:{list:true,createArticle:'experimental_unverified',publishTimeBinding:false},requiresPreparedFingerprint:true,administratorVerification:'may require administrator scan; poll the same workflow session for screenshot',recommendedTimeoutMs:120000,submittedMeaning:'WeChat accepted the final request; public visibility not independently verified',verifiedThrough:'news live submission received WeChat ret=0 and appeared in publication records; review and public visibility require separate confirmation; newspic final submission unverified',concurrency:1};
 const owners=()=>global.__publicationPlatformSessions??=new Map<string,PublicationPlatform>();
 function assertWechatWebAccount(account: unknown): asserts account is string {
  if(typeof account !== 'string' || !/^gh_[a-zA-Z0-9]{12}$/.test(account)) throw Error('wechat_web_invalid_account');
@@ -35,6 +35,8 @@ function assertVideoTask(id:unknown){
 export async function callPlatformTool(platform:PublicationPlatform,name:string,input:Record<string,unknown>):Promise<unknown>{
  if(!platformMcpTools(platform).some(t=>t.name===name))throw Error('platform_tool_not_allowed');
  if(name==='get_version'){const info=platformReleaseInfo(platform);if(platform!=='wechat')return info;const toolList=platformMcpTools(platform);return {...info,toolCount:toolList.length,toolListSha256:createHash('sha256').update(JSON.stringify(toolList)).digest('hex'),toolListHashAlgorithm:'sha256-json-tools-list-v1'};}
+ if(platform==='wechat' && name==='wechat_create_collection')return createWechatCollection(input);
+ if(platform==='wechat' && name==='wechat_collection_request_status')return wechatCollectionRequestStatus(input);
  if(platform==='wechat' && name==='wechat_list_collections')return listWechatCollections(input);
  if(platform==='wechat' && name==='wechat_list_collection_candidates')return listWechatCollectionCandidates(input);
  if(platform==='wechat' && ['wechat_create_video_draft','wechat_create_podcast_draft','wechat_media_draft_status'].includes(name))return callWechatMediaTool(name,input);
@@ -68,10 +70,17 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
  }
  if(platform==='wechat' && name==='wechat_web_publish_draft'){
   assertWechatWebAccount(input.expectedAccount);
-  if(input.confirmPublish!==true||input.aiGenerated!==true||typeof input.expectedFingerprint!=='string'||!/^[a-f0-9]{64}$/.test(input.expectedFingerprint)||typeof input.requestId!=='string'||!input.requestId||typeof input.expectedAccount!=='string'||typeof input.mediaId!=='string')throw Error('wechat_web_confirmation_and_preparation_required');
+  if(input.confirmPublish!==true||typeof input.aiGenerated!=='boolean'||typeof input.expectedFingerprint!=='string'||!/^[a-f0-9]{64}$/.test(input.expectedFingerprint)||typeof input.requestId!=='string'||!input.requestId||typeof input.expectedAccount!=='string'||typeof input.mediaId!=='string')throw Error('wechat_web_confirmation_and_preparation_required');
+  if(input.notifyFollowers!==undefined&&typeof input.notifyFollowers!=='boolean')throw Error('wechat_web_invalid_notify_followers');
+  if(input.declareOriginal!==undefined&&typeof input.declareOriginal!=='boolean')throw Error('wechat_web_invalid_original_setting');
+  if(input.declareOriginal===true&&(input.confirmOriginalAgreement!==true||typeof input.originalAuthor!=='string'||!input.originalAuthor.trim()||Array.from(input.originalAuthor).length>8))throw Error('wechat_web_original_author_and_agreement_required');
+  const statements=['ai_generated','official_media','fiction','personal_opinion','health','investment','none'];
+  const statement=input.articleStatement===undefined?(input.aiGenerated?'ai_generated':'personal_opinion'):input.articleStatement;
+  if(typeof statement!=='string'||!statements.includes(statement))throw Error('wechat_web_invalid_article_statement');
+  if((input.aiGenerated===true)!==(statement==='ai_generated'))throw Error('wechat_web_ai_statement_conflict');
   const old=webPublishState(input.expectedAccount,input.mediaId);
   if(old)return {reused:true,...old,note:'Existing intent; no second click. Query status.'};
-  const opened=await callWorkflowTool('workflow_open_session',{workflowId:'cea6d731-ce15-46d8-95fb-f420ebfacb93',browserInstance:1,vars:{mediaId:input.mediaId,expectedAccount:input.expectedAccount,requestId:input.requestId,expectedFingerprint:input.expectedFingerprint,aiGenerated:'true',directPublish:'true'},confirmBrowserControl:true}) as Record<string,unknown>;
+  const opened=await callWorkflowTool('workflow_open_session',{workflowId:'cea6d731-ce15-46d8-95fb-f420ebfacb93',browserInstance:1,vars:{mediaId:input.mediaId,expectedAccount:input.expectedAccount,requestId:input.requestId,expectedFingerprint:input.expectedFingerprint,aiGenerated:input.aiGenerated?'true':'false',articleStatement:statement,declareOriginal:input.declareOriginal===true?'true':'false',originalAuthor:typeof input.originalAuthor==='string'?input.originalAuthor:'',confirmOriginalAgreement:input.confirmOriginalAgreement===true?'true':'false',notifyFollowers:input.notifyFollowers===true?'true':'false',directPublish:'true'},confirmBrowserControl:true}) as Record<string,unknown>;
   const sid=String(opened.sessionId);owners().set(sid,platform);
   try{
    await callWorkflowTool('workflow_run',{sessionId:sid,expectedRevision:opened.sessionRevision,requestId:input.requestId,confirmExecution:true});

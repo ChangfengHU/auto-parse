@@ -57,7 +57,7 @@ const create=(r,id='create-1',articles=[article])=>r.callWechatDraftTool('wechat
 test.after(()=>{for(const r of suites)fs.rmSync(r.cwd,{recursive:true,force:true});});
 test('wechat catalog has independent auth and only approved preparation workflow',()=>{
  const c=loader()('lib/workflow/platform-mcp-contract.ts'),names=c.platformMcpTools('wechat').map(x=>x.name);
- assert.equal(names.length,28);assert(names.includes('wechat_list_collections'));assert(names.includes('wechat_list_collection_candidates'));assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(names.includes('workflow_open_session'));assert(!names.includes('workflow_create'));assert(!names.includes('workflow_update'));
+ assert.equal(names.length,30);assert(names.includes('wechat_list_collections'));assert(names.includes('wechat_list_collection_candidates'));assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(names.includes('workflow_open_session'));assert(!names.includes('workflow_create'));assert(!names.includes('workflow_update'));
  const env={WORKFLOW_MCP_TOKEN:'fixture'};
  for(const other of ['douyin','xiaohongshu','x']){
   const req=new Request('https://auto-parse-v2.vyibc.com/api/publish/mcp/wechat',{headers:{authorization:'Bearer '+c.platformMcpToken(other,env)}});
@@ -397,4 +397,32 @@ test('wechat version reports the actual tools list digest',async()=>{
  const load=loader(),service=load('lib/workflow/platform-mcp-service.ts'),catalog=load('lib/workflow/platform-mcp-contract.ts');
  const result=await service.callPlatformTool('wechat','get_version',{});const list=catalog.platformMcpTools('wechat');
  assert.equal(result.toolCount,list.length);assert.equal(result.toolListSha256,require('node:crypto').createHash('sha256').update(JSON.stringify(list)).digest('hex'));
+});
+
+test('collection creation receipt needs one new ID, explicit success and complete readback',()=>{
+ const check=loader()('lib/wechat/collections.ts').validateCollectionReceipt;
+ const before=['1'],rows=[{id:'1',title:'Existing'},{id:'2',title:'New'}];
+ assert.equal(check(0,before,rows,'New',true),'2');
+ assert.throws(()=>check(1,before,rows,'New',true),/result_unknown/);
+ assert.throws(()=>check(0,before,rows,'New',false),/result_unknown/);
+ assert.throws(()=>check(0,before,[...rows,{id:'3',title:'New'}],'New',true),/result_unknown/);
+ assert.throws(()=>check(0,before,rows,'Absent',true),/result_unknown/);
+});
+
+test('collection create performs one click and replays verified receipt without opening browser again',async()=>{
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'wechat-collection-'));let pages=0,clicks=0,phase=0;
+ const expected='gh_123456789abc',props={expectedAccount:expected,requestId:'create-collection-1',name:'Fixture collection',confirmCreate:true};
+ const before={items:[{id:'1',title:'Existing'}],complete:true},after={items:[...before.items,{id:'2',title:props.name}],complete:true};
+ const field={waitFor:async()=>{},fill:async()=>{},inputValue:async()=>props.name};
+ const response={ok:()=>true,json:async()=>({base_resp:{ret:0}}),status:()=>200,request:()=>({method:()=> 'POST'}),url:()=> 'https://mp.weixin.qq.com/cgi-bin/appmsgalbummgr'};
+ const editor={getByPlaceholder:()=>field,getByRole:()=>({count:async()=>1,click:async()=>{clicks++}}),waitForResponse:async()=>response,close:async()=>{}};
+ const choice={count:async()=>1,click:async()=>{},filter(){return this}};
+ const page={isClosed:()=>false,goto:async()=>{},waitForFunction:async()=>{},waitForURL:async()=>{},evaluate:async(fn)=>String(fn).includes('location.assign')?undefined:String(fn).includes('user_name')?expected:(phase++===0?before:after),getByText:()=>({first:()=>({click:async()=>{}})}),locator:()=>choice,waitForEvent:async()=>editor,reload:async()=>{},close:async()=>{}};
+ const playwright={chromium:{connectOverCDP:async()=>({contexts:()=>[{newPage:async()=>{pages++;return page}}],close:async()=>{}})}};
+ try{
+  const load=loader({'playwright':playwright,'lib/workflow/browser-activity.ts':{acquireManagedBrowserActivity:async()=>async()=>{}}},{process:{...process,cwd:()=>cwd}}),api=load('lib/wechat/collections.ts');
+  const result=await api.createWechatCollection(props);assert.equal(result.status,'created');assert.equal(result.collectionId,'2');assert.equal(clicks,1);
+  const replay=await api.createWechatCollection(props);assert.equal(replay.reused,true);assert.equal(replay.state,'created');assert.equal(clicks,1);assert.equal(pages,1);
+  await assert.rejects(api.createWechatCollection({...props,name:'Different'}),/request_conflict/);
+ }finally{fs.rmSync(cwd,{recursive:true,force:true})}
 });

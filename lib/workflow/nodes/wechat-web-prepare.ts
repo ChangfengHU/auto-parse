@@ -25,7 +25,7 @@ export async function executeWechatWebPrepare(page: Page, params: Params, ctx: W
     const kind = article.article_type as 'news' | 'newspic';
     const publishing=params.mode==='publish';
     if(params.mode && !['prepare','publish'].includes(params.mode))throw Error('wechat_web_invalid_mode');
-    if(publishing && (ctx.vars.directPublish!=='true'||params.aiGenerated!=='true'||!params.requestId||params.expectedFingerprint!==fingerprint))
+    if(publishing && (ctx.vars.directPublish!=='true'||!['true','false'].includes(String(params.aiGenerated))||!params.requestId||params.expectedFingerprint!==fingerprint))
       throw Error('wechat_web_publication_confirmation_or_fingerprint_required');
     const official = {title: article.title, createdAt: Number(raw.create_time), thumbUrl: article.thumb_url};
     stage='open_home';
@@ -99,7 +99,7 @@ export async function executeWechatWebPrepare(page: Page, params: Params, ctx: W
       if(webDraftFingerprint(fresh.news_item)!==fingerprint)
         throw Error('wechat_web_draft_changed_prepare_again');
       stage='publish';
-      const result=await publishVerifiedEditor(editor,{mediaId:params.mediaId,expectedAccount:params.expectedAccount,requestId:params.requestId!,expectedFingerprint:params.expectedFingerprint!,aiGenerated:true},matched.appId,fingerprint,kind);
+      const result=await publishVerifiedEditor(editor,{mediaId:params.mediaId,expectedAccount:params.expectedAccount,requestId:params.requestId!,expectedFingerprint:params.expectedFingerprint!,aiGenerated:params.aiGenerated==='true',articleStatement:ctx.vars.articleStatement,declareOriginal:ctx.vars.declareOriginal==='true',originalAuthor:ctx.vars.originalAuthor,confirmOriginalAgreement:ctx.vars.confirmOriginalAgreement==='true',notifyFollowers:ctx.vars.notifyFollowers==='true'},matched.appId,fingerprint,kind);
       const retainedEditor=editor;editor=undefined;
       if(draftPopup){const ownedDraftPopup=draftPopup;retainedEditor.once('close',()=>{void ownedDraftPopup.close().catch(()=>{})});draftPopup=undefined;}
       return {success:true,newPage:retainedEditor,log:['公众号网页发表状态：'+result.status],output:{...result,draftFingerprint:fingerprint,title:official.title}};
