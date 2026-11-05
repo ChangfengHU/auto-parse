@@ -125,7 +125,7 @@ test('news original declaration uses explicit author and agreement before public
   const base={count:async()=>1,click:async()=>{},filter(){return this},locator(){return this},getByRole(){return this},isChecked:async()=>true,waitFor:async()=>{}};
   const radio={isChecked:async()=>true,check:async()=>{}};
   const field={count:async()=>1,fill:async v=>{author=v},inputValue:async()=>author};
-  const agreement={count:async()=>1,isChecked:async()=>agreed,check:async()=>{agreed=true}};
+  const agreement={count:async()=>1,isChecked:async()=>agreed,check:async()=>{throw Error('hidden checkbox cannot be clicked by Playwright')},evaluate:async fn=>fn({click:()=>{agreed=true}})};
   const original={count:async()=>1,locator:s=>s.includes('original_type')?{first:()=>radio}:s.includes('js_counter')?field:agreement,getByRole:()=>({click:async()=>{dismissed=true}}),waitFor:async()=>{}};
   const notify={count:async()=>1,isChecked:async()=>true};const dialog={waitFor:async()=>{},locator:()=>notify,getByRole:()=>base};
   const unset={count:async()=>1,isVisible:async()=>!dismissed};

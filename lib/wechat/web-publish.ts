@@ -57,7 +57,7 @@ export async function publishVerifiedEditor(page:Page,input:WebPublishInput,appI
    const author=original.locator('input.js_counter.js_author');if(await author.count()!==1)throw Error('wechat_web_original_author_ambiguous');
    await author.fill(input.originalAuthor!);if(await author.inputValue()!==input.originalAuthor)throw Error('wechat_web_original_author_mismatch');
    const agreement=original.locator('input.weui-desktop-form__checkbox');if(await agreement.count()!==1)throw Error('wechat_web_original_agreement_ambiguous');
-   if(!await agreement.isChecked())await agreement.check({force:true});
+   if(!await agreement.isChecked())await agreement.evaluate((element:HTMLInputElement)=>element.click());
    if(!await agreement.isChecked())throw Error('wechat_web_original_agreement_unchecked');
    await original.getByRole('button',{name:'确定',exact:true}).click();
    await original.waitFor({state:'hidden',timeout:15000});
