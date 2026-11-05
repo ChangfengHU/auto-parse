@@ -426,3 +426,18 @@ test('collection create performs one click and replays verified receipt without 
   await assert.rejects(api.createWechatCollection({...props,name:'Different'}),/request_conflict/);
  }finally{fs.rmSync(cwd,{recursive:true,force:true})}
 });
+
+test('collection edit payload must preserve exact collection and ordered article IDs',()=>{
+ const api=loader({}, {URLSearchParams})('lib/wechat/collections.ts'),body=(id,keys)=>new URLSearchParams({id,appmsg_info:JSON.stringify({appmsgkeys:keys})}).toString();
+ const keys=[{msgid:'11',itemidx:'1'},{msgid:'22',itemidx:'1'}];
+ assert.doesNotThrow(()=>api.validateCollectionAddPayload(body('123',keys),'123',['11_1','22_1']));
+ for(const [id,list,expected] of [['124',keys,['11_1','22_1']],['123',keys,['22_1']],['123',keys,['22_1','11_1']],['123',[keys[0]],['11_1','22_1']]])
+  assert.throws(()=>api.validateCollectionAddPayload(body(id,list),'123',expected),/payload_mismatch/);
+});
+
+test('collection item add rejects malformed identity and missing confirmation before browser access',async()=>{
+ let connections=0;const api=loader({'playwright':{chromium:{connectOverCDP:async()=>{connections++;throw Error('unexpected')}}}}, {URLSearchParams})('lib/wechat/collections.ts');
+ const base={expectedAccount:'gh_123456789abc',requestId:'add-item-1',collectionId:'123',contentId:'11_1',confirmAdd:true};
+ for(const patch of [{confirmAdd:false},{collectionId:'bad'},{contentId:'11'},{expectedAccount:'display-name'}])await assert.rejects(api.addWechatCollectionItem({...base,...patch}));
+ assert.equal(connections,0);
+});
