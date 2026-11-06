@@ -4,6 +4,13 @@
 
 ## In Progress
 
+- [WORKFLOW-006] X 文字发推工作流与安全预览
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-10-26
+  Log: dev-log/2026-10-26-x-publish.md
+  Next: X文字工作流、MCP状态查询和多行工作台已上线；151项回归、类型/构建、公网实际点击预览通过。实发及公开可见性待用户指定正式内容后验收。
+
 - [AUDIO-003] 音频搜索稳定性与页面/MCP完整回归
   Status: In Progress
   Owner: codex
@@ -99,6 +106,14 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+
+- [WORKFLOW-007] X 单图发推与真实回执
+  Status: Done
+  Owner: codex
+  Updated: 2026-10-27
+  Log: dev-log/2026-10-27-x-image-publish.md
+  Result: 单图原生上传、媒体回执及独立链接回查通过；部署同一验收构建，生产重启后状态查询通过。
+
 
 - [WORKFLOW-004] 小红书浏览器一键发布与条件节点
   Status: Done
