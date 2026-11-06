@@ -503,3 +503,16 @@ test('collection receipt polling waits for eventual readback and preserves uncer
  await assert.rejects(check(0,['1'],'New',async()=>({items:[{id:'1',title:'Old'}],complete:true}),async()=>{},2),/result_unknown/);
  await assert.rejects(check(1,['1'],'New',async()=>{throw Error('must not read')},async()=>{},2),/result_unknown/);
 });
+
+test('batch preview accepts native newspic with image list and rejects malformed images',async()=>{
+ const api=loader()('lib/wechat/web-batch.ts');
+ const good={article_type:'newspic',title:'image post',thumb_url:'https://mmbiz.qpic.cn/cover',thumb_media_id:'',image_info:{image_list:[{image_media_id:'image-1'}]}};
+ const news={article_type:'news',title:'news',thumb_url:'https://mmbiz.qpic.cn/cover',thumb_media_id:'cover-1'};
+ const deps={getDraft:async id=>({news_item:[id==='image'?good:news]})};
+ const result=await api.prepareBatch({expectedAccount:'gh_123456789abc',mediaIds:['image','news']},deps);
+ assert.equal(result.items[0].articleType,'newspic');assert.equal(result.items[1].articleType,'news');
+ for(const image_list of [[],[{}],[{image_media_id:''}],Array(21).fill({image_media_id:'x'})]){
+  const bad={getDraft:async()=>({news_item:[{...good,image_info:{image_list}}]})};
+  await assert.rejects(api.prepareBatch({expectedAccount:'gh_123456789abc',mediaIds:['a','b']},bad),/unsupported_draft/);
+ }
+});

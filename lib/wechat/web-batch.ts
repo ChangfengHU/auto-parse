@@ -37,7 +37,13 @@ function validateItems(items:unknown):Item[]{
 async function inspect(id:string,deps:Deps){
  const raw=await deps.getDraft(id),items=raw.news_item;
  if(!Array.isArray(items)||items.length!==1)throw Error('wechat_batch_single_drafts_only');
- const a=items[0] as Record<string,unknown>;if(!a||!['news','newspic'].includes(String(a.article_type))||typeof a.title!=='string'||typeof a.thumb_media_id!=='string'||!a.thumb_media_id||typeof a.thumb_url!=='string'||!a.thumb_url)throw Error('wechat_batch_unsupported_draft');
+ const a=items[0] as Record<string,unknown>;
+ if(!a||!['news','newspic'].includes(String(a.article_type))||typeof a.title!=='string'||!a.title||typeof a.thumb_url!=='string'||!a.thumb_url)throw Error('wechat_batch_unsupported_draft');
+ if(a.article_type==='news'&&(typeof a.thumb_media_id!=='string'||!a.thumb_media_id))throw Error('wechat_batch_unsupported_draft');
+ if(a.article_type==='newspic'){
+  const info=a.image_info as {image_list?:unknown}|undefined;
+  if(!Array.isArray(info?.image_list)||info.image_list.length<1||info.image_list.length>20||info.image_list.some(x=>!x||typeof x.image_media_id!=='string'||!x.image_media_id))throw Error('wechat_batch_unsupported_draft');
+ }
  return {mediaId:id,title:a.title,articleType:String(a.article_type),fingerprint:webDraftFingerprint(items)};
 }
 export async function prepareBatch(input:Record<string,unknown>,deps:Deps){

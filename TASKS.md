@@ -15,7 +15,7 @@
   Owner: codex
   Updated: 2026-11-05
   Log: dev-log/2026-11-05-wechat-batch-publish.md
-  Next: MCP/Hub 插件 0.5.8 已部署，87 项测试和生产两条真实草稿只读预检通过。微信可能逐篇扫码；等待用户指定可发表稿件与管理员扫码以验收真实批次。Hub Skill 更新预览超时，插件内 Skill 仍为 0.5.4，待修复同步。
+  Next: 0.5.8 混合贴图预检误把 thumb_media_id 当必需字段，正在按 image_info 修复并验证；微信可能逐篇扫码；等待用户指定可发表稿件与管理员扫码以验收真实批次。Hub Skill 更新预览超时，插件内 Skill 仍为 0.5.4，待修复同步。
 
 
 - [WECHAT-GIF-001] 公众号GIF真实验收与状态声明
