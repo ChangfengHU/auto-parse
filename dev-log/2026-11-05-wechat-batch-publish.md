@@ -10,3 +10,5 @@
 Skill 新固定包发布到 Fleet 版本 0.5.6，分发排队；Hub agent 的 Skill 更新预览读取来源时超时，插件内 Skill 仍是 0.5.4。未宣称插件内新指南已同步。代码提交 0a4a45a；构建时 HEAD 为 c381605，工作区包含修改，服务元数据按实际报告 dirty=true。
 
 2026-11-06：用户已登录，针对真实贴图与图文只读批次预检失败，发现 newspic 官方响应有 image_info 但 thumb_media_id 为空。按类型分别校验：图文仍须封面 media ID，贴图须 1-20 个有效 image_media_id；尚未部署或公开发表。
+
+2026-11-06：0.5.9 修复贴图 thumb_media_id 空值误拒。54 项草稿、17 项平台测试、ESLint/TypeScript 和独立构建通过。独立实例及生产对原批次贴图+图文只读预检通过；生产部署 auto-parse-965309b8-9418-4144-ad03-af87c362d11c，Hub MCP 0.5.9 回执 2899267e-bb60-4339-a34a-f77be816287d，插件 0.5.9 引用该 MCP，Skill 仍 0.5.4。原批次 batch-20261105-kling-morning-02 首篇 unknown、第二篇 pending；未重发，等待指定新测试稿或原批次可靠对账。
