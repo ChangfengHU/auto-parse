@@ -1,0 +1,130 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {createHash,randomUUID} from 'node:crypto';
+
+export type VideoPlatform='douyin'|'xiaohongshu'|'wechat'|'x'|'channels';
+export type DeliveryState='reserved'|'running'|'prepared'|'draft_saved'|'published'|'failed'|'unknown';
+export type DeliveryInput={platform:VideoPlatform;accountId:string;requestId:string;sourceUrl:string;title:string;description:string;topics:string[];aiGenerated:boolean;mode:'prepare'|'draft'|'publish';cover?:{verticalUrl?:string;horizontalUrl?:string}};
+export type ArchivedVideo={sha256:string;bytes:number;savedAt:string;storage:'local_original'};
+export type VideoDelivery={id:string;input:DeliveryInput;fingerprint:string;state:DeliveryState;createdAt:string;updatedAt:string;taskId?:string;receipt?:{workId?:string;url?:string;draftId?:string;moderation?:string;verifiedAt?:string};error?:string;archive?:ArchivedVideo;provenance?:string;sourceCreatedAt?:string};
+export type VideoWork={id:string;title:string;sourceUrl:string;sha256:string|null;archive:ArchivedVideo|null;createdAt:string;updatedAt:string;deliveries:VideoDelivery[]};
+const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
+const root=()=>process.env.VIDEO_WORKS_DATA_DIR||path.join(process.cwd(),'.data','video-work-center');
+export const videoFileDirectory=()=>path.join(root(),'originals');
+const records=()=>path.join(root(),'deliveries');
+const platforms=['douyin','xiaohongshu','wechat','x','channels'];
+export function videoSourceUrl(value:string){
+ const u=new URL(value);
+ if(u.protocol!=='https:'||!['cdn.vyibc.com','resource.vyibc.com'].includes(u.hostname)||u.username||u.password||u.port||u.search||u.hash||!u.pathname.toLowerCase().endsWith('.mp4'))throw Error('video_work_source_invalid');
+ return u.href;
+}
+function atomic(file:string,value:unknown){
+ fs.mkdirSync(path.dirname(file),{recursive:true,mode:0o700});
+ const temp=file+'.'+randomUUID()+'.tmp';let fd:number|undefined;
+ try{fd=fs.openSync(temp,'wx',0o600);fs.writeFileSync(fd,JSON.stringify(value));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;fs.renameSync(temp,file);
+ const d=fs.openSync(path.dirname(file),'r');try{fs.fsyncSync(d)}finally{fs.closeSync(d)}}
+ finally{if(fd!==undefined)fs.closeSync(fd);fs.rmSync(temp,{force:true})}
+}
+export function allVideoDeliveries():VideoDelivery[]{
+ let names:string[];try{names=fs.readdirSync(records())}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return [];throw e}
+ return names.filter(n=>/^[a-f0-9]{64}\.json$/.test(n)).map(n=>{try{return JSON.parse(fs.readFileSync(path.join(records(),n),'utf8')) as VideoDelivery}catch{throw Error('video_work_record_unreadable')}});
+}
+export function recordVideoDelivery(input:DeliveryInput,patch:Partial<Omit<VideoDelivery,'id'|'input'|'fingerprint'|'createdAt'>>={}):VideoDelivery{
+ if(!platforms.includes(input.platform)||!/^[A-Za-z0-9_.-]{1,100}$/.test(input.accountId)||!/^[A-Za-z0-9_.-]{1,120}$/.test(input.requestId)||!input.title.trim()||input.title.length>500||input.description.length>20000||!Array.isArray(input.topics)||input.topics.some(t=>typeof t!=='string'))throw Error('video_work_input_invalid');
+ const clean={...input,sourceUrl:videoSourceUrl(input.sourceUrl)};
+ const id=hash([input.platform,input.accountId,input.requestId,input.mode].join('\n')),fingerprint=hash(JSON.stringify(clean));
+ const file=path.join(records(),id+'.json');
+ let old:VideoDelivery|undefined;
+ try{old=JSON.parse(fs.readFileSync(file,'utf8'))}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw Error('video_work_record_unreadable')}
+ if(old&&old.fingerprint!==fingerprint)throw Error('video_work_request_conflict');
+ const now=new Date().toISOString();
+ const state=(old?.state==='published'||old?.state==='draft_saved')?old.state:patch.state||old?.state||'reserved';
+ const next:VideoDelivery={...old,...patch,id,input:clean,fingerprint,createdAt:old?.createdAt||now,updatedAt:old&&Object.keys(patch).every(k=>k==='archive')?old.updatedAt:now,state};
+ if(old?.receipt)next.receipt={...old.receipt,...patch.receipt};
+ atomic(file,next);return next;
+}
+export function patchVideoDelivery(id:string,patch:Partial<Omit<VideoDelivery,'id'|'input'|'fingerprint'|'createdAt'>>){
+ if(!/^[a-f0-9]{64}$/.test(id))throw Error('video_work_id_invalid');
+ const old=JSON.parse(fs.readFileSync(path.join(records(),id+'.json'),'utf8')) as VideoDelivery;
+ return recordVideoDelivery(old.input,patch);
+}
+export function deliveryInputFromDouyin(input:{requestId:string;expectedAccountId:string;videoUrl:string;title:string;description?:string;topics?:string[];aiGenerated:boolean;prepareOnly?:boolean;cover?:{verticalUrl?:string;horizontalUrl?:string}}):DeliveryInput{
+ return {platform:'douyin',accountId:input.expectedAccountId,requestId:input.requestId,sourceUrl:input.videoUrl,title:input.title,description:input.description||'',topics:input.topics||[],aiGenerated:input.aiGenerated,mode:input.prepareOnly?'prepare':'publish',...(input.cover?{cover:input.cover}:{})};
+}
+type TaskSnapshot={taskId:string;startedAt:number;status:string;publication?:{awemeId?:string;videoUrl?:string;moderation?:string};workflow:{nodes:Array<{params:Record<string,unknown>}>};steps:Array<{output?:Record<string,unknown>}>;errorMessage?:string};
+export function syncVideoWorkflowTask(task:TaskSnapshot){
+ const raw=task.workflow.nodes.map(n=>n.params.douyinPublication).find(Boolean) as Parameters<typeof deliveryInputFromDouyin>[0]|undefined;
+ if(!raw)return null;
+ const input=deliveryInputFromDouyin(raw),output=task.steps.map(s=>s.output).find(o=>o?.awemeId||o?.prepared);
+ const receipt=task.publication||output;
+ const uncertain=!!task.errorMessage?.includes('unknown')||fs.existsSync(path.join(process.cwd(),'.data','douyin-publications',hash(raw.expectedAccountId+':'+raw.requestId)+'.json'));
+ const state:DeliveryState=receipt?.awemeId?'published':output?.prepared?'prepared':task.status==='running'?'running':task.status==='error'?(uncertain?'unknown':'failed'):task.status==='stopped'?'unknown':'unknown';
+ return recordVideoDelivery(input,{taskId:task.taskId,state,sourceCreatedAt:new Date(task.startedAt).toISOString(),...receipt?.awemeId?{receipt:{workId:String(receipt.awemeId),url:String(receipt.videoUrl||'https://www.douyin.com/video/'+receipt.awemeId),moderation:String(receipt.moderation||'pending_or_unknown')}}:{},...task.errorMessage?{error:/^[a-z0-9_]+$/.test(task.errorMessage)?task.errorMessage:'workflow_failed_check_original_task'}:{},provenance:'auto_parse_workflow'});
+}
+export function deliveryByTaskId(taskId:string){return allVideoDeliveries().find(d=>d.taskId===taskId)||null}
+export function listVideoWorks(options:{platform?:string;state?:DeliveryState;accountId?:string;q?:string;offset?:number;limit?:number}={}){
+ const all=allVideoDeliveries(),groups=new Map<string,VideoWork>();
+ const sourceHashes=new Map<string,string>();for(const d of all)if(d.archive)sourceHashes.set(d.input.sourceUrl,d.archive.sha256);
+ for(const d of all){
+  if(options.platform&&d.input.platform!==options.platform||options.accountId&&d.input.accountId!==options.accountId)continue;
+  const sha=d.archive?.sha256||sourceHashes.get(d.input.sourceUrl)||null,id=sha||hash(d.input.sourceUrl);
+  const g=groups.get(id);
+  if(!g)groups.set(id,{id,title:d.input.title,sourceUrl:d.input.sourceUrl,sha256:sha,archive:d.archive||null,createdAt:d.sourceCreatedAt||d.createdAt,updatedAt:d.updatedAt,deliveries:[d]});
+  else{g.deliveries.push(d);if(d.updatedAt>g.updatedAt){g.updatedAt=d.updatedAt;g.title=d.input.title}if((d.sourceCreatedAt||d.createdAt)<g.createdAt)g.createdAt=d.sourceCreatedAt||d.createdAt;if(d.archive)g.archive=d.archive}
+ }
+ const q=options.q?.trim().toLocaleLowerCase()||'';
+ const matching=[...groups.values()].filter(w=>(!options.state||w.deliveries.some(d=>d.state===options.state))).filter(w=>!q||JSON.stringify([w.title,w.deliveries.map(d=>[d.input.title,d.input.description,d.input.accountId,d.taskId,d.receipt?.workId])]).toLocaleLowerCase().includes(q)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+ const offset=Math.max(0,Math.floor(options.offset||0)),limit=Math.min(100,Math.max(1,Math.floor(options.limit||20)));
+ return {items:matching.slice(offset,offset+limit),total:matching.length,nextOffset:offset+limit<matching.length?offset+limit:null,retention:'permanent_until_explicit_owner_removal',workflowCacheIsArchive:false};
+}
+export function getVideoWork(id:string,platform?:string){
+ if(!/^[a-f0-9]{64}$/.test(id))throw Error('video_work_id_invalid');
+ let offset=0;for(;;){const page=listVideoWorks({platform,offset,limit:100});const found=page.items.find(w=>w.id===id||w.deliveries.some(d=>hash(d.input.sourceUrl)===id));if(found)return found;if(page.nextOffset===null)return null;offset=page.nextOffset;}
+}
+export async function retainVideoOriginal(sourceUrl:string,localFile:string){
+ const matching=allVideoDeliveries().filter(d=>d.input.sourceUrl===sourceUrl);
+ if(!matching.length)return null;
+ const stat=fs.statSync(localFile);if(!stat.isFile()||stat.size===0||stat.size>536870912)throw Error('video_work_file_size_invalid');
+ const h=createHash('sha256');for await(const chunk of fs.createReadStream(localFile))h.update(chunk);
+ const sha256=h.digest('hex'),dir=videoFileDirectory();fs.mkdirSync(dir,{recursive:true,mode:0o700});
+ const dest=path.join(dir,sha256+'.mp4');
+ if(!fs.existsSync(dest)){
+  const space=fs.statfsSync(dir);if(space.bavail*space.bsize<stat.size+134217728)throw Error('video_work_disk_space_insufficient');
+  const temp=path.join(dir,sha256+'.'+randomUUID()+'.tmp');
+  try{fs.copyFileSync(localFile,temp,fs.constants.COPYFILE_EXCL);fs.chmodSync(temp,0o600);const f=fs.openSync(temp,'r');try{fs.fsyncSync(f)}finally{fs.closeSync(f)};fs.renameSync(temp,dest)}
+  finally{fs.rmSync(temp,{force:true})}
+ }
+ if(fs.statSync(dest).size!==stat.size)throw Error('video_work_archive_size_mismatch');
+ const archive:ArchivedVideo={sha256,bytes:stat.size,storage:'local_original',savedAt:new Date().toISOString()};
+ for(const d of matching)recordVideoDelivery(d.input,{archive});
+ await ensureVideoPoster(sha256).catch(()=>{});
+ return archive;
+}
+
+export function syncWechatVideoDraft(record:{input:{kind:string;requestId:string;expectedAccount:string;sourceUrl:string;title:string;description:string};state:string;receipt?:Record<string,unknown>;error?:{code:string};sessionId?:string;updatedAt?:string}){
+ const p=record.input;if(p.kind!=='video')return null;
+ const state:DeliveryState=record.state==='completed'&&record.receipt?.saveResponseAccepted===true&&record.receipt?.nativeEditorReloadVerified===true?'draft_saved':['reserved','running','failed'].includes(record.state)?record.state as DeliveryState:'unknown';
+ return recordVideoDelivery({platform:'wechat',accountId:p.expectedAccount,requestId:p.requestId,sourceUrl:p.sourceUrl,title:p.title,description:p.description,topics:[],aiGenerated:false,mode:'draft'},{state,taskId:record.sessionId,...record.updatedAt?{sourceCreatedAt:record.updatedAt}:{},receipt:record.receipt?.appMsgId?{draftId:String(record.receipt.appMsgId),verifiedAt:typeof record.receipt.verifiedAt==='string'?record.receipt.verifiedAt:undefined}:undefined,error:record.error?.code,provenance:'wechat_native_video_draft'});
+}
+export function retainedVideoPathForSource(sourceUrl:string){
+ const record=allVideoDeliveries().find(d=>d.input.sourceUrl===sourceUrl&&d.archive);
+ if(!record?.archive)return null;
+ const file=path.join(videoFileDirectory(),record.archive.sha256+'.mp4');
+ try{return fs.statSync(file).size===record.archive.bytes?file:null}catch{return null}
+}
+
+export const videoPosterPath=(sha256:string)=>{
+ if(!/^[a-f0-9]{64}$/.test(sha256))throw Error('video_work_hash_invalid');
+ return path.join(root(),'posters',sha256+'.jpg');
+};
+export async function ensureVideoPoster(sha256:string){
+ const target=videoPosterPath(sha256);if(fs.existsSync(target))return target;
+ fs.mkdirSync(path.dirname(target),{recursive:true,mode:0o700});
+ const temp=target+'.'+randomUUID()+'.jpg';
+ try{
+  await promisify(execFile)('ffmpeg',['-nostdin','-v','error','-ss','0','-i',path.join(videoFileDirectory(),sha256+'.mp4'),'-frames:v','1','-vf','scale=640:640:force_original_aspect_ratio=decrease','-q:v','3','-y',temp],{timeout:20000,maxBuffer:65536});
+  fs.chmodSync(temp,0o600);fs.renameSync(temp,target);return target;
+ }finally{fs.rmSync(temp,{force:true})}
+}

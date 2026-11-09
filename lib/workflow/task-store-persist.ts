@@ -1,3 +1,4 @@
+import {syncVideoWorkflowTask} from '../video-works/store';
 /**
  * 工作流任务本地短期持久化：每任务一个 JSON 文件，仅依赖 fs，无原生模块 / 无 SQLite 版本问题。
  *
@@ -98,6 +99,9 @@ function purgeExpiredOnce(): void {
 }
 
 export function persistWorkflowTask(task: PersistedTask): void {
+  // Permanent publication archive is independent of the short-lived workflow cache.
+  try { syncVideoWorkflowTask(task as Parameters<typeof syncVideoWorkflowTask>[0]); }
+  catch { console.error('[video-work] archive sync failed; inspect original task', task.taskId); }
   if (!persistEnabled() || persistGiveUp) return;
   if (!ensureDirOnce()) return;
   try {

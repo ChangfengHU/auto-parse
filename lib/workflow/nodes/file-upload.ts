@@ -1,3 +1,4 @@
+import {retainVideoOriginal,retainedVideoPathForSource} from '../../video-works/store';
 import type { Page } from 'playwright';
 import type { FileUploadParams, NodeResult, WorkflowContext } from '../types';
 import { captureScreenshot } from '../utils';
@@ -64,7 +65,10 @@ export async function executeFileUpload(
     if (!['https:', 'http:'].includes(source.protocol)) throw new Error('视频地址必须是 HTTP(S)');
     tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'wf-upload-'));
     tmpFile = path.join(tmpDir, 'video' + (path.extname(source.pathname) || '.mp4'));
-    await downloadToTemp(url, tmpFile, params.transferMode === 'buffer' ? REMOTE_UPLOAD_MAX_BYTES : undefined);
+    const retained=retainedVideoPathForSource(url);
+    if(retained)await fs.promises.copyFile(retained,tmpFile,fs.constants.COPYFILE_EXCL);
+    else await downloadToTemp(url, tmpFile, params.transferMode === 'buffer' ? REMOTE_UPLOAD_MAX_BYTES : undefined);
+    await retainVideoOriginal(url,tmpFile);
     log.push(`✅ 下载完成：${path.basename(tmpFile)}`);
 
     log.push(`📤 注入文件到上传控件：${params.selector}`);

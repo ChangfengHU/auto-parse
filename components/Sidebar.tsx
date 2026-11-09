@@ -63,6 +63,11 @@ const NAV = [
     ),
   },
   {
+    href: '/video-works',
+    label: '视频作品中心',
+    icon: (<svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 8l6 4-6 4z"/></svg>),
+  },
+  {
     href: '/publish',
     label: '视频发布',
     icon: (

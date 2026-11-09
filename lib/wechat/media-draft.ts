@@ -1,3 +1,4 @@
+import {recordVideoDelivery,syncWechatVideoDraft} from '../video-works/store';
 import {createHash,randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,7 +29,7 @@ const dir=()=>process.env.WECHAT_MEDIA_DRAFT_LEDGER||path.join(process.cwd(),'.r
 function file(account:string,id:string){return path.join(dir(),hash(account+'\n'+id)+'.json')}
 function atomicSave(p:string,r:MediaDraftRecord){
  const temp=p+'.'+randomUUID()+'.tmp';let fd:number|undefined;
- try{fd=fs.openSync(temp,'wx',0o600);fs.writeFileSync(fd,JSON.stringify(r));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;fs.renameSync(temp,p);
+ try{fd=fs.openSync(temp,'wx',0o600);fs.writeFileSync(fd,JSON.stringify(r));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;fs.renameSync(temp,p);syncWechatVideoDraft(r);
  const d=fs.openSync(path.dirname(p),'r');try{fs.fsyncSync(d)}finally{fs.closeSync(d)}}finally{if(fd!==undefined)fs.closeSync(fd);fs.rmSync(temp,{force:true})}
 }
 export function getMediaDraft(account:string,id:string):MediaDraftRecord|null{
@@ -37,6 +38,7 @@ export function getMediaDraft(account:string,id:string):MediaDraftRecord|null{
  return r;
 }
 export function reserveMediaDraft(input:MediaDraftInput):{reused:boolean;record:MediaDraftRecord}{
+ if(input.kind==='video')recordVideoDelivery({platform:'wechat',accountId:input.expectedAccount,requestId:input.requestId,sourceUrl:input.sourceUrl,title:input.title,description:input.description,topics:[],aiGenerated:false,mode:'draft'});
  fs.mkdirSync(dir(),{recursive:true,mode:0o700});
  const fingerprint=hash(JSON.stringify(input)),p=file(input.expectedAccount,input.requestId);
  const existing=getMediaDraft(input.expectedAccount,input.requestId);
@@ -63,7 +65,7 @@ export function reserveMediaDraft(input:MediaDraftInput):{reused:boolean;record:
  let fd:number;try{fd=fs.openSync(p,'wx',0o600)}catch(e){if((e as NodeJS.ErrnoException).code==='EEXIST')return reserveMediaDraft(input);throw e}
  try{fs.writeFileSync(fd,JSON.stringify(record));fs.fsyncSync(fd)}finally{fs.closeSync(fd)}
  const d=fs.openSync(dir(),'r');try{fs.fsyncSync(d)}finally{fs.closeSync(d)}
- return {reused:false,record};
+ syncWechatVideoDraft(record);return {reused:false,record};
 }
 export function updateMediaDraft(account:string,id:string,patch:Partial<MediaDraftRecord>){
  const p=file(account,id),lock=p+'.lock';const fd=fs.openSync(lock,'wx',0o600);

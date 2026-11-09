@@ -1,3 +1,4 @@
+import {recordVideoDelivery,deliveryInputFromDouyin} from '../video-works/store';
 import path from 'node:path';
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { getWorkflow } from './workflow-db';
@@ -22,10 +23,11 @@ export async function startDouyinWorkflow(input: DouyinWorkflowInput) {
     if (!input.cover.verticalUrl && !input.cover.horizontalUrl) throw new Error('publication_cover_input_invalid');
     for (const url of [input.cover.verticalUrl, input.cover.horizontalUrl]) if (url) validateCoverUrl(url);
   }
+  const archived = recordVideoDelivery(deliveryInputFromDouyin(input));
   const directory = path.join(process.cwd(), '.data');
   if (!input.prepareOnly) {
     const publication = await readPublication(path.join(directory, 'douyin-publications'), identity.key, identity.fingerprint);
-    if (publication?.receipt) return { ok: true, status: 'published', receipt: publication.receipt, reused: true };
+    if (publication?.receipt) { recordVideoDelivery(archived.input,{state:'published',receipt:{workId:publication.receipt.awemeId,url:publication.receipt.videoUrl,moderation:publication.receipt.moderation}}); return { ok: true, status: 'published', receipt: publication.receipt, reused: true }; }
   }
   const workflow = await getWorkflow(DOUYIN_WORKFLOW_ID);
   const types = ['material', 'navigate', 'qrcode', 'navigate', 'file_upload', 'wait_condition', 'text_input',
@@ -59,6 +61,7 @@ export async function startDouyinWorkflow(input: DouyinWorkflowInput) {
   try { await reservation.writeFile(JSON.stringify({ fingerprint: identity.fingerprint, state: 'starting' })); await reservation.sync(); }
   finally { await reservation.close(); }
   const task = await startWorkflowTask({ workflowId: workflow.id, workflow: snapshot, vars: {} });
+  recordVideoDelivery(archived.input,{taskId:task.taskId,state:'running'});
   await writeFile(requestFile, JSON.stringify({ fingerprint: identity.fingerprint, taskId: task.taskId }), { mode: 0o600 });
   return { ok: true, taskId: task.taskId, workflowId: workflow.id, status: task.status, prepareOnly: Boolean(input.prepareOnly) };
 }

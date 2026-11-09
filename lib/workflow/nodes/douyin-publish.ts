@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
 import path from 'node:path';
+import {recordVideoDelivery,deliveryInputFromDouyin} from '../../video-works/store';
 import { fillDouyinCovers } from '../douyin-cover';
 import { captureScreenshot } from '../utils';
 import type { NodeResult, WorkflowContext } from '../types';
@@ -18,13 +19,17 @@ type Params = {
 export async function executeDouyinPublish(page: Page, params: Params, ctx: WorkflowContext): Promise<NodeResult> {
   const log: string[] = [];
   let phase = 'preflight';
+  let archiveInput:ReturnType<typeof deliveryInputFromDouyin>|undefined;
   const emit = (message: string) => { log.push(message); ctx.emit?.('log', message); };
   try {
     if ((params.confirmPublish !== true && params.prepareOnly !== true) || typeof params.aiGenerated !== 'boolean' ||
         (params.prepareOnly === true && params.confirmPublish === true)) throw new Error('publication_confirmation_required');
     const { key, fingerprint } = publicationIdentity(params.requestId, params.expectedAccountId, params.videoUrl, params.title, params.aiGenerated, params);
+    archiveInput=deliveryInputFromDouyin(params);
+    recordVideoDelivery(archiveInput,{state:'running',provenance:'douyin_guarded_node'});
     const directory = path.join(process.cwd(), '.data', 'douyin-publications');
     const previous = await readPublication(directory, key, fingerprint);
+    if(previous?.receipt)recordVideoDelivery(archiveInput,{state:'published',receipt:{workId:previous.receipt.awemeId,url:previous.receipt.videoUrl,moderation:previous.receipt.moderation}});
     if (previous?.receipt) return { success: true, log: ['已读取同一请求的真实作品回执，未重复提交'], output: { ...previous.receipt, reused: true } };
 
     if ((params.verifyCurrentSession !== true &&
@@ -112,6 +117,7 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
       await page.getByText('内容由AI生成', { exact: true }).and(page.locator(':visible')).first().waitFor({ state: 'visible' });
     }
     if (params.prepareOnly) {
+      recordVideoDelivery(archiveInput,{state:'prepared'});
       emit('发布预览已准备；未点击发布、未占用发布编号');
       return { success: true, log, screenshot: await captureScreenshot(page), output: {
         prepared: true, published: false, title: params.title, description: caption, topics,
@@ -144,6 +150,7 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
     const receipt = await receiptPromise;
     if (!receipt) throw new Error('submission_unknown_do_not_retry');
     await finishPublication(directory, key, fingerprint, receipt);
+    recordVideoDelivery(archiveInput,{state:'published',receipt:{workId:receipt.awemeId,url:receipt.videoUrl,moderation:receipt.moderation}});
     emit('已取得真实作品创建回执；平台审核状态仍需另行查询');
     return { success: true, log, output: receipt };
   } catch (error) {
@@ -151,6 +158,7 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
       error.message.includes('strict mode violation') ? 'selector_ambiguous' : 'operation_failed') : 'operation_failed';
     emit('发布检查阶段：' + phase + '；类别：' + detail);
     const message = error instanceof Error && /^[a-z_]+$/.test(error.message) ? error.message : 'publication_' + phase + '_failed';
+    if(archiveInput){try{recordVideoDelivery(archiveInput,{state:phase==='submission'||message.includes('unknown')?'unknown':'failed',error:message})}catch{emit('作品档案写入失败；保留原发布账本，禁止重发')}}
     emit('抖音发布节点停止：' + message);
     const screenshot = await captureScreenshot(page).catch(() => undefined);
     return { success: false, log, error: message, screenshot };

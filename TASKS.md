@@ -4,6 +4,14 @@
 
 ## In Progress
 
+- [STORAGE-001] 视频作品中心与抖音发布MCP长期留存
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-11-09
+  Log: dev-log/2026-11-09-video-work-center.md
+  Next: 修复发布链路留存缺口；新增多平台作品菜单、原片保留、状态回查和MCP版本；不得实发测试。
+
+
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
   Log: dev-log/2026-11-05-wechat-operations.md

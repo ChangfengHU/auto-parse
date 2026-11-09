@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import {retainedVideoPathForSource} from '../video-works/store';
 import os from 'node:os';
 import path from 'node:path';
 import {execFile} from 'node:child_process';
@@ -9,6 +10,11 @@ export async function downloadMediaAsset(input:MediaDraftInput){
  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'wechat-media-'));await fs.chmod(directory,0o700);
  const filename=path.join(directory,input.kind==='video'?'upload.mp4':'upload.mp3');
  try{
+  let size=0;const retained=input.kind==='video'?retainedVideoPathForSource(input.sourceUrl):null;
+  if(retained){
+   const stat=await fs.stat(retained);if(stat.size>MEDIA_MAX_BYTES)throw Error('media_file_too_large');
+   await fs.copyFile(retained,filename);await fs.chmod(filename,0o600);size=stat.size;
+  }else{
   let url=mediaAssetUrl(input.sourceUrl),response:Response|undefined;
   for(let i=0;i<4;i++){
    response=await fetch(url,{redirect:'manual',signal:AbortSignal.timeout(120000)});
@@ -17,8 +23,9 @@ export async function downloadMediaAsset(input:MediaDraftInput){
   }
   if(!response?.ok||!response.body)throw Error('media_download_http_'+(response?.status||0));
   if(Number(response.headers.get('content-length')||0)>MEDIA_MAX_BYTES){await response.body.cancel();throw Error('media_file_too_large')}
-  const fd=await fs.open(filename,'wx',0o600);let size=0;const reader=response.body.getReader();
+  const fd=await fs.open(filename,'wx',0o600);const reader=response.body.getReader();
   try{for(;;){const chunk=await reader.read();if(chunk.done)break;size+=chunk.value.byteLength;if(size>MEDIA_MAX_BYTES)throw Error('media_file_too_large');await fd.writeFile(chunk.value)}}finally{await reader.cancel().catch(()=>{});await fd.close()}
+  }
   const {stdout}=await execute('ffprobe',['-v','error','-show_entries','format=duration,format_name:stream=codec_type,codec_name','-of','json',filename],{timeout:20000,maxBuffer:65536});
   const metadata=JSON.parse(stdout) as {format?:{duration?:string;format_name?:string};streams?:Array<{codec_type:string;codec_name:string}>};
   const duration=Number(metadata.format?.duration),streams=metadata.streams||[];

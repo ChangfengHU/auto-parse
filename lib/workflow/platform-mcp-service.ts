@@ -1,3 +1,4 @@
+import {listVideoWorks,getVideoWork,deliveryByTaskId} from '../video-works/store';
 import {prepareBatch,startBatch,batchStatus} from '../wechat/web-batch';
 import {createHash} from 'node:crypto';
 import {platformReleaseInfo} from './platform-release';
@@ -35,6 +36,8 @@ function assertVideoTask(id:unknown){
 }
 export async function callPlatformTool(platform:PublicationPlatform,name:string,input:Record<string,unknown>):Promise<unknown>{
  if(!platformMcpTools(platform).some(t=>t.name===name))throw Error('platform_tool_not_allowed');
+ if(name==='list_video_works')return listVideoWorks({platform,accountId:input.accountId as string|undefined,state:input.state as NonNullable<Parameters<typeof listVideoWorks>[0]>['state'],q:input.query as string|undefined,offset:input.offset as number|undefined,limit:input.limit as number|undefined});
+ if(name==='get_video_work'){const work=getVideoWork(String(input.workId),platform);if(!work)throw Error('video_work_not_found');return {work};}
  if(name==='get_version'){const info=platformReleaseInfo(platform);if(platform!=='wechat')return info;const toolList=platformMcpTools(platform);return {...info,toolCount:toolList.length,toolListSha256:createHash('sha256').update(JSON.stringify(toolList)).digest('hex'),toolListHashAlgorithm:'sha256-json-tools-list-v1'};}
  if(platform==='wechat' && ['wechat_web_batch_prepare','wechat_web_batch_publish','wechat_web_batch_status'].includes(name)){
   const deps={getDraft:async(id:string)=>callWechatDraftTool('wechat_get_draft',{mediaId:id}),publish:async(value:Record<string,unknown>)=>callPlatformTool('wechat','wechat_web_publish_draft',value) as Promise<Record<string,unknown>>,publication:(account:string,id:string)=>webPublishState(account,id),session:async(id:string)=>callWorkflowTool('workflow_get_session',{sessionId:id,includeScreenshot:false}) as Promise<Record<string,unknown>>,close:async(id:string)=>callPlatformTool('wechat','workflow_close_session',{sessionId:id}),assistance:async(id:string)=>callPlatformTool('wechat','wechat_web_assistance',{sessionId:id}) as Promise<Record<string,unknown>>};
@@ -105,7 +108,7 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
    formats:platform==='wechat'?['news-preparation','news-web-publication','newspic-preparation','newspic-web-publication','video-draft','podcast-draft']:platform==='x'?['text','single-image']:['video','image-text'],
    wechatWebPublication:platform==='wechat'?WECHAT_WEB_CAPABILITIES:undefined,
    xPublication:platform==='x'?c.xPublication:undefined,imageTextPublication:platform==='x'||platform==='wechat'?undefined:{...(c.imageTextPublication as object),platforms:[platform==='xiaohongshu'?'xhs':'douyin']},
-   video:platform==='douyin'?{workflowId:DOUYIN_WORKFLOW_ID,maxBytes:536870912,topics:'caption_text',cover:'experimental',receiptSources:['creation_response','creator_work_list']}:undefined,
+   video:platform==='douyin'?{workflowId:DOUYIN_WORKFLOW_ID,maxBytes:536870912,topics:'caption_text',cover:'experimental',receiptSources:['creation_response','creator_work_list'],archive:{owner:'auto-parse',retention:'permanent',originals:'content_hash_local_copy_on_upload',queryTools:['list_video_works','get_video_work'],prepareIsCloudDraft:false}}:undefined,
    limits:'Only platform-approved workflows; no arbitrary nodes/CRUD. User-authorized account control and explicit public publication. Unknown submissions must not be retried.'};
  }
  if(name==='workflow_list'){
@@ -134,6 +137,7 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
   return startDouyinWorkflow(p);
  }
  if(name==='get_video_task'){
+  if(typeof input.taskId==='string'&&!getWorkflowTask(input.taskId)){const archived=deliveryByTaskId(input.taskId);if(archived?.input.platform===platform)return {ok:true,taskId:input.taskId,status:archived.state,receipt:archived.receipt,archive:archived,workflowExecution:null,note:'Permanent archive; short-lived execution details are unavailable. Do not resubmit.'};}
   const task=assertVideoTask(input.taskId),output=task.steps.find(s=>s.output?.awemeId||s.output?.prepared)?.output;
   const receipt=task.publication||(output?.awemeId?output:null);
   return {ok:true,taskId:task.taskId,status:receipt?'published':output?.prepared?'prepared':task.status,receipt,prepared:output?.prepared?output:null,workflowExecution:getWorkflowTaskSummary(task.taskId)};

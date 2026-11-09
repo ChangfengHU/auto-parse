@@ -94,6 +94,7 @@ for (const mode of ['prepare-only', 'success', 'live-session', 'live-session-wro
       delete context.outputs.creatorVerified; delete context.outputs.accountId;
     }
     const sandbox = { ...ledger, path, URL, AbortSignal, Error, process: { cwd: () => dir, env: { FLEET_NODE_ID: 'host-84' } },
+      recordVideoDelivery:()=>({}),deliveryInputFromDouyin:p=>p,
       captureScreenshot: async () => undefined,
       fetch: async () => { fleetCalls++; throw new Error('local_workflow_must_not_call_fleet'); },
     };

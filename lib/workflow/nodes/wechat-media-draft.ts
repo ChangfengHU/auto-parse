@@ -1,3 +1,4 @@
+import {retainVideoOriginal} from '../../video-works/store';
 import type {Page,Response} from 'playwright';
 import type {NodeResult,WorkflowContext} from '../types';
 import {getMediaDraft,updateMediaDraft,mediaDraftView} from '../../wechat/media-draft';
@@ -39,6 +40,7 @@ export async function executeWechatMediaDraft(root:Page,params:Params,ctx:Workfl
  try{
   update({state:'running',phase});await protect(root);await home();
   stage('downloading');asset=await downloadMediaAsset(input);
+  if(input.kind==='video')await retainVideoOriginal(input.sourceUrl,asset.filename);
   const materialTitle='MCP'+(input.kind==='video'?'视频':'音频')+record.fingerprint.slice(0,12);
   update({receipt:{materialTitle,bytes:asset.size,durationSeconds:asset.duration}});
   let page=await editor();stage('uploading_material');

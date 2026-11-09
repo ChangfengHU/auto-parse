@@ -22,6 +22,7 @@ test('approved workflow snapshot keeps original unchanged, preview cannot publis
   const baseline = structuredClone(workflow);
   let calls = 0, snapshot;
   const sandbox = { ...fs, ...ledger, path, URL, Buffer, structuredClone, process: { cwd: () => dir },
+    recordVideoDelivery:()=>({}),deliveryInputFromDouyin:p=>p,
     getWorkflow: async () => workflow, getWorkflowTask: () => ({ status: 'done' }),
     startWorkflowTask: async request => { calls++; snapshot = request.workflow; return { taskId: 'test-task', status: 'running' }; },
   };
