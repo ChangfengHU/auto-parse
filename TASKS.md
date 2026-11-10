@@ -282,4 +282,6 @@ WeChat manual VNC handoff MCP, task-owned popup draft navigation and real read-o
 - [WECHAT-SETTINGS-20261105] 署名默认、提交设置警示、工具哈希 0.5.5 已部署并登记 Hub；插件自动 0.5.5，Skill 尚为 0.5.4。其余 P0/P1/P2 仍在进行，不代表全部完成。旧扫码任务因用户授权重启中断，须使用原请求对账。
 
 ## WORKS-002 — In Progress
+
+WORKS-002验证状态：独立入库、历史补录、原片留存与页面已上线；138项相关回归通过；Skill安装包0.1.0已发布。公众号网页登录失效，真实视频草稿尚未完成。Hub登记预览失败，连接绑定未核验，不宣称插件已更新。
 独立作品入库/历史补录MCP；按作品ID创建公众号视频草稿并回写。公众号只需草稿，不开发公开发表。日志dev-log/2026-11-10-independent-video-works.md。

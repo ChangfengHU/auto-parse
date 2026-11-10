@@ -4,6 +4,7 @@ import os from 'node:os';
 import {stripTypeScriptTypes} from 'node:module';
 const source=stripTypeScriptTypes(fs.readFileSync(new URL('../lib/video-works/store.ts',import.meta.url),'utf8'),{mode:'transform'});
 const store=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+if(process.getuid?.()===0)throw Error('run_video_works_cli_as_service_user');
 const action=process.argv[2]||'summary';
 if(action==='backfill'){
  let imported=0,errors=0;const rejected=[];
