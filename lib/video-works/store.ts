@@ -9,7 +9,7 @@ export type DeliveryState='reserved'|'running'|'prepared'|'draft_saved'|'publish
 export type DeliveryInput={platform:VideoPlatform;accountId:string;requestId:string;sourceUrl:string;title:string;description:string;topics:string[];aiGenerated:boolean;mode:'prepare'|'draft'|'publish';cover?:{verticalUrl?:string;horizontalUrl?:string}};
 export type ArchivedVideo={sha256:string;bytes:number;savedAt:string;storage:'local_original'};
 export type VideoDelivery={id:string;input:DeliveryInput;fingerprint:string;state:DeliveryState;createdAt:string;updatedAt:string;taskId?:string;receipt?:{workId?:string;url?:string;draftId?:string;moderation?:string;verifiedAt?:string};error?:string;archive?:ArchivedVideo;provenance?:string;sourceCreatedAt?:string};
-export type VideoWork={id:string;title:string;sourceUrl:string;sha256:string|null;archive:ArchivedVideo|null;createdAt:string;updatedAt:string;deliveries:VideoDelivery[]};
+export type VideoWork={id:string;title:string;sourceUrl:string;sha256:string|null;archive:ArchivedVideo|null;createdAt:string;updatedAt:string;deliveries:VideoDelivery[];description?:string;topics?:string[];aiGenerated?:boolean;sourceIds?:string[];retentionState?:string;retentionError?:string;reportedPlatformUrl?:string;referenceEvidence?:string};
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
 const root=()=>process.env.VIDEO_WORKS_DATA_DIR||path.join(process.cwd(),'.data','video-work-center');
 export const videoFileDirectory=()=>path.join(root(),'originals');
@@ -43,7 +43,7 @@ export function recordVideoDelivery(input:DeliveryInput,patch:Partial<Omit<Video
  const state=(old?.state==='published'||old?.state==='draft_saved')?old.state:patch.state||old?.state||'reserved';
  const next:VideoDelivery={...old,...patch,id,input:clean,fingerprint,createdAt:old?.createdAt||now,updatedAt:old&&Object.keys(patch).every(k=>k==='archive')?old.updatedAt:now,state};
  if(old?.receipt)next.receipt={...old.receipt,...patch.receipt};
- atomic(file,next);return next;
+ atomic(file,next);const registered=registerVideoWork({...clean,origin:'publisher'},true);if(next.archive&&!registered.record.archive)updateVideoRegistration(clean.sourceUrl,{archive:next.archive,retentionState:'retained'});return next;
 }
 export function patchVideoDelivery(id:string,patch:Partial<Omit<VideoDelivery,'id'|'input'|'fingerprint'|'createdAt'>>){
  if(!/^[a-f0-9]{64}$/.test(id))throw Error('video_work_id_invalid');
@@ -64,28 +64,34 @@ export function syncVideoWorkflowTask(task:TaskSnapshot){
  return recordVideoDelivery(input,{taskId:task.taskId,state,sourceCreatedAt:new Date(task.startedAt).toISOString(),...receipt?.awemeId?{receipt:{workId:String(receipt.awemeId),url:String(receipt.videoUrl||'https://www.douyin.com/video/'+receipt.awemeId),moderation:String(receipt.moderation||'pending_or_unknown')}}:{},...task.errorMessage?{error:/^[a-z0-9_]+$/.test(task.errorMessage)?task.errorMessage:'workflow_failed_check_original_task'}:{},provenance:'auto_parse_workflow'});
 }
 export function deliveryByTaskId(taskId:string){return allVideoDeliveries().find(d=>d.taskId===taskId)||null}
-export function listVideoWorks(options:{platform?:string;state?:DeliveryState;accountId?:string;q?:string;offset?:number;limit?:number}={}){
- const all=allVideoDeliveries(),groups=new Map<string,VideoWork>();
- const sourceHashes=new Map<string,string>();for(const d of all)if(d.archive)sourceHashes.set(d.input.sourceUrl,d.archive.sha256);
- for(const d of all){
-  if(options.platform&&d.input.platform!==options.platform||options.accountId&&d.input.accountId!==options.accountId)continue;
-  const sha=d.archive?.sha256||sourceHashes.get(d.input.sourceUrl)||null,id=sha||hash(d.input.sourceUrl);
-  const g=groups.get(id);
-  if(!g)groups.set(id,{id,title:d.input.title,sourceUrl:d.input.sourceUrl,sha256:sha,archive:d.archive||null,createdAt:d.sourceCreatedAt||d.createdAt,updatedAt:d.updatedAt,deliveries:[d]});
-  else{g.deliveries.push(d);if(d.updatedAt>g.updatedAt){g.updatedAt=d.updatedAt;g.title=d.input.title}if((d.sourceCreatedAt||d.createdAt)<g.createdAt)g.createdAt=d.sourceCreatedAt||d.createdAt;if(d.archive)g.archive=d.archive}
+export function listVideoWorks(options:{platform?:string;state?:DeliveryState|'registered';accountId?:string;q?:string;offset?:number;limit?:number}={}){
+ const all=allVideoDeliveries(),registered=registeredVideoWorks(),groups=new Map<string,VideoWork>();
+ const sourceHashes=new Map<string,string>();for(const d of [...registered,...all.map(d=>({sourceUrl:d.input.sourceUrl,archive:d.archive}))])if(d.archive)sourceHashes.set(d.sourceUrl,d.archive.sha256);
+ const visible=all.filter(d=>(!options.platform||d.input.platform===options.platform)&&(!options.accountId||d.input.accountId===options.accountId)),sources=new Set(visible.map(d=>d.input.sourceUrl));
+ for(const r of registered){
+  if((options.platform||options.accountId)&&!sources.has(r.sourceUrl))continue;
+  const sha=r.archive?.sha256||sourceHashes.get(r.sourceUrl)||null,id=sha||hash(r.sourceUrl),old=groups.get(id);
+  if(old){old.sourceIds?.push(r.id);continue}
+  groups.set(id,{id,title:r.title,description:r.description,topics:r.topics,aiGenerated:r.aiGenerated,sourceUrl:r.sourceUrl,sourceIds:[r.id],retentionState:r.archive?'retained':r.retentionState,retentionError:r.retentionError,reportedPlatformUrl:r.reportedPlatformUrl,referenceEvidence:r.reportedPlatformUrl?'reported_not_verified':undefined,sha256:sha,archive:r.archive||null,createdAt:r.createdAt,updatedAt:r.updatedAt,deliveries:[]});
+ }
+ for(const d of visible){
+  const sha=d.archive?.sha256||sourceHashes.get(d.input.sourceUrl)||null,id=sha||hash(d.input.sourceUrl),g=groups.get(id);
+  if(!g)groups.set(id,{id,title:d.input.title,description:d.input.description,topics:d.input.topics,aiGenerated:d.input.aiGenerated,sourceUrl:d.input.sourceUrl,sourceIds:[hash(d.input.sourceUrl)],sha256:sha,archive:d.archive||null,createdAt:d.sourceCreatedAt||d.createdAt,updatedAt:d.updatedAt,deliveries:[d]});
+  else{g.deliveries.push(d);if(!g.sourceIds?.includes(hash(d.input.sourceUrl)))g.sourceIds?.push(hash(d.input.sourceUrl));if(d.updatedAt>g.updatedAt)g.updatedAt=d.updatedAt;if((d.sourceCreatedAt||d.createdAt)<g.createdAt)g.createdAt=d.sourceCreatedAt||d.createdAt;if(d.archive)g.archive=d.archive}
  }
  const q=options.q?.trim().toLocaleLowerCase()||'';
- const matching=[...groups.values()].filter(w=>(!options.state||w.deliveries.some(d=>d.state===options.state))).filter(w=>!q||JSON.stringify([w.title,w.deliveries.map(d=>[d.input.title,d.input.description,d.input.accountId,d.taskId,d.receipt?.workId])]).toLocaleLowerCase().includes(q)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+ const matching=[...groups.values()].filter(w=>!options.state||(options.state==='registered'?w.deliveries.length===0:w.deliveries.some(d=>d.state===options.state))).filter(w=>!q||JSON.stringify([w.id,w.sourceUrl,w.sourceIds,w.title,w.description,w.topics,w.deliveries.map(d=>[d.input.title,d.input.description,d.input.accountId,d.taskId,d.receipt?.workId])]).toLocaleLowerCase().includes(q)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
  const offset=Math.max(0,Math.floor(options.offset||0)),limit=Math.min(100,Math.max(1,Math.floor(options.limit||20)));
  return {items:matching.slice(offset,offset+limit),total:matching.length,nextOffset:offset+limit<matching.length?offset+limit:null,retention:'permanent_until_explicit_owner_removal',workflowCacheIsArchive:false};
 }
 export function getVideoWork(id:string,platform?:string){
  if(!/^[a-f0-9]{64}$/.test(id))throw Error('video_work_id_invalid');
- let offset=0;for(;;){const page=listVideoWorks({platform,offset,limit:100});const found=page.items.find(w=>w.id===id||w.deliveries.some(d=>hash(d.input.sourceUrl)===id));if(found)return found;if(page.nextOffset===null)return null;offset=page.nextOffset;}
+ let offset=0;for(;;){const page=listVideoWorks({platform,offset,limit:100});const found=page.items.find(w=>w.id===id||w.sourceIds?.includes(id)||hash(w.sourceUrl)===id||w.deliveries.some(d=>hash(d.input.sourceUrl)===id));if(found)return found;if(page.nextOffset===null)return null;offset=page.nextOffset;}
 }
 export async function retainVideoOriginal(sourceUrl:string,localFile:string){
  const matching=allVideoDeliveries().filter(d=>d.input.sourceUrl===sourceUrl);
- if(!matching.length)return null;
+ const registered=registeredVideoWorks().filter(r=>r.sourceUrl===sourceUrl);
+ if(!matching.length&&!registered.length)return null;
  const stat=fs.statSync(localFile);if(!stat.isFile()||stat.size===0||stat.size>536870912)throw Error('video_work_file_size_invalid');
  const h=createHash('sha256');for await(const chunk of fs.createReadStream(localFile))h.update(chunk);
  const sha256=h.digest('hex'),dir=videoFileDirectory();fs.mkdirSync(dir,{recursive:true,mode:0o700});
@@ -99,6 +105,7 @@ export async function retainVideoOriginal(sourceUrl:string,localFile:string){
  if(fs.statSync(dest).size!==stat.size)throw Error('video_work_archive_size_mismatch');
  const archive:ArchivedVideo={sha256,bytes:stat.size,storage:'local_original',savedAt:new Date().toISOString()};
  for(const d of matching)recordVideoDelivery(d.input,{archive});
+ for(const r of registered)updateVideoRegistration(r.sourceUrl,{archive,retentionState:'retained',retentionError:undefined});
  await ensureVideoPoster(sha256).catch(()=>{});
  return archive;
 }
@@ -109,7 +116,7 @@ export function syncWechatVideoDraft(record:{input:{kind:string;requestId:string
  return recordVideoDelivery({platform:'wechat',accountId:p.expectedAccount,requestId:p.requestId,sourceUrl:p.sourceUrl,title:p.title,description:p.description,topics:[],aiGenerated:false,mode:'draft'},{state,taskId:record.sessionId,...record.updatedAt?{sourceCreatedAt:record.updatedAt}:{},receipt:record.receipt?.appMsgId?{draftId:String(record.receipt.appMsgId),verifiedAt:typeof record.receipt.verifiedAt==='string'?record.receipt.verifiedAt:undefined}:undefined,error:record.error?.code,provenance:'wechat_native_video_draft'});
 }
 export function retainedVideoPathForSource(sourceUrl:string){
- const record=allVideoDeliveries().find(d=>d.input.sourceUrl===sourceUrl&&d.archive);
+ const record=allVideoDeliveries().find(d=>d.input.sourceUrl===sourceUrl&&d.archive)||registeredVideoWorks().find(r=>r.sourceUrl===sourceUrl&&r.archive);
  if(!record?.archive)return null;
  const file=path.join(videoFileDirectory(),record.archive.sha256+'.mp4');
  try{return fs.statSync(file).size===record.archive.bytes?file:null}catch{return null}
@@ -127,4 +134,28 @@ export async function ensureVideoPoster(sha256:string){
   await promisify(execFile)('ffmpeg',['-nostdin','-v','error','-ss','0','-i',path.join(videoFileDirectory(),sha256+'.mp4'),'-frames:v','1','-vf','scale=640:640:force_original_aspect_ratio=decrease','-q:v','3','-y',temp],{timeout:20000,maxBuffer:65536});
   fs.chmodSync(temp,0o600);fs.renameSync(temp,target);return target;
  }finally{fs.rmSync(temp,{force:true})}
+}
+
+export type WorkRegistration={id:string;sourceUrl:string;title:string;description:string;topics:string[];aiGenerated:boolean;origin:'generated'|'historical'|'material'|'publisher';createdAt:string;updatedAt:string;archive?:ArchivedVideo;retentionState?:'registered'|'queued'|'running'|'retained'|'failed';retentionError?:string;reportedPlatformUrl?:string};
+const workRecords=()=>path.join(root(),'works');
+export function registeredVideoWorks():WorkRegistration[]{
+ let files:string[];try{files=fs.readdirSync(workRecords())}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return [];throw e}
+ return files.filter(f=>/^[a-f0-9]{64}\.json$/.test(f)).map(f=>{try{return JSON.parse(fs.readFileSync(path.join(workRecords(),f),'utf8')) as WorkRegistration}catch{throw Error('video_work_registration_unreadable')}});
+}
+export function registerVideoWork(input:{sourceUrl:string;title:string;description?:string;topics?:string[];aiGenerated:boolean;origin?:WorkRegistration['origin'];reportedPlatformUrl?:string},publisherCapture=false){
+ const sourceUrl=videoSourceUrl(input.sourceUrl);
+ if(typeof input.title!=='string'||!input.title.trim()||input.title.length>500||typeof input.aiGenerated!=='boolean'||(input.description||'').length>20000||input.topics?.some(t=>typeof t!=='string'||t.length>100))throw Error('video_work_registration_invalid');
+ if(input.reportedPlatformUrl&&!/^https:\/\/(?:www\.)?(?:douyin\.com\/video\/[0-9]+|mp\.weixin\.qq\.com\/s\/[A-Za-z0-9_-]+)\/?$/.test(input.reportedPlatformUrl))throw Error('video_work_platform_reference_invalid');
+ const id=hash(sourceUrl),file=path.join(workRecords(),id+'.json');let previous:WorkRegistration|undefined;
+ try{previous=JSON.parse(fs.readFileSync(file,'utf8'))}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw Error('video_work_registration_unreadable')}
+ if(previous){
+  if(!publisherCapture&&(previous.title!==input.title||previous.description!==(input.description||'')||previous.aiGenerated!==input.aiGenerated||JSON.stringify(previous.topics)!==JSON.stringify(input.topics||[])))throw Error('video_work_registration_conflict');
+  return {record:previous,reused:true};
+ }
+ const now=new Date().toISOString(),record:WorkRegistration={id,sourceUrl,title:input.title,description:input.description||'',topics:input.topics||[],aiGenerated:input.aiGenerated,origin:input.origin||'generated',createdAt:now,updatedAt:now,retentionState:'registered',...(input.reportedPlatformUrl?{reportedPlatformUrl:input.reportedPlatformUrl}:{})};
+ atomic(file,record);return {record,reused:false};
+}
+export function updateVideoRegistration(sourceUrl:string,patch:Partial<Pick<WorkRegistration,'archive'|'retentionState'|'retentionError'>>){
+ const file=path.join(workRecords(),hash(sourceUrl)+'.json');const record=JSON.parse(fs.readFileSync(file,'utf8')) as WorkRegistration;
+ atomic(file,{...record,...patch});return {...record,...patch};
 }

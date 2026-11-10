@@ -280,3 +280,6 @@ WeChat manual VNC handoff MCP, task-owned popup draft navigation and real read-o
 - [WECHAT-SETTINGS-20261105] P0/P1/P2 优化进行中：账号名默认署名、提交设置和覆盖警示、工具清单哈希已在源码实现，尚未部署；存在等待管理员扫码的活动会话，不重启。原创声明、文章声明、发布时合集、合集创建、贴图公开验收、持久租约诊断与上游回读仍待实现和验证。不得把提交设置当作微信回读。
 
 - [WECHAT-SETTINGS-20261105] 署名默认、提交设置警示、工具哈希 0.5.5 已部署并登记 Hub；插件自动 0.5.5，Skill 尚为 0.5.4。其余 P0/P1/P2 仍在进行，不代表全部完成。旧扫码任务因用户授权重启中断，须使用原请求对账。
+
+## WORKS-002 — In Progress
+独立作品入库/历史补录MCP；按作品ID创建公众号视频草稿并回写。公众号只需草稿，不开发公开发表。日志dev-log/2026-11-10-independent-video-works.md。

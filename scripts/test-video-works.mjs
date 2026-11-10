@@ -110,3 +110,48 @@ test('WeChat reuse reads retained original when public source is gone, still che
  assert.equal(fs.readFileSync(result.filename,'utf8'),'full-resolution-fixture');assert.equal(result.size,fs.statSync(source).size);await result.cleanup();assert.equal(fs.existsSync(result.filename),false);assert.equal(fs.existsSync(source),true,'temporary cleanup must preserve permanent archive');
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });
+
+test('independent works register without fake platform deliveries and reuse a retained original for idempotent WeChat drafts',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'independent-work-test-')),old=process.env.VIDEO_WORKS_DATA_DIR;
+ process.env.VIDEO_WORKS_DATA_DIR=dir;
+ let store;const calls=[];let status='completed';
+ const native={callWechatMediaTool:async(name,input)=>{
+  calls.push({name,input});
+  if(name==='wechat_media_draft_status')return{found:true,status,phase:status==='unknown'?'process_restarted':'completed',receipt:status==='completed'?{appMsgId:'1000001',saveResponseAccepted:true,nativeEditorReloadVerified:true}:undefined};
+  store.syncWechatVideoDraft({input:{kind:'video',requestId:input.requestId,expectedAccount:input.expectedAccount,sourceUrl:input.videoUrl,title:input.title,description:input.description},state:'completed',receipt:{appMsgId:'1000001',saveResponseAccepted:true,nativeEditorReloadVerified:true}});
+  return{found:true,status:'completed',receipt:{appMsgId:'1000001',saveResponseAccepted:true,nativeEditorReloadVerified:true}};
+ }};
+ try{
+ const load=loader({'lib/workflow/wechat-media-service.ts':native});store=load('lib/video-works/store.ts');const service=load('lib/video-works/service.ts'),contract=load('lib/video-works/mcp-contract.ts');
+ const input={sourceUrl:'https://cdn.vyibc.com/unpublished-fixture.mp4',title:'这个原始标题超过二十字需要代理自动重新拟定标题',description:'原始文案保留',topics:['原创'],aiGenerated:true,confirmRecord:true};
+ const registered=service.registerIndependentWork(input);
+ assert.equal(registered.published,false);assert.equal(store.allVideoDeliveries().length,0,'registration must never fabricate a platform delivery');
+ assert.equal(store.listVideoWorks({state:'registered'}).total,1);
+ assert.equal(store.listVideoWorks({platform:'douyin'}).total,0,'platform MCP must not expose unpublished independent works');
+ const file=path.join(dir,'test.mp4');fs.writeFileSync(file,'original byte fidelity fixture');
+ await store.retainVideoOriginal(input.sourceUrl,file);
+ const w=store.getVideoWork(registered.work.id);assert(w.archive);assert.equal(w.deliveries.length,0);
+ assert.equal(service.registerIndependentWork(input).reused,true);assert.equal(store.listVideoWorks().total,1);
+ store.syncWechatVideoDraft({input:{kind:'video',requestId:'existing-account-proof',expectedAccount:'gh_123456789012',sourceUrl:'https://cdn.vyibc.com/account-proof.mp4',title:'已验证账号',description:''},state:'completed',receipt:{appMsgId:'999999',saveResponseAccepted:true,nativeEditorReloadVerified:true}});
+ const plan=service.prepareWorkWechatDraft({workId:w.id});
+ assert.equal(plan.expectedAccount,'gh_123456789012');assert.equal(plan.needsAdaptation,true);assert.equal(plan.videoUrl,input.sourceUrl);
+ const adapt=await service.createWorkWechatDraft({workId:w.id,confirmDraft:true});assert.equal(adapt.created,false);assert.equal(calls.length,0,'overlong metadata must be adapted before browser side effects');
+ const draftInput={workId:w.id,title:'独立作品视频草稿测试',description:'代理适配的公众号文案',confirmDraft:true};
+ await assert.rejects(service.createWorkWechatDraft({...draftInput,confirmDraft:false}),/confirmation/);
+ const first=await service.createWorkWechatDraft(draftInput),second=await service.createWorkWechatDraft(draftInput);
+ assert.equal(first.publiclyPublished,false);assert.equal(second.reused,true);assert.equal(first.requestId,second.requestId);
+ assert.equal(calls.filter(c=>c.name==='wechat_create_video_draft').length,1,'the same work and metadata must not create a second draft');
+ assert.equal(store.getVideoWork(w.id).title,input.title,'platform adaptation must preserve original master title');
+ assert.equal(store.getVideoWork(w.id).deliveries[0].state,'draft_saved');
+ status='unknown';await service.createWorkWechatDraft(draftInput);
+ assert.equal(calls.filter(c=>c.name==='wechat_create_video_draft').length,1,'unknown native save cannot be resubmitted');
+ const hist=service.backfillIndependentWork({...input,sourceUrl:'https://cdn.vyibc.com/historical-fixture.mp4',platformUrl:'https://www.douyin.com/video/1234567890123456789'});
+ assert.equal(hist.externalActionsTriggered,false);assert.equal(hist.work.referenceEvidence,'reported_not_verified');assert.equal(hist.work.deliveries.length,0);
+ assert.throws(()=>service.backfillIndependentWork({taskId:'../../secret',confirmRecord:true}),/invalid/);
+ assert(!contract.VIDEO_WORKS_TOOLS.some(t=>t.name.includes('publish')),'independent work MCP must expose no public publication tool');
+ const request=token=>new Request('https://auto-parse-v2.vyibc.com/api/video-works/mcp',{headers:{authorization:'Bearer '+token}});
+ assert.equal(contract.authorizeVideoWorksMcp(request('fixture'),{VIDEO_WORKS_MCP_TOKEN:'fixture'}),200);
+ assert.equal(contract.authorizeVideoWorksMcp(request('platform-douyin'),{VIDEO_WORKS_MCP_TOKEN:'fixture'}),401);
+ assert.equal(contract.authorizeVideoWorksMcp(request('fixture'),{}),503);
+ }finally{if(old===undefined)delete process.env.VIDEO_WORKS_DATA_DIR;else process.env.VIDEO_WORKS_DATA_DIR=old;fs.rmSync(dir,{recursive:true,force:true})}
+});
