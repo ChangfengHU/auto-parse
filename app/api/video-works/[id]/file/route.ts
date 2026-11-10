@@ -5,10 +5,10 @@ import {workScope} from '@/lib/video-works/auth';
 import {getVideoWork,videoFileDirectory} from '@/lib/video-works/store';
 export const runtime='nodejs';export const dynamic='force-dynamic';
 export async function GET(req:Request,ctx:{params:Promise<{id:string}>}){
- const scope=workScope(req);if(!scope)return new Response(null,{status:401});
+ const scope=workScope(req)||'viewer';
  const {id}=await ctx.params;
  if(!/^[a-f0-9]{64}$/.test(id))return new Response(null,{status:404});
- const work=getVideoWork(id,scope==='admin'?undefined:'douyin');
+ const work=getVideoWork(id,scope==='douyin'?'douyin':undefined);
  if(!work?.archive)return new Response(null,{status:404});
  const file=path.join(videoFileDirectory(),work.archive.sha256+'.mp4');
  let size:number;try{size=fs.statSync(file).size}catch{return new Response(null,{status:404})}

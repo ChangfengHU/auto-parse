@@ -4,11 +4,11 @@ import {callPlatformTool} from '@/lib/workflow/platform-mcp-service';
 export const runtime='nodejs';export const dynamic='force-dynamic';
 const headers={'Cache-Control':'private, no-store'};
 export async function GET(req:Request){
- const scope=workScope(req);if(!scope)return Response.json({error:'请先连接作品中心'},{status:401,headers});
+ const scope=workScope(req)||'viewer';
  try{const p=new URL(req.url).searchParams;
  const state=p.get('state');if(state&&!['reserved','running','prepared','draft_saved','published','failed','unknown'].includes(state))return Response.json({error:'state_invalid'},{status:400,headers});
  const offset=Number(p.get('offset')||0);if(!Number.isSafeInteger(offset)||offset<0)return Response.json({error:'offset_invalid'},{status:400,headers});
- const result=listVideoWorks({state:state as NonNullable<Parameters<typeof listVideoWorks>[0]>['state']||undefined,platform:scope==='admin'?(p.get('platform')||undefined):'douyin',q:(p.get('q')||'').slice(0,300),offset,limit:20});
+ const result=listVideoWorks({state:state as NonNullable<Parameters<typeof listVideoWorks>[0]>['state']||undefined,platform:scope==='douyin'?'douyin':(p.get('platform')||undefined),q:(p.get('q')||'').slice(0,300),offset,limit:20});
  return Response.json({...result,scope},{headers});}catch{return Response.json({error:'作品档案读取失败，未把错误当作空列表'},{status:500,headers})}
 }
 export async function POST(req:Request){

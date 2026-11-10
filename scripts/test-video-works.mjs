@@ -78,7 +78,8 @@ test('work center: scoped login, forged cookies, request origin and platform per
  assert.equal(auth.workScope(new Request('https://auto-parse-v2.vyibc.com',{headers:{cookie:'__Host-video-work-session='+payload+'.'+sig}})),null);
  let calls=0;
  const api=loader({'lib/video-works/auth.ts':auth,'lib/video-works/store.ts':{listVideoWorks:o=>({items:[],scopePlatform:o.platform}),getVideoWork:()=>({sourceUrl:'https://resource.vyibc.com/test.mp4',deliveries:[{input:{title:'test',description:'text',topics:[],aiGenerated:true}}]})},'lib/workflow/platform-mcp-service.ts':{callPlatformTool:async()=>{calls++;return {ok:true}}}})('app/api/video-works/route.ts');
- assert.equal((await api.GET(req('bad'))).status,401);
+ assert.equal((await api.GET(req('bad'))).status,200,'owner requested direct read without connection');
+ assert.equal((await api.POST(new Request('https://auto-parse-v2.vyibc.com/api/video-works',{method:'POST',headers:{origin:'https://auto-parse-v2.vyibc.com','content-type':'application/json'},body:JSON.stringify({action:'prepare',confirmPrepare:true})}))).status,401,'public reading must not authorize any write');
  assert.equal((await(await api.GET(req('test-douyin-only'))).json()).scopePlatform,'douyin');
  const post=(platform,token='test-douyin-only')=>new Request('https://auto-parse-v2.vyibc.com/api/video-works',{method:'POST',headers:{authorization:'Bearer '+token,origin:'https://auto-parse-v2.vyibc.com','content-type':'application/json'},body:JSON.stringify({action:'prepare',confirmPrepare:true,platform,workId:'a'.repeat(64),accountId:'account',requestId:'request',title:'test'})});
  assert.equal((await api.POST(post('wechat'))).status,403);assert.equal(calls,0);
@@ -86,13 +87,13 @@ test('work center: scoped login, forged cookies, request origin and platform per
  assert.equal((await api.POST(post('wechat','test-admin-only'))).status,200);assert.equal(calls,2);
  }finally{if(old===undefined)delete process.env.AUTO_PARSE_ADMIN_TOKEN;else process.env.AUTO_PARSE_ADMIN_TOKEN=old}
 });
-test('original download is private, supports byte ranges, and cannot read arbitrary paths',async()=>{
+test('original download is directly viewable, supports byte ranges, and cannot read arbitrary paths',async()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'video-work-file-test-')),name='b'.repeat(64),work={archive:{sha256:name,bytes:10}};
  fs.writeFileSync(path.join(dir,name+'.mp4'),'0123456789');
  try{
- const api=loader({'lib/video-works/auth.ts':{workScope:req=>req.headers.get('authorization')==='Bearer fixture'?'douyin':null},'lib/video-works/store.ts':{videoFileDirectory:()=>dir,getVideoWork:(id,scope)=>{assert.equal(scope,'douyin');return id==='a'.repeat(64)?work:null}}})('app/api/video-works/[id]/file/route.ts');
+ const api=loader({'lib/video-works/auth.ts':{workScope:req=>req.headers.get('authorization')==='Bearer fixture'?'douyin':null},'lib/video-works/store.ts':{videoFileDirectory:()=>dir,getVideoWork:(id,scope)=>{if(scope!==undefined)assert.equal(scope,'douyin');return id==='a'.repeat(64)?work:null}}})('app/api/video-works/[id]/file/route.ts');
  const get=(range,authorized=true,id='a'.repeat(64))=>api.GET(new Request('https://auto-parse-v2.vyibc.com/api/video-works/'+id+'/file',{headers:{...(authorized?{authorization:'Bearer fixture'}:{}),...(range?{range}:{})}}),{params:Promise.resolve({id})});
- assert.equal((await get(null,false)).status,401);
+ assert.equal((await get(null,false)).status,200,'owner requested direct original viewing');
  assert.equal((await get(null,true,'../private')).status,404);
  const partial=await get('bytes=2-5');assert.equal(partial.status,206);assert.equal(partial.headers.get('content-range'),'bytes 2-5/10');assert.equal(await partial.text(),'2345');
  const suffix=await get('bytes=-3');assert.equal(await suffix.text(),'789');
