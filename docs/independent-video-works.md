@@ -44,3 +44,7 @@ Hub登记预览返回hub_connection_binding_unavailable，暂未登记MCP/组成
 - 官方MCP列表独立读到两个新标题和不同mediaId；另有旧“API视频验证未通过勿发布”探测图文，总计3条，本次有效新增视频草稿为2条。未删除旧探测稿，未公开发表。
 - 页面保存成功截图：机主/tmp/wechat-two-new-drafts-20261110.jpg。保留原请求、视频原件及投递记录，重试先查原状态。
 - 本轮仅补充文档和真实验收证据，不改运行代码、不重启服务。此前编译/回归结果见前文；没有为文档改动重复构建。Hub独立MCP登记和主插件升级仍待连接绑定问题解决，源Skill更新不代表安装包已再发布或客户端已更新。GitHub推送此前被自动审核拒绝，本轮不重试，只保存远端本地提交。
+
+## 2026-11-10 能力广场推送进展（UTC 18:13）
+用户明确要求推送能力广场。现有vyibc-auto-publish为0.6.1；查询video-work无已登记记录。独立MCP0.1.1登记预检requestId=auto-parse-video-works-mcp-v011-20261110，返回hub_connection_binding_unavailable；查询该请求registration_not_found，未登记。目标https://auto-parse-v2.vyibc.com/api/video-works/mcp，引用hub:connection:fleet-owner:auto-parse-video-works。只读金库元数据表明此键存在，未读取该绑定秘密。为定位源码位置而读取宽泛boss:registry被自动审核拒绝：用户仅授权能力广场登记，该配置可能包含无关秘密；停止该路径，未改写任何连接或降低服务鉴权。
+完整单文件Skill校验通过；已发布video-work-center 0.1.2，requestId=video-work-center-hub-v012-20261110；ZIP https://skill.vyibc.com/video-work-center/mcp-release/video-work-center-hub-v012-20261110/video-work-center-20261110181333.zip ，SHA256 c97fc4633900d8330aae9a42183b988628fb21b2385b63fe2b7d21ce3233bc13，安装器别名https://skill.vyibc.com/install-video-work-center.sh。发布器回执hubRegistration=not_requested，不等同广场登记、插件打包或ChatGPT推送。待授权仅检查并修复上述单条连接后，复用原MCP登记请求，登记Skill时依赖固定MCP0.1.1，再组合插件。未修改现有主插件，未部署业务代码或重启服务，未推送GitHub。
