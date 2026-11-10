@@ -25,3 +25,9 @@
 私有视频草稿测试《Clawd交朋友》请求 workdraft-15f568eceaef73529b013c0edf1baa5f26716f04ae1420de：failed/checking_account，未上传、未保存。独立临时页只读确认公众号网页登录页，无当前账号；官方API账号状态不代表网页登录有效。待用户登录后按原请求恢复核查，不更换ID。
 Hub登记预览返回hub_connection_binding_unavailable，暂未登记MCP/组成插件。为诊断读取Hub绑定实际秘密值被自动审核拒绝；未继续读取，不得宣称Hub升级完成。独立Skill安装包已发布：https://skill.vyibc.com/install-video-work-center.sh ，SHA256 d0f861dda2bbcb4c20302c9806c2c1e6a29f891c88d1b03e398943a66cb983ea；安装包不包含MCP凭据。既有发布插件仍0.6.1。
 运维补录必须以服务用户claude运行CLI，禁止root写台账；本次补录产生的文件所有者已修复，公开列表恢复200。
+
+## 网页草稿操作（0.1.1）
+卡片与详情新增“存到公众号草稿”，直接复用原片、默认公众号和文案。新接口 /api/video-works/[id]/wechat-draft 只接收确认、标题、正文；调用与MCP相同的prepare/create/status服务，不提供发布参数、替换来源或切换目标账号。匿名与抖音范围连接不可操作，受限网页会话也不能调用旧平台准备接口。
+通过已认证MCP create_web_access(confirmWebAccess=true)签发仅一次10分钟入口，兑换最长8小时HttpOnly/Secure/SameSite=Strict cookie。入口片段在兑换前从地址栏移除，服务只存随机码摘要，不把任何后台服务凭据传给浏览器。入口只交给已授权所有者，不写日志。可退出操作，直接浏览不受影响。页面每5秒只查询处理中任务，失败和未知停止重建；保存响应及原生编辑器回读才显示成功。字数超限要求调整文案，不机械截断，不压缩原片。
+发布记录auto-parse-work-web-v011b-20261110，源码de8824b；17项相关隔离回归、针对性TypeScript、ESLint及生产构建通过。真实页面复用旧草稿100001831，无新增投递；查看Clawd原失败记录，不重试。手机390px检查并修复操作区位置，Escape关闭和恢复桌面验证通过。临时viewport已重置，页面留给用户，当前浏览器已启用8小时操作会话。
+网页退出公众号登录导致新建草稿仍未验收；自动审核拒绝再次点击该失败作品保存按钮，未绕过，改为只读查看。需用户登录后继续。Hub独立MCP连接及主插件升级仍未完成；Skill安装包0.1.1已发布，SHA256 a44714d9a59e66de75bd22c803bd4c5d8c562535e9e3ff186b39e71e4af2ad56，不表示客户端已自动安装。
