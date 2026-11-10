@@ -4,13 +4,6 @@
 
 ## In Progress
 
-- [STORAGE-001] 视频作品中心与抖音发布MCP长期留存
-  Status: In Progress
-  Owner: codex
-  Updated: 2026-11-09
-  Log: dev-log/2026-11-09-video-work-center.md
-  Next: 服务及Hub版本已上线；137项回归和线上接口验收通过。等待用户授权本次浏览器登录或自行连接后完成已认证页面走查；不得实发测试。
-
 
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
@@ -160,6 +153,15 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+
+- [STORAGE-001] 视频作品中心与抖音发布MCP长期留存
+  Status: Done
+  Owner: codex
+  Updated: 2026-11-09
+  Log: dev-log/2026-11-09-video-work-center.md
+  Result: 视频作品中心免连接查看、小工具直达、抖音MCP0.2.0和插件0.6.1已上线；原片及投递自动留存，UI与接口验收通过；无实发测试。
+
+
 
 - [WECHAT-FORMATS-002] 公众号格式、GIF位置和视频播客草稿实测指南
   Status: Done
