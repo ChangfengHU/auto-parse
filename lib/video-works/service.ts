@@ -6,6 +6,7 @@ import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {allVideoDeliveries,getVideoWork,listVideoWorks,registerVideoWork,updateVideoRegistration,retainVideoOriginal,retainedVideoPathForSource,syncVideoWorkflowTask,syncWechatVideoDraft,videoSourceUrl} from './store';
 import {callWechatMediaTool} from '../workflow/wechat-media-service';
+import {issueVideoWorksWebAccess} from './web-access';
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
 const pending=new Map<string,string>();let running=0;
 function enqueue(sourceUrl:string){
@@ -62,7 +63,7 @@ export function prepareWorkWechatDraft(input:Record<string,unknown>){
  const title=typeof input.title==='string'?input.title:old?.input.title||w.title;
  const description=typeof input.description==='string'?input.description:old?.input.description??w.description??'';
  const needsAdaptation=!title.trim()||title!==title.trim()||/[\r\n]/.test(title)||Array.from(title).length>20||Array.from(description).length>300;
- const requestId='workdraft-'+hash(JSON.stringify([w.sha256||w.sourceUrl,expectedAccount,title,description])).slice(0,48);
+ const requestId=w.deliveries.find(d=>d.input.platform==='wechat'&&d.input.accountId===expectedAccount&&d.input.title===title&&d.input.description===description)?.input.requestId||'workdraft-'+hash(JSON.stringify([w.sha256||w.sourceUrl,expectedAccount,title,description])).slice(0,48);
  return {workId:w.id,expectedAccount,requestId,videoUrl:w.sourceUrl,title,description,needsAdaptation,originalRetained:!!w.archive,originalBytes:w.archive?.bytes||null,limits:{title:20,description:300,bytes:104857600},instructions:'Use stored source and known account. Agent rewrites overlong metadata, preserving meaning; never ask user to repeat existing assets. Saving only, never publicly publish.'};
 }
 export async function createWorkWechatDraft(input:Record<string,unknown>){
@@ -85,6 +86,7 @@ export async function getWorkWechatDrafts(input:Record<string,unknown>){
  return {workId:w.id,items,publiclyPublished:false,completion:'completed with saveResponseAccepted and nativeEditorReloadVerified'};
 }
 export async function callVideoWorksTool(name:string,input:Record<string,unknown>){
+ if(name==='create_web_access')return issueVideoWorksWebAccess(input);
  if(name==='list_video_works')return listVideoWorks({q:input.query as string|undefined,state:input.state as NonNullable<Parameters<typeof listVideoWorks>[0]>['state'],platform:input.platform as string|undefined,offset:input.offset as number|undefined,limit:input.limit as number|undefined});
  if(name==='get_video_work')return {work:work(input.workId),retentionProcess:'running/queued can require re-register after restart; local retention retry never republishes'};
  if(name==='register_video_work')return registerIndependentWork(input);

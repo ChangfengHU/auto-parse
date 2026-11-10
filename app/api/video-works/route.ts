@@ -13,6 +13,7 @@ export async function GET(req:Request){
 }
 export async function POST(req:Request){
  const scope=workScope(req);if(!scope)return Response.json({error:'unauthorized'},{status:401,headers});
+ if(scope==='works')return Response.json({error:'网页操作会话仅用于专用公众号草稿接口'},{status:403,headers});
  if(!workSameOrigin(req))return Response.json({error:'origin_not_allowed'},{status:403,headers});
  if(Number(req.headers.get('content-length'))>20000)return Response.json({error:'request_too_large'},{status:413,headers});
  try{

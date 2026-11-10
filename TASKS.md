@@ -285,3 +285,6 @@ WeChat manual VNC handoff MCP, task-owned popup draft navigation and real read-o
 
 WORKS-002验证状态：独立入库、历史补录、原片留存与页面已上线；138项相关回归通过；Skill安装包0.1.0已发布。公众号网页登录失效，真实视频草稿尚未完成。Hub登记预览失败，连接绑定未核验，不宣称插件已更新。
 独立作品入库/历史补录MCP；按作品ID创建公众号视频草稿并回写。公众号只需草稿，不开发公开发表。日志dev-log/2026-11-10-independent-video-works.md。
+
+## FRONTEND-WORKS-003 — In Progress
+页面一键保存公众号视频草稿，与独立MCP共用执行、去重和回执；独立限时网页操作会话，无服务凭据进入前端。保留公开查看与正式工作流。

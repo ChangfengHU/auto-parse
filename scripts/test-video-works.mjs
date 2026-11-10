@@ -85,6 +85,7 @@ test('work center: scoped login, forged cookies, request origin and platform per
  assert.equal((await api.POST(post('wechat'))).status,403);assert.equal(calls,0);
  assert.equal((await api.POST(post('douyin'))).status,200);assert.equal(calls,1);
  assert.equal((await api.POST(post('wechat','test-admin-only'))).status,200);assert.equal(calls,2);
+ const restricted=loader({'lib/video-works/auth.ts':{workScope:()=> 'works',workSameOrigin:()=>true},'lib/video-works/store.ts':{},'lib/workflow/platform-mcp-service.ts':{callPlatformTool:async()=>{calls++;return {}}}})('app/api/video-works/route.ts');assert.equal((await restricted.POST(post('douyin'))).status,403);assert.equal(calls,2,'works cookie cannot call legacy platform preparation');
  }finally{if(old===undefined)delete process.env.AUTO_PARSE_ADMIN_TOKEN;else process.env.AUTO_PARSE_ADMIN_TOKEN=old}
 });
 test('original download is directly viewable, supports byte ranges, and cannot read arbitrary paths',async()=>{
@@ -154,4 +155,46 @@ test('independent works register without fake platform deliveries and reuse a re
  assert.equal(contract.authorizeVideoWorksMcp(request('platform-douyin'),{VIDEO_WORKS_MCP_TOKEN:'fixture'}),401);
  assert.equal(contract.authorizeVideoWorksMcp(request('fixture'),{}),503);
  }finally{if(old===undefined)delete process.env.VIDEO_WORKS_DATA_DIR;else process.env.VIDEO_WORKS_DATA_DIR=old;fs.rmSync(dir,{recursive:true,force:true})}
+});
+
+test('web draft access is short lived, one use, works-only, and cannot become platform/admin credentials',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'video-work-web-test-')),oldDir=process.env.VIDEO_WORKS_DATA_DIR,oldKey=process.env.VIDEO_WORKS_MCP_TOKEN;
+ process.env.VIDEO_WORKS_DATA_DIR=dir;process.env.VIDEO_WORKS_MCP_TOKEN='unit-only-works-key';
+ try{
+ const load=loader({'lib/workflow/platform-mcp-contract.ts':{authorizePlatformMcp:()=>401}});
+ const access=load('lib/video-works/web-access.ts'),auth=load('lib/video-works/auth.ts'),session=load('app/api/video-works/session/route.ts');
+ assert.throws(()=>access.issueVideoWorksWebAccess({}),/confirmation/);
+ const link=access.issueVideoWorksWebAccess({confirmWebAccess:true}),u=new URL(link.url),code=new URLSearchParams(u.hash.slice(1)).get('access');
+ assert.equal(u.search,'');assert.equal(link.oneUse,true);assert(!link.url.includes(process.env.VIDEO_WORKS_MCP_TOKEN));
+ assert(Date.parse(link.expiresAt)-Date.now()<=600000);assert(Date.parse(link.sessionExpiresAt)-Date.now()<=28800000);
+ const paths=fs.readdirSync(path.join(dir,'web-access'));assert.equal(paths.length,1);assert(!fs.readFileSync(path.join(dir,'web-access',paths[0]),'utf8').includes(code),'only code digest persisted');
+ const request=(body,origin='https://auto-parse-v2.vyibc.com')=>new Request('https://auto-parse-v2.vyibc.com/api/video-works/session',{method:'POST',headers:{origin,'content-type':'application/json'},body:JSON.stringify(body)});
+ assert.equal((await session.POST(request({code},'https://evil.test'))).status,403,'cross-origin exchange rejected without consuming grant');
+ const redeemed=await session.POST(request({code}));assert.equal(redeemed.status,200);
+ const cookie=redeemed.headers.get('set-cookie');assert(cookie.includes('HttpOnly'));assert(cookie.includes('Secure'));assert(cookie.includes('SameSite=Strict'));
+ const req=new Request(u.origin,{headers:{cookie:cookie.split(';')[0]}});
+ assert.equal(auth.workScope(req),'works');assert.equal(auth.workBearerScope(req),null,'browser cookie is not an admin/MCP credential');
+ assert.equal((await session.POST(request({code}))).status,401,'one use code cannot be replayed');
+ assert.equal(auth.workScope(new Request(u.origin,{headers:{cookie:cookie.split(';')[0]+'tampered'}})),null);
+ const record=access.issueVideoWorksWebAccess({confirmWebAccess:true}),expiredCode=new URLSearchParams(new URL(record.url).hash.slice(1)).get('access'),f=path.join(dir,'web-access',createHash('sha256').update(expiredCode).digest('hex')+'.json');
+ fs.writeFileSync(f,JSON.stringify({expires:Date.now()-1,sessionExpires:Date.now()+60000,purpose:'wechat_video_draft_only'}));
+ assert.throws(()=>access.consumeVideoWorksWebAccess(expiredCode),/expired/);
+ assert.equal((await session.DELETE(new Request(u.origin,{method:'DELETE',headers:{origin:'https://evil.test'}}))).status,403);
+ const logout=await session.DELETE(new Request(u.origin,{method:'DELETE',headers:{origin:u.origin}}));assert(logout.headers.get('set-cookie').includes('Max-Age=0'));
+ }finally{if(oldDir===undefined)delete process.env.VIDEO_WORKS_DATA_DIR;else process.env.VIDEO_WORKS_DATA_DIR=oldDir;if(oldKey===undefined)delete process.env.VIDEO_WORKS_MCP_TOKEN;else process.env.VIDEO_WORKS_MCP_TOKEN=oldKey;fs.rmSync(dir,{recursive:true,force:true})}
+});
+test('web draft API and MCP share business operations; anonymous, CSRF and public publish payloads fail closed',async()=>{
+ let calls=0,captured;const plan={workId:'a'.repeat(64),expectedAccount:'gh_123456789012',title:'原片标题',description:'原文案',requestId:'stable-existing'};
+ const service={prepareWorkWechatDraft:()=>plan,getWorkWechatDrafts:async()=>({items:[]}),createWorkWechatDraft:async input=>{calls++;captured=input;return{requestId:'stable-existing',result:{status:'reserved'},publiclyPublished:false}}};
+ const api=loader({'lib/video-works/auth.ts':{workScope:req=>req.headers.get('x-test-scope'),workSameOrigin:req=>req.headers.get('origin')==='https://auto-parse-v2.vyibc.com'},'lib/video-works/service.ts':service})('app/api/video-works/[id]/wechat-draft/route.ts');
+ const ctx={params:Promise.resolve({id:plan.workId})},request=(scope,p={confirmDraft:true},origin='https://auto-parse-v2.vyibc.com')=>new Request('https://auto-parse-v2.vyibc.com/api/video-works/'+plan.workId+'/wechat-draft',{method:'POST',headers:{...(scope?{'x-test-scope':scope}:{}),origin,'content-type':'application/json'},body:JSON.stringify(p)});
+ assert.equal((await api.POST(request(null),ctx)).status,401);assert.equal((await api.POST(request('douyin'),ctx)).status,401);
+ assert.equal((await api.POST(request('works',{},'https://evil.test'),ctx)).status,403);assert.equal(calls,0);
+ assert.equal((await api.POST(request('works',{confirmDraft:true,publish:true}),ctx)).status,409);
+ assert.equal((await api.POST(request('works',{confirmDraft:true,expectedAccount:'other'}),ctx)).status,409);
+ assert.equal((await api.POST(request('works',{confirmDraft:true,videoUrl:'https://evil.test/other.mp4'}),ctx)).status,409);
+ assert.equal((await api.POST(request('works',{confirmDraft:false}),ctx)).status,409);assert.equal(calls,0);
+ const result=await api.POST(request('works',{confirmDraft:true,title:'页面改写',description:'正文'}),ctx);assert.equal(result.status,200);assert.equal(calls,1);assert.equal(captured.workId,plan.workId);assert.equal(captured.confirmDraft,true);assert.equal(captured.expectedAccount,undefined,'page cannot choose another account');
+ assert.equal((await api.GET(new Request('https://auto-parse-v2.vyibc.com',{headers:{'x-test-scope':'works'}}),ctx)).status,200);
+ assert.equal((await api.GET(new Request('https://auto-parse-v2.vyibc.com'),ctx)).status,401);assert.equal(calls,1,'status read never creates a second draft');
 });

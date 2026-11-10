@@ -1,6 +1,7 @@
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import {authorizePlatformMcp} from '../workflow/platform-mcp-contract';
-export type WorkScope='admin'|'douyin';
+import {videoWorksWebScope} from './web-access';
+export type WorkScope='admin'|'douyin'|'works';
 const COOKIE='__Host-video-work-session';
 function equal(a:string,b:string){return Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b))}
 const key=()=>process.env.AUTO_PARSE_ADMIN_TOKEN||'';
@@ -10,6 +11,7 @@ export function workBearerScope(req:Request):WorkScope|null{
  return authorizePlatformMcp(req,'douyin')===200?'douyin':null;
 }
 export function workScope(req:Request):WorkScope|null{
+ const operator=videoWorksWebScope(req);if(operator)return operator;
  const bearer=workBearerScope(req);if(bearer)return bearer;
  const cookie=(req.headers.get('cookie')||'').split(';').map(x=>x.trim()).find(x=>x.startsWith(COOKIE+'='))?.slice(COOKIE.length+1);
  if(!cookie||!key())return null;
