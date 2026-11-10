@@ -45,6 +45,9 @@ test('permanent video works: original fidelity, platform isolation, retry confli
  assert.equal(store.allVideoDeliveries().find(d=>d.input.platform==='wechat').state,'unknown');
  store.syncWechatVideoDraft({input:wp,state:'completed',receipt:{appMsgId:'1234',saveResponseAccepted:true,nativeEditorReloadVerified:true}});
  assert.equal(store.allVideoDeliveries().find(d=>d.input.platform==='wechat').state,'draft_saved');
+ store.syncWechatVideoDraft({input:wp,state:'completed',sessionId:'original-browser-session',receipt:{appMsgId:'1234',saveResponseAccepted:true,nativeEditorReloadVerified:true}});
+ store.syncWechatVideoDraft({input:wp,state:'completed',receipt:{appMsgId:'1234',saveResponseAccepted:true,nativeEditorReloadVerified:true}});
+ assert.equal(store.allVideoDeliveries().find(d=>d.input.platform==='wechat').taskId,'original-browser-session','status refresh preserves the original browser task identity');
  assert.equal(store.listVideoWorks().total,1);
  assert.equal(store.listVideoWorks().items[0].deliveries.length,2);
  assert.equal(store.listVideoWorks({platform:'douyin'}).items[0].deliveries.length,1,'scoped tools must not expose other platform metadata');
