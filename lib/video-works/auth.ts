@@ -1,7 +1,7 @@
 import {createHmac,timingSafeEqual} from 'node:crypto';
 import {authorizePlatformMcp} from '../workflow/platform-mcp-contract';
 import {videoWorksWebScope} from './web-access';
-export type WorkScope='admin'|'douyin'|'works'|'works_editor';
+export type WorkScope='admin'|'douyin'|'works'|'works_editor'|'works_publisher';
 const COOKIE='__Host-video-work-session';
 function equal(a:string,b:string){return Buffer.byteLength(a)===Buffer.byteLength(b)&&timingSafeEqual(Buffer.from(a),Buffer.from(b))}
 const key=()=>process.env.AUTO_PARSE_ADMIN_TOKEN||'';

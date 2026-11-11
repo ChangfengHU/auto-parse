@@ -1,3 +1,4 @@
+import {DOUYIN_VIDEO_FIELDS} from './douyin-video-fields';
 import {MEDIA_DRAFT_WORKFLOW} from '../wechat/media-draft';
 import {WECHAT_DRAFT_TOOLS} from '../wechat/draft-contract';
 import {createHmac,timingSafeEqual} from 'node:crypto';
@@ -26,7 +27,7 @@ export function authorizePlatformMcp(req:Request,platform:PublicationPlatform,en
 }
 const shared=new Set(['workflow_capabilities','workflow_list','workflow_get','workflow_open_session','workflow_run_step','workflow_run','workflow_get_session','workflow_stop','workflow_close_session']);
 const string={type:'string',minLength:1};
-const video={accountId:string,videoUrl:string,title:string,description:{type:'string'},topics:{type:'array',maxItems:5,items:string},aiGenerated:{type:'boolean'},requestId:string,cover:{type:'object',properties:{verticalUrl:string,horizontalUrl:string},additionalProperties:false}};
+const video=DOUYIN_VIDEO_FIELDS;
 const tool=(name:string,description:string,properties:Record<string,unknown>,required:string[],readOnly=false)=>({name,description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:readOnly,destructiveHint:!readOnly,openWorldHint:true}});
 export function platformMcpTools(platform:PublicationPlatform){
  const versionTool=tool('get_version','Read this publication MCP server version and verified deployment metadata.',{},[],true);
@@ -49,8 +50,8 @@ export function platformMcpTools(platform:PublicationPlatform){
  if(platform==='douyin')tools.push(
   tool('list_video_works','List permanently retained Douyin video works and delivery history; independent of Fleet and the seven-day workflow cache.',{query:{type:'string',maxLength:300},state:{type:'string',enum:['reserved','running','prepared','draft_saved','published','failed','unknown']},accountId:string,offset:{type:'integer',minimum:0},limit:{type:'integer',minimum:1,maximum:100}},[],true),
   tool('get_video_work','Read one retained Douyin video work, original archive metadata and same-platform deliveries.',{workId:{type:'string',pattern:'^[a-f0-9]{64}$'}},['workId'],true),
-  tool('prepare_video','Prepare a Douyin video through the approved workflow without publishing. Account control/upload requires user authorization.',video,['accountId','videoUrl','title','aiGenerated','requestId']),
-  tool('publish_video','Publish a user-authorized Douyin video once through the approved workflow; preserve requestId and reconcile unknown results.',{...video,confirmPublish:{type:'boolean',const:true}},['accountId','videoUrl','title','aiGenerated','requestId','confirmPublish']),
+  tool('prepare_video','Prepare a Douyin video using workId plus the account/channel content plan, or a direct videoUrl+title. Explicit title/body/topics/cover override inherited content. Normalized publicationInput is returned and durably recorded. No public publication.',video,['accountId','aiGenerated','requestId']),
+  tool('publish_video','Publish a user-authorized Douyin video once. Supply workId to inherit the selected channel/account plan, or direct videoUrl+title. Explicit empty body/topics or cover {} clear defaults. All resolved fields appear in publicationInput and the work archive. Unsupported parameters are rejected. Stable requestId and confirmPublish required; never retry unknown submissions with a new ID.',{...video,confirmPublish:{type:'boolean',const:true}},['accountId','aiGenerated','requestId','confirmPublish']),
   tool('get_video_task','Read a durable Douyin publication task only; creation evidence is not moderation approval.',{taskId:string},['taskId'],true),
   tool('reconcile_video_task','Reconcile an uncertain Douyin task using an exact known work ID. Does not upload or republish.',{taskId:string,awemeId:string},['taskId','awemeId'])
  );

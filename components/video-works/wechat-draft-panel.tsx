@@ -6,8 +6,9 @@ const phases:Record<string,string>={reserved:'等待执行',checking_account:'�
 const messages:Record<string,string>={video_work_web_signin_required:'操作会话尚未启用或已过期，请重新打开MCP提供的限时操作入口。',wechat_default_account_not_unique:'还没有唯一的默认公众号账号，需要先在服务端确认目标账号。',work_original_not_retained_poll_work_first:'原片仍在留存，请稍后查看。',wechat_original_exceeds_100mib_no_automatic_quality_loss:'原片超过公众号当前100 MiB限制，没有自动压缩或降低画质。',video_work_not_found:'这条作品未找到，请刷新作品列表。'};
 function message(code:string){return messages[code]||'操作未完成：'+code}
 const pending=(s?:string)=>s==='reserved'||s==='running';
-export default function WechatDraftPanel({workId,canOperate,autoStart=false,onChanged}:{workId:string;canOperate:boolean;autoStart?:boolean;onChanged:()=>Promise<void>}){
+export default function WechatDraftPanel({workId,canOperate,autoStart=false,onChanged,onDirty}:{workId:string;canOperate:boolean;autoStart?:boolean;onChanged:()=>Promise<void>;onDirty?:(dirty:boolean)=>void}){
  const [plan,setPlan]=useState<Plan|null>(null),[title,setTitle]=useState(''),[description,setDescription]=useState(''),[draft,setDraft]=useState<Draft|null>(null),[loading,setLoading]=useState(false),[submitting,setSubmitting]=useState(false),[error,setError]=useState('');
+ const baseline=useRef('');useEffect(()=>{onDirty?.(!!plan&&JSON.stringify([title,description])!==baseline.current)},[plan,title,description,onDirty]);
  const currentRequest=useRef(''),started=useRef(false),mounted=useRef(true);
  const endpoint='/api/video-works/'+workId+'/wechat-draft';
  const changed=useRef(onChanged);useEffect(()=>{changed.current=onChanged},[onChanged]);
@@ -17,15 +18,15 @@ export default function WechatDraftPanel({workId,canOperate,autoStart=false,onCh
    const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirmDraft:true,title:t,description:d})}),data=await response.json();
    if(!mounted.current)return;if(!response.ok)throw Error(message(data.error||'video_work_operation_failed'));
    if(data.created===false){setError('请将标题调整到20字以内、正文调整到300字以内，再保存。');return}
-   currentRequest.current=data.requestId||'';setDraft(data.result||{status:'unknown',requestId:data.requestId});await changed.current();
+   baseline.current=JSON.stringify([t,d]);onDirty?.(false);currentRequest.current=data.requestId||'';setDraft(data.result||{status:'unknown',requestId:data.requestId});await changed.current();
   }catch(e){if(mounted.current)setError((e instanceof Error?e.message:'请求结果暂未确认')+' 请先查看原任务状态，勿更换文案重复提交。')}
   finally{started.current=false;if(mounted.current)setSubmitting(false)}
- },[endpoint]);
+ },[endpoint,onDirty]);
  useEffect(()=>{
   mounted.current=true;if(!canOperate)return()=>{mounted.current=false};const controller=new AbortController();setLoading(true);
   void (async()=>{try{
    const response=await fetch(endpoint,{cache:'no-store',signal:controller.signal}),data=await response.json();if(!response.ok)throw Error(message(data.error||'video_work_operation_failed'));if(controller.signal.aborted)return;
-   setPlan(data.plan);setTitle(data.plan.title);setDescription(data.plan.description);currentRequest.current=data.plan.requestId;
+   baseline.current=JSON.stringify([data.plan.title,data.plan.description]);setPlan(data.plan);setTitle(data.plan.title);setDescription(data.plan.description);currentRequest.current=data.plan.requestId;
    const existing=data.drafts.items.find((d:Draft)=>d.requestId===data.plan.requestId);if(existing)setDraft(existing);
    if(autoStart&&!data.plan.needsAdaptation&&data.plan.originalRetained&&data.plan.originalBytes<=104857600&&!controller.signal.aborted)await create(data.plan.title,data.plan.description);
   }catch(e){if(!controller.signal.aborted)setError(e instanceof Error?e.message:'读取草稿状态失败')}finally{if(!controller.signal.aborted)setLoading(false)}})();
@@ -48,7 +49,7 @@ export default function WechatDraftPanel({workId,canOperate,autoStart=false,onCh
   <label className="block text-sm">公众号正文 <span className={Array.from(description).length>300?'text-red-700':'text-muted-foreground'}>{Array.from(description).length}/300</span><textarea rows={4} value={description} disabled={locked} onChange={e=>{setDescription(e.target.value);setDraft(null)}} className="block w-full mt-1 border border-border rounded-lg bg-background px-3 py-2 disabled:opacity-60"/></label>
   {invalid&&<p className="text-sm text-amber-800">公众号标题最多20字，正文最多300字。原文已保留，请调整本次草稿文案。</p>}
   {(plan.originalBytes||0)>104857600&&<p className="text-sm text-amber-800">原片超过100 MiB，暂不能保存；未自动压缩。</p>}
-  <button type="button" onClick={()=>void create(title,description)} disabled={locked||invalid||!plan.originalRetained||(plan.originalBytes||0)>104857600||draft?.status==='unknown'} className="w-full rounded-lg bg-primary text-primary-foreground py-3 text-sm font-semibold disabled:opacity-50">{submitting?'正在提交…':pending(draft?.status)?'正在保存，请稍候':saved?'查看已保存草稿':draft?.status==='failed'?'查询原草稿任务':'保存视频草稿'}</button>
+  <button type="button" onClick={()=>void (saved||draft?.status==='failed'?refresh():create(title,description))} disabled={locked||invalid||!plan.originalRetained||(plan.originalBytes||0)>104857600||draft?.status==='unknown'} className="vw-btn primary w-full py-3 text-sm font-semibold disabled:opacity-50">{submitting?'正在提交…':pending(draft?.status)?'正在保存，请稍候':saved?'查看已保存草稿':draft?.status==='failed'?'查询原草稿任务':'保存视频草稿'}</button>
   </>}
   {draft&&<div role="status" className={'rounded-lg border p-3 text-sm space-y-2 '+(saved?'border-green-300 bg-green-50 text-green-900':draft.status==='failed'||draft.status==='unknown'?'border-amber-300 bg-amber-50 text-amber-900':'border-border bg-background')}>
    <strong>{saved?'视频草稿已保存并核对通过':draft.status==='failed'?'草稿未保存':draft.status==='unknown'?'结果待确认，请勿重复创建':phases[draft.phase||'']||'任务处理中'}</strong>

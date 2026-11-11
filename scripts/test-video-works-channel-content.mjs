@@ -79,3 +79,42 @@ test('draft preparation consumes the selected channel/account copy and cover wit
  assert.equal(r.status,200);assert.equal(called.name,'prepare_video');assert.equal(called.args.title,'抖音专用');assert.equal(called.args.description,'抖音正文');assert.equal(called.args.cover.verticalUrl,'https://resource.vyibc.com/own-cover.jpg');
  assert.equal(JSON.stringify(store.getVideoWork(id).deliveries),before);
 }));
+
+test('MCP canonical input inherits each account plan and never drops explicit body, tags, covers or AI metadata',fixture(async(load)=>{
+ const store=load('lib/video-works/store.ts'),content=load('lib/video-works/channel-content.ts'),id=register(store),w=store.getVideoWork(id);
+ content.saveChannelContent(w,input({platform:'douyin',accountId:'53017623213',title:'账号专用',description:'账号正文',cover:{verticalUrl:'https://resource.vyibc.com/vertical.jpg',horizontalUrl:'https://cdn.vyibc.com/horizontal.png'},requestId:'canonical-plan-001'}));
+ const canonical=load('lib/workflow/douyin-publication-input.ts').resolveDouyinPublicationInput;
+ const v=canonical({workId:id,accountId:'53017623213',aiGenerated:true,requestId:'canonical-request'});
+ assert.equal(v.title,'账号专用');assert.equal(v.description,'账号正文');assert.equal(v.topics[0],'方案');assert.equal(v.cover.horizontalUrl,'https://cdn.vyibc.com/horizontal.png');assert.equal(v.videoUrl,source(0));assert.equal(v.aiGenerated,true);
+ const override=canonical({workId:id,accountId:'53017623213',aiGenerated:true,requestId:'canonical-override',title:'显式标题',description:'',topics:[],cover:{}});
+ assert.equal(override.title,'显式标题');assert.equal(override.description,'');assert.equal(override.topics.length,0);assert.equal(override.cover,undefined);
+ assert.throws(()=>canonical({workId:id,accountId:'53017623213',aiGenerated:false,requestId:'canonical-false'}),/ai_declaration/);
+ assert.throws(()=>canonical({workId:id,videoUrl:source(99),accountId:'53017623213',aiGenerated:true,requestId:'canonical-wrong'}),/source_conflict/);
+ assert.throws(()=>canonical({workId:id,accountId:'53017623213',aiGenerated:true,requestId:'canonical-extra',scheduledPublish:'tomorrow'}),/unsupported_parameter/);
+}));
+test('page distribution uses the canonical payload and refuses missing confirmation, unknown prior submission, and unverified accounts',fixture(async(load)=>{
+ const store=load('lib/video-works/store.ts'),id=register(store),w=store.getVideoWork(id);w.archive={bytes:1000,sha256:'a'.repeat(64),storage:'local_original',savedAt:new Date().toISOString()};
+ const calls=[];const distribution=loader({'lib/video-works/store.ts':store,'lib/workflow/platform-mcp-service.ts':{callPlatformTool:async(p,n,input)=>{calls.push({p,n,input});return {status:'running',taskId:'fixture-task'}}}})('lib/video-works/distribution.ts');
+ const params={action:'prepare',accountId:'53017623213',title:'公开标题',description:'正文',topics:['生活'],aiGenerated:true,cover:{verticalUrl:'https://resource.vyibc.com/vertical.jpg'}};
+ await assert.rejects(distribution.executeWorkDouyin(w,params),/confirmation/);assert.equal(calls.length,0);
+ await assert.rejects(distribution.executeWorkDouyin(w,{...params,confirmPrepare:true},true),/not_previously_verified/);assert.equal(calls.length,0);
+ const first=await distribution.executeWorkDouyin(w,{...params,confirmPrepare:true});await distribution.executeWorkDouyin(w,{...params,confirmPrepare:true});assert.equal(calls[0].input.requestId,calls[1].input.requestId);assert.equal(first.operation.state,'running');assert.equal(calls[0].input.cover.verticalUrl,params.cover.verticalUrl);assert.equal(calls[0].input.description,'正文');
+ w.deliveries.push({id:'u',input:{...params,sourceUrl:w.sourceUrl,platform:'douyin',requestId:'unknown-request',mode:'publish'},state:'unknown',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+ await assert.rejects(distribution.executeWorkDouyin(w,{...params,title:'改了也不能绕过',action:'publish',confirmPublish:true}),/previous_result_unresolved/);
+}));
+test('explicit publication web grant is separate from both old draft/editor grants and preserves their scopes',fixture(async(load)=>{
+ const previous=process.env.VIDEO_WORKS_MCP_TOKEN;process.env.VIDEO_WORKS_MCP_TOKEN='isolated-publisher-scope';
+ try{const access=load('lib/video-works/web-access.ts');for(const [flags,expected] of [[{},'works'],[{includeContentEditing:true},'works_editor'],[{includeDouyinPublishing:true},'works_publisher']]){
+ const result=access.issueVideoWorksWebAccess({confirmWebAccess:true,...flags}),code=new URLSearchParams(new URL(result.url).hash.slice(1)).get('access'),cookie=access.consumeVideoWorksWebAccess(code).split(';')[0];assert.equal(access.videoWorksWebScope(new Request('https://auto-parse-v2.vyibc.com',{headers:{cookie}})),expected);
+ }}finally{if(previous===undefined)delete process.env.VIDEO_WORKS_MCP_TOKEN;else process.env.VIDEO_WORKS_MCP_TOKEN=previous}
+}));
+
+test('Douyin page route only accepts its dedicated publisher scope, rejects CSRF and unknown fields before execution',fixture(async(load)=>{
+ const store=load('lib/video-works/store.ts'),id=register(store),ctx={params:Promise.resolve({id})};let calls=0;
+ const api=loader({'lib/video-works/store.ts':store,'lib/video-works/auth.ts':{workScope:req=>req.headers.get('x-fixture-scope'),workSameOrigin:req=>req.headers.get('origin')==='https://auto-parse-v2.vyibc.com'},'lib/video-works/distribution.ts':{douyinPlan:()=>({accountId:'53017623213'}),getWorkDouyinStatus:async()=>null,executeWorkDouyin:async()=>{calls++;return {operation:{state:'running'}}}}})('app/api/video-works/[id]/douyin/route.ts');
+ const post=(scope,body={action:'publish',confirmPublish:true},origin='https://auto-parse-v2.vyibc.com')=>new Request('https://auto-parse-v2.vyibc.com/api/video-works/'+id+'/douyin',{method:'POST',headers:{'content-type':'application/json',origin,...scope?{'x-fixture-scope':scope}:{}},body:JSON.stringify(body)});
+ for(const scope of [null,'works','works_editor'])assert.equal((await api.POST(post(scope),ctx)).status,401);
+ assert.equal(calls,0);assert.equal((await api.POST(post('works_publisher',{},'https://evil.test'),ctx)).status,403);
+ assert.equal((await api.POST(post('works_publisher',{action:'publish',location:'unimplemented'}),ctx)).status,409);assert.equal(calls,0);
+ assert.equal((await api.POST(post('works_publisher'),ctx)).status,200);assert.equal(calls,1);
+}));

@@ -3,7 +3,7 @@ import {prepareWorkWechatDraft,createWorkWechatDraft,getWorkWechatDrafts} from '
 export const runtime='nodejs';export const dynamic='force-dynamic';
 const headers={'Cache-Control':'private, no-store'};
 type Context={params:Promise<{id:string}>};
-function allowed(req:Request){const scope=workScope(req);return scope==='admin'||scope==='works'||scope==='works_editor'}
+function allowed(req:Request){const scope=workScope(req);return scope==='admin'||scope==='works'||scope==='works_editor'||scope==='works_publisher'}
 function failure(e:unknown){const error=e instanceof Error&&/^[a-z0-9_]+$/.test(e.message)?e.message:'video_work_operation_failed';return Response.json({error},{status:error==='video_work_not_found'?404:409,headers})}
 export async function GET(req:Request,ctx:Context){
  if(!allowed(req))return Response.json({error:'video_work_web_signin_required'},{status:401,headers});

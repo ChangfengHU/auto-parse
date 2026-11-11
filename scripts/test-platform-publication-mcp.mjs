@@ -94,9 +94,9 @@ test('expired session is an unknown-result recovery boundary, not a new executio
  assert.equal(r.calls.length,before);
 });
 test('Douyin video adapter projects explicit approval and never starts in another platform',async()=>{
- const r=runtime(),input={accountId:'fixture',videoUrl:'https://resource.vyibc.com/fixture.mp4',title:'fixture',requestId:'fixture-request',aiGenerated:true};
+ const r=runtime(),input={accountId:'53017623213',videoUrl:'https://resource.vyibc.com/fixture.mp4',title:'fixture',description:'完整正文',topics:['生活'],cover:{verticalUrl:'https://resource.vyibc.com/cover.jpg'},requestId:'fixture-request',aiGenerated:true};
  await r.call('douyin','prepare_video',input);assert.equal(r.starts[0].prepareOnly,true);assert.equal(r.starts[0].confirmPublish,false);
- await r.call('douyin','publish_video',{...input,confirmPublish:true});assert.equal(r.starts[1].prepareOnly,false);assert.equal(r.starts[1].confirmPublish,true);
+ const published=await r.call('douyin','publish_video',{...input,confirmPublish:true});assert.equal(published.publicationInput.description,input.description);assert.equal(published.publicationInput.topics[0],'生活');assert.equal(published.publicationInput.cover.verticalUrl,input.cover.verticalUrl);assert.equal(r.starts[1].prepareOnly,false);assert.equal(r.starts[1].confirmPublish,true);
  await assert.rejects(r.call('xiaohongshu','publish_video',input),/platform_tool_not_allowed/);
  r.tasks.set('foreign',{workflowId:'foreign'});
  await assert.rejects(r.call('douyin','get_video_task',{taskId:'foreign'}),/platform_video_task_not_found/);
@@ -147,7 +147,7 @@ test('all four platform MCPs expose self version, backed by matching release met
  const dir=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'platform-version-test-'));
  const file=path.join(dir,'release.json');
  try{
-  const versions={wechat:'0.5.9',douyin:'0.2.0',xiaohongshu:'0.1.1',x:'0.1.1'};
+  const versions={wechat:'0.5.9',douyin:'0.3.0',xiaohongshu:'0.1.1',x:'0.1.1'};
   fs.writeFileSync(file,JSON.stringify({versions,deploy_id:'release-test-1',working_tree_dirty:true,git_commit:'a'.repeat(40),deployed_at:'2026-11-02T03:22:27+08:00'}));
   const l=loader({}, {process:{...process,env:{AUTO_PARSE_RELEASE_METADATA:file}}});
   const c=l('lib/workflow/platform-mcp-contract.ts'),r=l('lib/workflow/platform-release.ts');
