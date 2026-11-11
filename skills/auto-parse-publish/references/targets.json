@@ -1,6 +1,6 @@
 {
   "schema": "auto-parse-publish-routing/v1",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "verifiedOn": "2026-10-30",
   "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers and native media drafts; official WeChat API for news/newspic; non-executable index",
   "providers": [
@@ -171,5 +171,7 @@
     "gifNewspic": "cover_and_second_content_image_editor_motion_verified; twenty_gifs_mobile_public_not_verified",
     "gifNewsBody": "existing_wechat_gif_url_draft_and_display_verified; animation_not_demonstrated"
   },
-  "reviewedOn": "2026-11-11"
+  "reviewedOn": "2026-11-11",
+  "copyGuide": "channel-copy.md",
+  "parameterGuide": "publishing-parameters.md"
 }

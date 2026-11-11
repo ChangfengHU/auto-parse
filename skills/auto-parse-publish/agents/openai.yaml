@@ -1,6 +1,6 @@
 interface:
   display_name: "自动发布"
-  short_description: "发布抖音、小红书、X，保存公众号草稿并核对回执"
-  default_prompt: "使用自动发布插件，先核对当前支持平台与目标账号，再按我的要求准备或发布内容。"
+  short_description: "分渠道编写标题正文标签封面，按真实参数发布或存稿并核对回执"
+  default_prompt: "使用自动发布插件，为目标渠道分别准备适合账号风格的标题、正文、标签与封面方案，再按实际工具参数和我的授权准备、发布或保存草稿，并回查结果。"
 policy:
   allow_implicit_invocation: true
