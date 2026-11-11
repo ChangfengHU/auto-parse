@@ -1,18 +1,19 @@
 {
   "schema": "auto-parse-publish-routing/v1",
-  "version": "0.5.4",
+  "version": "0.8.0",
   "verifiedOn": "2026-10-30",
   "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers and native media drafts; official WeChat API for news/newspic; non-executable index",
   "providers": [
     {
       "key": "douyin-video",
       "server": "auto-parse-douyin-publish",
-      "capabilityVersion": "0.1.1",
+      "capabilityVersion": "0.3.0",
       "workflowId": "34f421be-f97c-498a-9c80-5214564abd1c",
       "browserInstance": 2,
       "reference": "douyin-video.md",
       "acceptance": "real_creation_receipt_verified; moderation distinct",
-      "platform": "douyin"
+      "platform": "douyin",
+      "fieldContractCheckedOn": "2026-11-11"
     },
     {
       "key": "xiaohongshu-video",
@@ -37,12 +38,13 @@
     {
       "key": "douyin-image-text",
       "server": "auto-parse-douyin-publish",
-      "capabilityVersion": "0.1.1",
+      "capabilityVersion": "0.3.0",
       "workflowId": "53197d8e-a89d-4d1a-bb8d-fc114156f30f",
       "browserInstance": 2,
       "reference": "workflows.md",
       "acceptance": "real_browser_preparation_verified; public_submission_not_accepted",
-      "platform": "douyin"
+      "platform": "douyin",
+      "fieldContractCheckedOn": "2026-11-11"
     },
     {
       "key": "x-text",
@@ -68,87 +70,99 @@
       "key": "wechat-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.5.4",
+      "capabilityVersion": "0.6.0",
       "reference": "wechat-drafts.md",
       "transport": "official_https_api",
       "browserRequired": false,
-      "acceptance": "official_authentication_permanent_cover_upload_draft_creation_same_media_id_readback_and_idempotent_replay_verified; no_public_publish_or_mass_send"
+      "acceptance": "official_authentication_permanent_cover_upload_draft_creation_same_media_id_readback_and_idempotent_replay_verified; no_public_publish_or_mass_send",
+      "fieldContractCheckedOn": "2026-11-11"
     },
     {
       "key": "wechat-newspic-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.5.4",
+      "capabilityVersion": "0.6.0",
       "reference": "wechat-drafts.md",
       "transport": "official_https_api",
       "browserRequired": false,
-      "acceptance": "real_eight_image_draft_created; official_article_type_newspic_order_and_first_cover_verified; same_request_replay_no_duplicate; no_public_publish; animated_gif_material_bytes_preserved_and_editor_motion_verified_2026_10_30; mobile_and_public_animation_not_verified"
+      "acceptance": "real_eight_image_draft_created; official_article_type_newspic_order_and_first_cover_verified; same_request_replay_no_duplicate; no_public_publish; animated_gif_material_bytes_preserved_and_editor_motion_verified_2026_10_30; mobile_and_public_animation_not_verified",
+      "fieldContractCheckedOn": "2026-11-11"
     },
     {
       "key": "wechat-draft-delete",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.5.4",
+      "capabilityVersion": "0.6.0",
       "reference": "wechat-drafts.md",
-      "acceptance": "real_single_test_draft_created_deleted_and_readback_absent; explicit_confirmation"
+      "acceptance": "real_single_test_draft_created_deleted_and_readback_absent; explicit_confirmation",
+      "fieldContractCheckedOn": "2026-11-11"
     },
     {
       "key": "wechat-official-publish",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.5.4",
+      "capabilityVersion": "0.6.0",
       "reference": "wechat-drafts.md",
-      "acceptance": "implementation_and_mock_tests_only; account_official_permission_probe_48001; no_web_publish_or_real_publication"
+      "acceptance": "implementation_and_mock_tests_only; account_official_permission_probe_48001; no_web_publish_or_real_publication",
+      "fieldContractCheckedOn": "2026-11-11"
     },
     {
       "key": "wechat-web-newspic",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.5.4",
+      "capabilityVersion": "0.6.0",
       "reference": "wechat-drafts.md",
       "workflowId": "cea6d731-ce15-46d8-95fb-f420ebfacb93",
       "prepareWorkflowId": "9a676224-70bd-41d4-9e85-c8d2b83a00c4",
       "browserInstance": 1,
       "browserRequired": true,
-      "acceptance": "real_browser_admin_verification_reached_with_final_send_blocked; final_live_submission_and_public_visibility_not_yet_verified"
+      "acceptance": "real_browser_admin_verification_reached_with_final_send_blocked; final_live_submission_and_public_visibility_not_yet_verified",
+      "fieldContractCheckedOn": "2026-11-11"
     },
     {
       "key": "wechat-video-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.5.4",
+      "capabilityVersion": "0.6.0",
       "reference": "wechat-usage.md",
       "tool": "wechat_create_video_draft",
       "statusTool": "wechat_media_draft_status",
       "workflowId": "a5844b00-cd7b-442d-9e4f-8a5a18338b82",
       "browserInstance": 1,
       "browserRequired": true,
-      "acceptance": "real_dedicated_mcp_create_save_response_native_editor_reload_title_description_identity_and_idempotent_replay_verified_2026_10_30; no_playback_or_publication_claim"
+      "acceptance": "real_dedicated_mcp_create_save_response_native_editor_reload_title_description_identity_and_idempotent_replay_verified_2026_10_30; no_playback_or_publication_claim",
+      "preflightTool": "wechat_prepare_video_draft",
+      "workQueryTool": "wechat_list_video_work_drafts",
+      "workIdReuse": true,
+      "normalizedInputReturned": true,
+      "fieldContractCheckedOn": "2026-11-11"
     },
     {
       "key": "wechat-podcast-draft",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.5.4",
+      "capabilityVersion": "0.6.0",
       "reference": "wechat-usage.md",
       "tool": "wechat_create_podcast_draft",
       "statusTool": "wechat_media_draft_status",
       "workflowId": "a5844b00-cd7b-442d-9e4f-8a5a18338b82",
       "browserInstance": 1,
       "browserRequired": true,
-      "acceptance": "real_dedicated_mcp_create_save_response_native_editor_reload_title_description_identity_and_idempotent_replay_verified_2026_10_30; no_playback_or_publication_claim"
+      "acceptance": "real_dedicated_mcp_create_save_response_native_editor_reload_title_description_identity_and_idempotent_replay_verified_2026_10_30; no_playback_or_publication_claim",
+      "fieldContractCheckedOn": "2026-11-11"
     },
     {
       "key": "wechat-web-news",
       "platform": "wechat",
       "server": "auto-parse-wechat-publish",
-      "capabilityVersion": "0.5.4",
+      "capabilityVersion": "0.6.0",
       "reference": "wechat-usage.md",
       "workflowId": "cea6d731-ce15-46d8-95fb-f420ebfacb93",
       "prepareWorkflowId": "9a676224-70bd-41d4-9e85-c8d2b83a00c4",
       "browserInstance": 1,
       "browserRequired": true,
-      "acceptance": "real_news_admin_scan_and_submission_ret_0; publication_record_then_deleted; public_visibility_not_confirmed"
+      "acceptance": "real_news_admin_scan_and_submission_ret_0; publication_record_then_deleted; public_visibility_not_confirmed",
+      "fieldContractCheckedOn": "2026-11-11"
     }
   ],
   "verificationNotes": {
@@ -156,5 +170,6 @@
     "wechatVideoPodcast": "dedicated_mcp_tools_and_formal_supabase_workflow_verified_2026_10_30; video_6_seconds_podcast_12_seconds; restart_durable_completed_receipt_verified; no_publication_verified",
     "gifNewspic": "cover_and_second_content_image_editor_motion_verified; twenty_gifs_mobile_public_not_verified",
     "gifNewsBody": "existing_wechat_gif_url_draft_and_display_verified; animation_not_demonstrated"
-  }
+  },
+  "reviewedOn": "2026-11-11"
 }

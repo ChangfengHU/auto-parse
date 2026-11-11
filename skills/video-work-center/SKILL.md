@@ -71,3 +71,9 @@ description: 管理视频原片、多渠道与账号的标题正文封面版本�
 auto-parse-douyin-publish 0.3.0 的 prepare_video / publish_video 可以传 workId、稳定 accountId、aiGenerated、requestId，省略的标题/正文/标签/封面读取该账号渠道方案；也保留 videoUrl+title 直接发布路径。显式传入字段优先，description=""、topics=[]、cover={} 表示清空/使用平台默认。workId与videoUrl冲突、格式不合法或未支持的参数会拒绝。MCP返回 publicationInput 是完整当次输入，页面分发记录读取同一投递台账，不从当前可编辑方案倒推旧内容。
 
 标题30字、正文900字符、标签最多5个（不带#，限字母/汉字/数字/下划线，每个30字以内）；封面JPG/PNG、每张8MiB以内，自有资源域无参数HTTPS，仍属实验能力。定时、位置、合集商品、可见范围、评论开关和抖音云草稿保存尚未接入。公众号视频草稿不提交标签/自定义封面/AI声明，不把原片AI属性当成平台已应用声明。
+
+## 原生公众号MCP工具同步（0.6.0）
+
+公众号原生插件现提供wechat_prepare_video_draft({workId,...})只读预检、wechat_create_video_draft({workId,...,confirmDraft:true})以及wechat_list_video_work_drafts({workId,...})。它们与作品中心页面/专用MCP共用账号渠道方案解析；标题正文显式覆盖，空正文保留，稳定requestId去重，旧URL调用兼容。返回完整publicationInput与platformSettings，不再只返回标题而隐藏正文。查询旧记录时缺上下文返回null，不编造AI声明/自定义封面。
+
+原生工具不支持tags/customCover/AI声明，不能把保存的渠道方案当作已应用。图文和贴图发表是另外的公众号工具；视频这条路径仍只存草稿。不要重复创建另一套工作流。以每个MCP实际get_version及客户端工具表为准。

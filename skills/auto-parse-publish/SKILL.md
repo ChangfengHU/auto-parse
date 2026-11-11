@@ -84,3 +84,16 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 每次检查返回 publicationInput，包括平台、账号、源视频、标题、正文、标签、横竖封面（无自定义则null）、AI声明、模式与请求号。该内容由同一适配层交给正式工作流并入作品台账；页面不拿后改的渠道方案替代历史快照。标题最多30字，正文900字符，最多5个无#标签；封面JPEG/PNG每张<=8MiB，实验能力，不承诺裁切自动正确。定时、位置、合集、商品关联、可见范围与评论设置未接入，不能传空字段或用普通点击绕过去补。
 
 作品页为右侧栏，明确区分准备发布页、公众号视频草稿与公开抖音提交。网页抖音授权通过作品中心MCP显式includeDouyinPublishing取得，旧草稿/内容编辑授权不扩权。未授权公开提交的界面测试不得点最终发布。公众号视频草稿不支持标签、自定义封面或AI声明设置；原片内容属性与实际平台设置分别解释。
+
+## 公众号视频草稿：原生 MCP 与作品统一参数（0.6.0）
+
+已入作品中心的视频，优先走原生公众号MCP：
+1. wechat_prepare_video_draft({workId,expectedAccount?}) 只读读取该账号的渠道标题/正文、原片留存与大小、needsAdaptation、限制和稳定requestId。账号只有唯一已核验默认时才自动采用，不猜多账号。
+2. 文案超限由Agent按含义改写，标题20个Unicode码点、正文300码点；不静默截断。只读预检不保存。可传title/description覆盖，description=""明确清空。
+3. 用户已授权保存草稿后调用wechat_create_video_draft({workId,expectedAccount?,requestId:预检返回值,title?,description?,confirmDraft:true})；原片须已留存且<=100MiB，仍由原工作流核验H264/AAC、时长<=3600秒。若已有同内容原请求，则必须沿用该请求，不能用新ID绕开历史记录。
+4. wechat_list_video_work_drafts({workId,expectedAccount?}) 查询作品的全部已有视频草稿请求与publicationInput；单请求继续wechat_media_draft_status({expectedAccount,requestId})。found=false但有archivedDelivery只是归档线索，不算新回读成功。
+5. publicationInput包含实际账号、视频来源、标题、完整正文、请求号与草稿模式，以及可确定的原作品AI属性；platformSettings明确标签/自定义封面不支持、封面使用推荐帧、工具未设置平台AI声明。原片AI属性不是平台AI声明。历史上下文缺失返回null，不推断为false。
+6. 只在status=completed且saveResponseAccepted/nativeEditorReloadVerified均true时报告已保存；不宣称公开发表或手机播放已验证。未知/重启中断只查原请求，不改内容和ID重建。
+7. 原videoUrl+title+expectedAccount+requestId+confirmDraft直接调用仍兼容，不需要先入库；与workId一起传不同videoUrl会拒绝。topics/cover/aiGenerated/confirmPublish等不支持参数不允许传入；渠道标签封面可另存作品方案，不能说已应用到公众号草稿。
+
+公众号视频草稿与图文/news、贴图/newspic、网页文章发表是不同工具路径。此优化不把视频草稿变成公开发表，也不改动原正式工作流。页面与本MCP共用同一解析器、请求身份和作品台账；不是为页面另建发布器。

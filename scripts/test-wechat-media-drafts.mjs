@@ -65,9 +65,9 @@ test('restart never automatically replays an unfinished save',()=>{
  const result=restarted.reserveMediaDraft(data);assert.equal(result.reused,true);assert.equal(result.record.state,'unknown');
  assert.equal(result.record.error.code,'media_process_restarted');
 });
-test('view omits URL and runtime session; does not claim playback or publication',()=>{
+test('view returns complete owned-source input without runtime session; does not claim playback or publication',()=>{
  const {m}=setup(),data=m.mediaDraftInput('video',input);const r=m.reserveMediaDraft(data).record;
- const view=m.mediaDraftView({...r,sessionId:'private-runtime'});assert.equal(view.published,false);assert(!JSON.stringify(view).includes('test.mp4'));assert(!JSON.stringify(view).includes('private-runtime'));
+ const view=m.mediaDraftView({...r,sessionId:'private-runtime'});assert.equal(view.published,false);assert.equal(view.publicationInput.sourceUrl,input.videoUrl);assert.equal(view.publicationInput.description,data.description);assert.equal(view.platformSettings.aiDeclaration,'not_set_by_tool');assert(!JSON.stringify(view).includes('private-runtime'));
 });
 test('download blocks redirect to private endpoint and removes temporary files',async()=>{
  let calls=0;const {load}=setup({}, {fetch:async()=>{calls++;return new Response(null,{status:302,headers:{location:'http://127.0.0.1/private'}})}});
@@ -112,4 +112,11 @@ test('same media request safely retries only a pre-session browser busy failure'
  m.updateMediaDraft(data.expectedAccount,data.requestId,{state:'running',phase:'saving_material'});
  m.updateMediaDraft(data.expectedAccount,data.requestId,{state:'unknown',error:{code:'managed_browser_busy',message:'busy',hint:'reconcile'}});
  assert.equal(m.reserveMediaDraft(data).record.state,'unknown');
+});
+
+test('immutable source context is retained independently from legacy input fingerprints',()=>{
+ const {m}=setup(),data=m.mediaDraftInput('video',input),context={workId:'a'.repeat(64),sourceAiGenerated:true,fieldSources:{title:'explicit_input',description:'empty_default'}};
+ const r=m.reserveMediaDraft(data,context);assert.equal(r.record.context.sourceAiGenerated,true);const replay=m.reserveMediaDraft(data,{...context,sourceAiGenerated:false});assert.equal(replay.record.context.sourceAiGenerated,true);
+ m.updateMediaDraft(data.expectedAccount,data.requestId,{state:'running',phase:'saving_material',context:{sourceAiGenerated:false}});assert.equal(m.getMediaDraft(data.expectedAccount,data.requestId).context.sourceAiGenerated,true);
+ assert.equal(m.mediaDraftView(m.getMediaDraft(data.expectedAccount,data.requestId)).publicationInput.aiGenerated,true);
 });

@@ -1,11 +1,12 @@
-import {recordVideoDelivery,syncWechatVideoDraft} from '../video-works/store';
+import type {WechatVideoContext} from './video-draft-content';
+import {syncWechatVideoDraft} from '../video-works/store';
 import {createHash,randomUUID} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 export const MEDIA_DRAFT_WORKFLOW='a5844b00-cd7b-442d-9e4f-8a5a18338b82';
 export const MEDIA_MAX_BYTES=100*1024*1024;
 export type MediaDraftInput={requestId:string;expectedAccount:string;kind:'video'|'podcast';sourceUrl:string;title:string;description:string};
-export type MediaDraftRecord={input:MediaDraftInput;fingerprint:string;owner:string;state:'reserved'|'running'|'completed'|'failed'|'unknown';phase:string;updatedAt:string;materialSaved?:boolean;sessionId?:string;receipt?:Record<string,unknown>;error?:{code:string;message:string;hint:string}};
+export type MediaDraftRecord={context?:WechatVideoContext;input:MediaDraftInput;fingerprint:string;owner:string;state:'reserved'|'running'|'completed'|'failed'|'unknown';phase:string;updatedAt:string;materialSaved?:boolean;sessionId?:string;receipt?:Record<string,unknown>;error?:{code:string;message:string;hint:string}};
 declare global {var __wechatMediaProcess:string|undefined}
 const owner=()=>global.__wechatMediaProcess??=randomUUID();
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -37,8 +38,7 @@ export function getMediaDraft(account:string,id:string):MediaDraftRecord|null{
  if(['reserved','running'].includes(r.state)&&r.owner!==owner())return {...r,state:'unknown',phase:'process_restarted',error:{code:'media_process_restarted',message:'服务重启，任务执行状态需核对。',hint:'不要更换 requestId 重提；按原请求及素材/草稿回执核对。'}};
  return r;
 }
-export function reserveMediaDraft(input:MediaDraftInput):{reused:boolean;record:MediaDraftRecord}{
- if(input.kind==='video')recordVideoDelivery({platform:'wechat',accountId:input.expectedAccount,requestId:input.requestId,sourceUrl:input.sourceUrl,title:input.title,description:input.description,topics:[],aiGenerated:false,mode:'draft'});
+export function reserveMediaDraft(input:MediaDraftInput,context?:WechatVideoContext):{reused:boolean;record:MediaDraftRecord}{
  fs.mkdirSync(dir(),{recursive:true,mode:0o700});
  const fingerprint=hash(JSON.stringify(input)),p=file(input.expectedAccount,input.requestId);
  const existing=getMediaDraft(input.expectedAccount,input.requestId);
@@ -53,7 +53,7 @@ export function reserveMediaDraft(input:MediaDraftInput):{reused:boolean;record:
     const latest=getMediaDraft(input.expectedAccount,input.requestId);
     if(!latest||latest.fingerprint!==fingerprint)throw Error('media_request_id_conflict');
     if(latest.state==='failed'&&latest.phase==='reserved'&&latest.error?.code==='managed_browser_busy'&&!latest.sessionId&&!latest.materialSaved&&!latest.receipt){
-     const record:MediaDraftRecord={input:latest.input,fingerprint,owner:owner(),state:'reserved',phase:'reserved',updatedAt:new Date().toISOString()};
+     const record:MediaDraftRecord={context:latest.context,input:latest.input,fingerprint,owner:owner(),state:'reserved',phase:'reserved',updatedAt:new Date().toISOString()};
      atomicSave(p,record);return {reused:false,record};
     }
     return {reused:true,record:latest};
@@ -61,8 +61,8 @@ export function reserveMediaDraft(input:MediaDraftInput):{reused:boolean;record:
   }
   return {reused:true,record:existing}
  }
- const record:MediaDraftRecord={input,fingerprint,owner:owner(),state:'reserved',phase:'reserved',updatedAt:new Date().toISOString()};
- let fd:number;try{fd=fs.openSync(p,'wx',0o600)}catch(e){if((e as NodeJS.ErrnoException).code==='EEXIST')return reserveMediaDraft(input);throw e}
+ const record:MediaDraftRecord={...context?{context}:{},input,fingerprint,owner:owner(),state:'reserved',phase:'reserved',updatedAt:new Date().toISOString()};
+ let fd:number;try{fd=fs.openSync(p,'wx',0o600)}catch(e){if((e as NodeJS.ErrnoException).code==='EEXIST')return reserveMediaDraft(input,context);throw e}
  try{fs.writeFileSync(fd,JSON.stringify(record));fs.fsyncSync(fd)}finally{fs.closeSync(fd)}
  const d=fs.openSync(dir(),'r');try{fs.fsyncSync(d)}finally{fs.closeSync(d)}
  syncWechatVideoDraft(record);return {reused:false,record};
@@ -72,12 +72,12 @@ export function updateMediaDraft(account:string,id:string,patch:Partial<MediaDra
  try{
   const r=getMediaDraft(account,id);if(!r||r.owner!==owner())throw Error('media_task_owner_mismatch');
   if(['completed','failed','unknown'].includes(r.state))throw Error('media_task_terminal');
-  const next={...r,...patch,input:r.input,fingerprint:r.fingerprint,owner:r.owner,updatedAt:new Date().toISOString()};atomicSave(p,next);return next;
+  const next={...r,...patch,input:r.input,context:r.context,fingerprint:r.fingerprint,owner:r.owner,updatedAt:new Date().toISOString()};atomicSave(p,next);return next;
  }finally{fs.closeSync(fd);fs.rmSync(lock,{force:true})}
 }
 export function mediaDraftView(record:MediaDraftRecord|null){
  if(!record)return {found:false};
  const {input,fingerprint,state,phase,updatedAt,materialSaved,receipt,error}=record;
- return {found:true,requestId:input.requestId,expectedAccount:input.expectedAccount,kind:input.kind,title:input.title,fingerprint,status:state,phase,updatedAt,materialSaved:!!materialSaved,receipt,error,published:false,statusTool:'wechat_media_draft_status',retry:'Repeat the same requestId to read existing state. Never use a new ID for an uncertain save.'};
+ return {publicationInput:{platform:'wechat',accountId:input.expectedAccount,sourceUrl:input.sourceUrl,title:input.title,description:input.description,topics:[],cover:null,aiGenerated:record.context?.sourceAiGenerated??null,mode:'draft',requestId:input.requestId,workId:record.context?.workId??null},platformSettings:{coverMode:input.kind==='video'?'recommended_video_frame':'account_avatar',customCover:'unsupported',topics:'unsupported',aiDeclaration:'not_set_by_tool'},fieldSources:record.context?.fieldSources||null,inputSchemaVersion:1,found:true,requestId:input.requestId,expectedAccount:input.expectedAccount,kind:input.kind,title:input.title,fingerprint,status:state,phase,updatedAt,materialSaved:!!materialSaved,receipt,error,published:false,statusTool:'wechat_media_draft_status',retry:'Repeat the same requestId to read existing state. Never use a new ID for an uncertain save.'};
 }
-export const MEDIA_DRAFT_CAPABILITIES={workflowId:MEDIA_DRAFT_WORKFLOW,tools:['wechat_create_video_draft','wechat_create_podcast_draft','wechat_media_draft_status'],async:true,concurrency:1,browserInstance:1,sourceHosts:['resource.vyibc.com','cdn.vyibc.com'],sourceUrl:'HTTPS without credentials, query or fragment; redirects revalidated',localLimits:{maxBytes:MEDIA_MAX_BYTES,maxTitleCharacters:20,maxVideoDescriptionCharacters:300,maxPodcastDescriptionCharacters:140,video:'MP4 H.264, optional AAC',audio:'MP3',maxDurationSeconds:3600},covers:{video:'first recommended video frame',podcast:'account avatar'},pollIntervalMs:5000,jobDeadlineMs:600000,recommendedCallTimeoutMs:30000,verification:'save response plus reloaded native editor; no playback or public publication claim',restart:'Receipts persist; unfinished jobs become unknown, never automatically replayed',publicPublication:false};
+export const MEDIA_DRAFT_CAPABILITIES={workflowId:MEDIA_DRAFT_WORKFLOW,tools:['wechat_prepare_video_draft','wechat_list_video_work_drafts','wechat_create_video_draft','wechat_create_podcast_draft','wechat_media_draft_status'],workIdReuse:true,normalizedInputReturned:true,unsupportedVideoParameters:['topics','cover','aiGenerated','confirmPublish'],async:true,concurrency:1,browserInstance:1,sourceHosts:['resource.vyibc.com','cdn.vyibc.com'],sourceUrl:'HTTPS without credentials, query or fragment; redirects revalidated',localLimits:{maxBytes:MEDIA_MAX_BYTES,maxTitleCharacters:20,maxVideoDescriptionCharacters:300,maxPodcastDescriptionCharacters:140,video:'MP4 H.264, optional AAC',audio:'MP3',maxDurationSeconds:3600},covers:{video:'first recommended video frame',podcast:'account avatar'},pollIntervalMs:5000,jobDeadlineMs:600000,recommendedCallTimeoutMs:30000,verification:'save response plus reloaded native editor; no playback or public publication claim',restart:'Receipts persist; unfinished jobs become unknown, never automatically replayed',publicPublication:false};

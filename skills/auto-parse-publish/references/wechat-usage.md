@@ -9,7 +9,7 @@
 | 图文文章 | wechat_create_draft，articleType=news，HTML content，thumbMediaId 或 coverImageUrl 二选一 | 已真实建草稿、按同 media_id 回读、防重复重放。正文外部导入 JPEG/PNG；已上传到微信的 GIF URL 可复用，已真实创建草稿并回读，编辑器显示已确认，但四帧截图静止，未证实播放 |
 | 贴图/图片消息 | 同一工具，articleType=newspic，纯文本 content，images 有序数组 | 已真实创建 8 张静态图早报；首图GIF和静态封面+第二张GIF两种组合均已在后台播放 |
 | 文字配图片 | 选择以上一种内容结构 | 没有独立“纯文字发布”工具；不能省略必需封面或图片假装纯文字类型 |
-| 视频 | wechat_create_video_draft | 专用异步工作流；仅保存草稿，实际验收结果见末尾 |
+| 视频 | wechat_prepare_video_draft → wechat_create_video_draft → wechat_list_video_work_drafts / wechat_media_draft_status | 专用异步工作流；仅保存草稿，实际验收结果见末尾 |
 | 播客（音频） | wechat_create_podcast_draft | 界面是播客，不是博客；专用异步工作流，验收结果见末尾 |
 | Live Photo | 无 | liveCoverVideoUrl 仅存本地台账，不上传视频、不生成实况照片 |
 | 正式发表 | 独立 wechat_publish_draft 或 wechat_web_publish_draft | 官方通道当前账号权限 48001；网页图文已通过扫码并获微信提交成功回执；之后记录显示已删除，公开可见未核实。贴图最终提交未验收。草稿成功不代表发表成功 |
@@ -211,3 +211,9 @@
 - 用户打开验证链接后，只看到当前任务的微信管理员二维码；网页自动刷新。等待状态时使用原 sessionId 调用 wechat_web_assistance；若二维码已出现，该工具还可返回新的 verificationUrl 和过期时间。链接有效期 10 分钟，浏览器会话结束或服务重启后失效。VNC 是备用手动入口。
 - 用户扫码后继续查询 wechat_web_publish_status；submitted 表示微信接收了提交，不代表内容审核通过或已公开可见。检查微信发表记录和公开状态。unknown 时不要换 ID 重发，先按原记录对账。
 - 图文 2026-11-03 真机测试通过扫码、微信 ret=0 和发表记录；记录后显示已删除，原因未知，公开可见未核实。贴图终态公开发表仍未验收。微信是否每次要求扫码取决于当时账号配置和风控；此次同一账号第二次提交再次出现扫码。
+
+### 0.6.0 已入库视频的优先调用
+
+使用workId时先只读wechat_prepare_video_draft读取原片、唯一默认账号、该账号/渠道标题正文、限制与requestId。必要时按语义改写文案，再以同一个请求调用wechat_create_video_draft，confirmDraft=true；无需让用户重复提供已存资源。按作品查全部已有请求使用wechat_list_video_work_drafts，单请求仍用wechat_media_draft_status。
+
+返回publicationInput为本次持久输入快照，包括完整description；platformSettings标明topics与customCover不支持、推荐帧封面和未设置平台AI声明。原作品AI分类（可知时）仅作source metadata，不表示平台已声明。旧记录无上下文时返回null。传入不支持的参数或workId/videoUrl冲突会失败；不会吞掉字段。旧的URL/账号/标题/请求号调用完整保留。已有同作品、账号和文案的原草稿请求只复用/查询，不能换ID重建。

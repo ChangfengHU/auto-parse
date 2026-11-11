@@ -112,3 +112,5 @@ wechat_web_publish_status({expectedAccount,mediaId})读取重启持久账本。s
 再调用 `wechat_web_batch_publish`，使用稳定 requestId、expectedAccount、confirmPublish:true 和 items；每个 item 含 mediaId、预检 fingerprint、真实 aiGenerated，以及需要时的 articleStatement、notifyFollowers、declareOriginal、originalAuthor、confirmOriginalAgreement。所有草稿会在启动前重新核对指纹。原创协议须用户明确同意。贴图不支持通知和原创开关。
 
 轮询 `wechat_web_batch_status`；当前文章的 assistance 显示 awaiting_admin_scan 时，把 verificationUrl 发给管理员并保持原任务。扫码后自动继续下一篇；微信可以要求再次扫码，不能保证一次扫码适用于整批。submitted 仅表示微信受理，公开状态需另查。任何 unknown、工作流失败或服务重启都会停止自动继续，不换请求号重试；先对账当前文章。单篇等待上限 20 分钟。真实多文章连续发表和微信扫码复用尚未实测。
+
+0.6.0：视频草稿支持workId继承账号/渠道标题正文；新增只读wechat_prepare_video_draft和wechat_list_video_work_drafts。具体参数、完整publicationInput与不支持字段见wechat-usage.md及主指南；图文/news与贴图/newspic工具保持原有参数，不把视频传入wechat_create_draft。

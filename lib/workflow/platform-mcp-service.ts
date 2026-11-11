@@ -50,7 +50,7 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
  if(platform==='wechat' && name==='wechat_collection_request_status')return wechatCollectionRequestStatus(input);
  if(platform==='wechat' && name==='wechat_list_collections')return listWechatCollections(input);
  if(platform==='wechat' && name==='wechat_list_collection_candidates')return listWechatCollectionCandidates(input);
- if(platform==='wechat' && ['wechat_create_video_draft','wechat_create_podcast_draft','wechat_media_draft_status'].includes(name))return callWechatMediaTool(name,input);
+ if(platform==='wechat' && ['wechat_prepare_video_draft','wechat_list_video_work_drafts','wechat_create_video_draft','wechat_create_podcast_draft','wechat_media_draft_status'].includes(name))return callWechatMediaTool(name,input);
  if(platform==='wechat' && name==='wechat_web_assistance'){
   const active=[...owners()].filter(([sid,owner])=>owner==='wechat'&&!!getSession(sid)).map(([sid])=>sid);
   const sid=typeof input.sessionId==='string'?input.sessionId:active.length===1?active[0]:undefined;

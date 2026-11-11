@@ -1,3 +1,4 @@
+import {prepareWechatVideoWork} from '../wechat/video-draft-content';
 import fs from 'node:fs';
 import {readChannelContent,saveChannelContent} from './channel-content';
 import path from 'node:path';
@@ -5,7 +6,7 @@ import os from 'node:os';
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {allVideoDeliveries,getVideoWork,listVideoWorks,registerVideoWork,updateVideoRegistration,retainVideoOriginal,retainedVideoPathForSource,syncVideoWorkflowTask,syncWechatVideoDraft,videoSourceUrl} from './store';
+import {getVideoWork,listVideoWorks,registerVideoWork,updateVideoRegistration,retainVideoOriginal,retainedVideoPathForSource,syncVideoWorkflowTask,syncWechatVideoDraft,videoSourceUrl} from './store';
 import {callWechatMediaTool} from '../workflow/wechat-media-service';
 import {issueVideoWorksWebAccess} from './web-access';
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
@@ -50,23 +51,7 @@ export function backfillIndependentWork(input:Record<string,unknown>){
  }
  return {...registerIndependentWork({...input,origin:'historical'}),externalActionsTriggered:false};
 }
-function defaultWechatAccount(override:unknown){
- if(override!==undefined){if(typeof override!=='string'||!/^gh_[A-Za-z0-9]{12}$/.test(override))throw Error('wechat_original_account_id_required');return override}
- const configured=process.env.VIDEO_WORKS_DEFAULT_WECHAT_ACCOUNT;
- if(configured&&/^gh_[A-Za-z0-9]{12}$/.test(configured))return configured;
- const accounts=[...new Set(allVideoDeliveries().filter(d=>d.input.platform==='wechat'&&d.state==='draft_saved'&&/^gh_[A-Za-z0-9]{12}$/.test(d.input.accountId)).map(d=>d.input.accountId))];
- if(accounts.length!==1)throw Error('wechat_default_account_not_unique');
- return accounts[0];
-}
-export function prepareWorkWechatDraft(input:Record<string,unknown>){
- const w=work(input.workId),expectedAccount=defaultWechatAccount(input.expectedAccount);
- const old=w.deliveries.find(d=>d.input.platform==='wechat'&&d.input.accountId===expectedAccount),saved=readChannelContent(w,{platform:'wechat',accountId:expectedAccount});
- const title=typeof input.title==='string'?input.title:saved.content.title||old?.input.title||w.title;
- const description=typeof input.description==='string'?input.description:saved.content.description??old?.input.description??w.description??'';
- const needsAdaptation=!title.trim()||title!==title.trim()||/[\r\n]/.test(title)||Array.from(title).length>20||Array.from(description).length>300;
- const requestId=w.deliveries.find(d=>d.input.platform==='wechat'&&d.input.accountId===expectedAccount&&d.input.title===title&&d.input.description===description)?.input.requestId||'workdraft-'+hash(JSON.stringify([w.sha256||w.sourceUrl,expectedAccount,title,description])).slice(0,48);
- return {workId:w.id,expectedAccount,requestId,videoUrl:w.sourceUrl,title,description,needsAdaptation,originalRetained:!!w.archive,originalBytes:w.archive?.bytes||null,limits:{title:20,description:300,bytes:104857600},instructions:'Use stored source and known account. Agent rewrites overlong metadata, preserving meaning; never ask user to repeat existing assets. Saving only, never publicly publish.'};
-}
+export function prepareWorkWechatDraft(input:Record<string,unknown>){return prepareWechatVideoWork(input)}
 export async function createWorkWechatDraft(input:Record<string,unknown>){
  if(input.confirmDraft!==true)throw Error('work_draft_confirmation_required');
  const p=prepareWorkWechatDraft(input);if(p.needsAdaptation)return {...p,status:'metadata_adaptation_required',created:false};

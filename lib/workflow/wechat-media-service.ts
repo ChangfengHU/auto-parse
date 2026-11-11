@@ -1,13 +1,27 @@
+import {getVideoWork} from '../video-works/store';
+import {prepareWechatVideoWork,resolveWechatVideoCreate} from '../wechat/video-draft-content';
 import {callWorkflowTool} from './mcp-service';
 import {getSession} from './session-store';
 import {MEDIA_DRAFT_WORKFLOW,getMediaDraft,mediaDraftInput,mediaDraftView,reserveMediaDraft,updateMediaDraft} from '../wechat/media-draft';
 export async function callWechatMediaTool(name:string,input:Record<string,unknown>){
+ if(name==='wechat_prepare_video_draft')return {...prepareWechatVideoWork(input),externalActionsTriggered:false};
+ if(name==='wechat_list_video_work_drafts'){
+  const w=getVideoWork(String(input.workId||''));if(!w)throw Error('video_work_not_found');
+  if(input.expectedAccount!==undefined&&(typeof input.expectedAccount!=='string'||!/^gh_[A-Za-z0-9]{12}$/.test(input.expectedAccount)))throw Error('wechat_original_account_id_required');
+  const items=w.deliveries.filter(d=>d.input.platform==='wechat'&&d.input.mode==='draft'&&(!input.expectedAccount||d.input.accountId===input.expectedAccount)).map(d=>{
+   const view=mediaDraftView(getMediaDraft(d.input.accountId,d.input.requestId));
+   return {...view,requestId:d.input.requestId,expectedAccount:d.input.accountId,...!view.found?{archivedDelivery:{input:d.input,state:d.state,receipt:d.receipt}}:{}};
+  });
+  return {workId:w.id,items,publiclyPublished:false,externalActionsTriggered:false};
+ }
  if(name==='wechat_media_draft_status'){
   if(typeof input.expectedAccount!=='string'||typeof input.requestId!=='string')throw Error('media_status_input_invalid');
   return mediaDraftView(getMediaDraft(input.expectedAccount,input.requestId));
  }
- const data=mediaDraftInput(name==='wechat_create_video_draft'?'video':'podcast',input);
- const reserved=reserveMediaDraft(data);if(reserved.reused)return {...mediaDraftView(reserved.record),reused:true};
+ if(!['wechat_create_video_draft','wechat_create_podcast_draft'].includes(name))throw Error('wechat_media_tool_not_allowed');
+ const resolved=name==='wechat_create_video_draft'?resolveWechatVideoCreate(input):{input,context:undefined};
+ const data=mediaDraftInput(name==='wechat_create_video_draft'?'video':'podcast',resolved.input);
+ const reserved=reserveMediaDraft(data,resolved.context);if(reserved.reused)return {...mediaDraftView(reserved.record),reused:true};
  // Return immediately. The receipt is durable before any browser side effect.
  void start(data.expectedAccount,data.requestId).catch(()=>{});
  return {...mediaDraftView(reserved.record),reused:false};

@@ -15,7 +15,7 @@ export async function POST(req:Request){
  if(m.jsonrpc!=='2.0'||typeof m.method!=='string')return error(-32600,'Invalid request');
  if(m.id===undefined)return new Response(null,{status:202,headers});
  let result:unknown;
- if(m.method==='initialize')result={protocolVersion:'2025-06-18',capabilities:{tools:{}},serverInfo:{name:'auto-parse-video-works',version:'0.3.0'},instructions:'Independent work registry, historic backfill, versioned per-channel/account title, body and cover, multi-channel filtering and native WeChat VIDEO DRAFT reuse. Never publicly publishes. Require work registration/draft authorization, preserve request IDs, read actual receipts; async source retention is not publication.'};
+ if(m.method==='initialize')result={protocolVersion:'2025-06-18',capabilities:{tools:{}},serverInfo:{name:'auto-parse-video-works',version:'0.3.1'},instructions:'Independent work registry, historic backfill, versioned per-channel/account title, body and cover, multi-channel filtering and native WeChat VIDEO DRAFT reuse. Never publicly publishes. Require work registration/draft authorization, preserve request IDs, read actual receipts; async source retention is not publication.'};
  else if(m.method==='tools/list')result={tools:VIDEO_WORKS_TOOLS};
  else if(m.method==='ping')result={};
  else if(m.method==='tools/call'){
@@ -24,7 +24,7 @@ export async function POST(req:Request){
   try{
    let data;if(name==='get_version'){
     let meta:Record<string,unknown>={};try{meta=JSON.parse(fs.readFileSync(process.env.AUTO_PARSE_RELEASE_METADATA||'','utf8'))}catch{}
-    data={server:'auto-parse-video-works',version:'0.3.0',server_version:'0.3.0',deploy_id:meta.deploy_id||null,git_commit:meta.git_commit||null,deployed_at:meta.deployed_at||null,changelog_zh:'新增侧边栏平台分发、抖音独立网页发布授权与统一完整参数；旧草稿/编辑授权不扩权，已投递快照不覆盖。'};
+    data={server:'auto-parse-video-works',version:'0.3.1',server_version:'0.3.1',deploy_id:meta.deploy_id||null,git_commit:meta.git_commit||null,deployed_at:meta.deployed_at||null,changelog_zh:'公众号视频草稿与原生发布MCP共用作品/渠道字段解析，完整输入与不支持设置明确回传；历史快照及授权范围不变。'};
    }else data=await callVideoWorksTool(name,args);
    result={content:[{type:'text',text:JSON.stringify(data)}],isError:false};
   }catch(e){result={isError:true,content:[{type:'text',text:JSON.stringify({error:e instanceof Error&&/^[a-z0-9_]+$/.test(e.message)?e.message:'video_work_operation_failed',hint:'查询原作品和原草稿请求；未知保存不要更换请求号重提。'})}]}}

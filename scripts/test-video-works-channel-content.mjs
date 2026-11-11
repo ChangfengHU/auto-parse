@@ -7,9 +7,9 @@ import vm from 'node:vm';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url),ts=require('typescript'),root=path.resolve(new URL('..',import.meta.url).pathname);
 function loader(mocks={}){
- const cache=new Map();const load=file=>{if(mocks[file])return mocks[file];if(cache.has(file))return cache.get(file);const mod={exports:{}};cache.set(file,mod.exports);
+ const cache=new Map(),shared={};const load=file=>{if(mocks[file])return mocks[file];if(cache.has(file))return cache.get(file);const mod={exports:{}};cache.set(file,mod.exports);
  const code=ts.transpileModule(fs.readFileSync(path.join(root,file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText;
- vm.runInNewContext(code,{module:mod,exports:mod.exports,require:n=>mocks[n]||(n.startsWith('.')||n.startsWith('@/')?load((n.startsWith('@/')?n.slice(2):path.normalize(path.join(path.dirname(file),n)))+(n.endsWith('.ts')?'':'.ts')):require(n)),process,console,Buffer,URL,Request,Response,Headers,ReadableStream,AbortSignal,setTimeout,clearTimeout,crypto:globalThis.crypto},{filename:file});cache.set(file,mod.exports);return mod.exports};return load;
+ vm.runInNewContext(code,{global:shared,module:mod,exports:mod.exports,require:n=>mocks[n]||(n.startsWith('.')||n.startsWith('@/')?load((n.startsWith('@/')?n.slice(2):path.normalize(path.join(path.dirname(file),n)))+(n.endsWith('.ts')?'':'.ts')):require(n)),process,console,Buffer,URL,Request,Response,Headers,ReadableStream,AbortSignal,setTimeout,clearTimeout,crypto:globalThis.crypto},{filename:file});cache.set(file,mod.exports);return mod.exports};return load;
 }
 function fixture(run){return async()=>{const dir=fs.mkdtempSync(path.join(os.tmpdir(),'channel-manager-test-')),previous=process.env.VIDEO_WORKS_DATA_DIR;process.env.VIDEO_WORKS_DATA_DIR=dir;try{await run(loader(),dir)}finally{if(previous===undefined)delete process.env.VIDEO_WORKS_DATA_DIR;else process.env.VIDEO_WORKS_DATA_DIR=previous;fs.rmSync(dir,{recursive:true,force:true})}}}
 const source=i=>'https://resource.vyibc.com/channel-fixture-'+i+'.mp4';
@@ -117,4 +117,35 @@ test('Douyin page route only accepts its dedicated publisher scope, rejects CSRF
  assert.equal(calls,0);assert.equal((await api.POST(post('works_publisher',{},'https://evil.test'),ctx)).status,403);
  assert.equal((await api.POST(post('works_publisher',{action:'publish',location:'unimplemented'}),ctx)).status,409);assert.equal(calls,0);
  assert.equal((await api.POST(post('works_publisher'),ctx)).status,200);assert.equal(calls,1);
+}));
+
+test('WeChat native work resolver inherits the account plan, preserves explicit empty body and refuses unsupported or conflicting inputs',fixture(async(load)=>{
+ const store=load('lib/video-works/store.ts'),content=load('lib/video-works/channel-content.ts'),id=register(store),account='gh_123456789012';
+ const resolver=load('lib/wechat/video-draft-content.ts');
+ content.saveChannelContent(store.getVideoWork(id),input({platform:'wechat',accountId:account,title:'公众号独立标题',description:'公众号独立正文',requestId:'wechat-native-plan'}));
+ const p=resolver.prepareWechatVideoWork({workId:id,expectedAccount:account});assert.equal(p.title,'公众号独立标题');assert.equal(p.description,'公众号独立正文');assert.equal(p.needsAdaptation,false);assert.equal(p.context.sourceAiGenerated,true);
+ assert.equal(resolver.prepareWechatVideoWork({workId:id,expectedAccount:account,description:''}).description,'');
+ assert.throws(()=>resolver.resolveWechatVideoCreate({workId:id,expectedAccount:account,confirmDraft:true}),/not_retained/);
+ store.updateVideoRegistration(source(0),{archive:{sha256:'b'.repeat(64),bytes:1000,storage:'local_original',savedAt:new Date().toISOString()},retentionState:'retained'});
+ const resolved=resolver.resolveWechatVideoCreate({workId:id,expectedAccount:account,confirmDraft:true});assert.equal(resolved.input.title,p.title);assert.equal(resolved.input.description,p.description);assert.equal(resolved.input.requestId,resolver.prepareWechatVideoWork({workId:id,expectedAccount:account}).requestId);assert.equal(resolver.resolveWechatVideoCreate({workId:id,expectedAccount:account,requestId:p.requestId,confirmDraft:true}).input.requestId,p.requestId);
+ for(const field of ['topics','cover','aiGenerated','confirmPublish'])assert.throws(()=>resolver.resolveWechatVideoCreate({workId:id,expectedAccount:account,confirmDraft:true,[field]:field==='topics'?[]:true}),/unsupported_parameter/);
+ assert.throws(()=>resolver.resolveWechatVideoCreate({workId:id,expectedAccount:account,videoUrl:source(99),confirmDraft:true}),/source_conflict/);
+ const legacy=resolver.resolveWechatVideoCreate({videoUrl:source(0),expectedAccount:account,requestId:'legacy-native-request',title:'URL直接标题',description:'',confirmDraft:true});assert.equal(legacy.input.title,'URL直接标题');assert.equal(legacy.input.description,'');
+ assert.equal(resolver.prepareWechatVideoWork({workId:id,expectedAccount:account,title:'长'.repeat(21)}).needsAdaptation,true);
+}));
+test('WeChat preflight and work draft query never open a browser; native request keeps complete account content across replay',fixture(async(load,dir)=>{
+ const store=load('lib/video-works/store.ts'),id=register(store),account='gh_123456789012';
+ store.updateVideoRegistration(source(0),{archive:{sha256:'c'.repeat(64),bytes:1000,storage:'local_original',savedAt:new Date().toISOString()},retentionState:'retained'});
+ const content=load('lib/video-works/channel-content.ts');content.saveChannelContent(store.getVideoWork(id),input({platform:'wechat',accountId:account,title:'草稿完整输入',description:'这段正文不能丢',requestId:'wechat-roundtrip-copy'}));
+ let browserCalls=0;const native=loader({'lib/video-works/store.ts':store,'lib/workflow/mcp-service.ts':{callWorkflowTool:()=>{browserCalls++;throw Error('browser_calls_forbidden')}},'lib/workflow/session-store.ts':{getSession:()=>null}});
+ const previous=process.env.WECHAT_MEDIA_DRAFT_LEDGER;process.env.WECHAT_MEDIA_DRAFT_LEDGER=path.join(dir,'native-ledger');
+ try{
+ const svc=native('lib/workflow/wechat-media-service.ts'),plan=await svc.callWechatMediaTool('wechat_prepare_video_draft',{workId:id,expectedAccount:account});assert.equal(plan.externalActionsTriggered,false);assert.equal(browserCalls,0);
+ const media=native('lib/wechat/media-draft.ts'),data=media.mediaDraftInput('video',{requestId:plan.requestId,expectedAccount:account,videoUrl:plan.videoUrl,title:plan.title,description:plan.description,confirmDraft:true});
+ media.reserveMediaDraft(data,plan.context);media.updateMediaDraft(account,data.requestId,{state:'completed',phase:'completed',receipt:{appMsgId:'fixture-draft',saveResponseAccepted:true,nativeEditorReloadVerified:true}});
+ const result=await svc.callWechatMediaTool('wechat_create_video_draft',{workId:id,expectedAccount:account,confirmDraft:true});
+ assert.equal(result.reused,true);assert.equal(result.publicationInput.description,'这段正文不能丢');assert.equal(result.publicationInput.accountId,account);assert.equal(result.publicationInput.aiGenerated,true);assert.equal(result.platformSettings.aiDeclaration,'not_set_by_tool');assert.equal(result.published,false);
+ const list=await svc.callWechatMediaTool('wechat_list_video_work_drafts',{workId:id});assert.equal(list.items.length,1);assert.equal(list.items[0].publicationInput.description,'这段正文不能丢');assert.equal(browserCalls,0);
+ assert.throws(()=>native('lib/wechat/video-draft-content.ts').prepareWechatVideoWork({workId:id,expectedAccount:account,requestId:'changed-existing-id'}),/use_original_request/);
+ }finally{if(previous===undefined)delete process.env.WECHAT_MEDIA_DRAFT_LEDGER;else process.env.WECHAT_MEDIA_DRAFT_LEDGER=previous}
 }));
