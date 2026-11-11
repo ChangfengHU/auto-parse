@@ -24,8 +24,7 @@ test('permanent video works: original fidelity, platform isolation, retry confli
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'video-works-test-')),previous=process.env.VIDEO_WORKS_DATA_DIR;
  process.env.VIDEO_WORKS_DATA_DIR=path.join(dir,'archive');
  try{
- const source=stripTypeScriptTypes(fs.readFileSync(path.join(root,'lib/video-works/store.ts'),'utf8'),{mode:'transform'});
- const store=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+ const store=loader()('lib/video-works/store.ts');
  const p={platform:'douyin',accountId:'53017623213',requestId:'fixture-request-123',sourceUrl:'https://resource.vyibc.com/fixture.mp4',title:'Original title',description:'Original description',topics:['test'],aiGenerated:true,mode:'prepare'};
  const first=store.recordVideoDelivery(p,{state:'reserved'});
  assert.equal(store.recordVideoDelivery(p).id,first.id);

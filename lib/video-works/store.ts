@@ -1,10 +1,12 @@
 import fs from 'node:fs';
+import {channelContentsForWork,contentRecords} from './channel-content';
+import type {WorkView} from './presentation';
 import path from 'node:path';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
 
-export type VideoPlatform='douyin'|'xiaohongshu'|'wechat'|'x'|'channels';
+export type VideoPlatform='douyin'|'xiaohongshu'|'wechat'|'x'|'channels'|'instagram'|'threads'|'facebook'|'tiktok';
 export type DeliveryState='reserved'|'running'|'prepared'|'draft_saved'|'published'|'failed'|'unknown';
 export type DeliveryInput={platform:VideoPlatform;accountId:string;requestId:string;sourceUrl:string;title:string;description:string;topics:string[];aiGenerated:boolean;mode:'prepare'|'draft'|'publish';cover?:{verticalUrl?:string;horizontalUrl?:string}};
 export type ArchivedVideo={sha256:string;bytes:number;savedAt:string;storage:'local_original'};
@@ -14,7 +16,7 @@ const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
 const root=()=>process.env.VIDEO_WORKS_DATA_DIR||path.join(process.cwd(),'.data','video-work-center');
 export const videoFileDirectory=()=>path.join(root(),'originals');
 const records=()=>path.join(root(),'deliveries');
-const platforms=['douyin','xiaohongshu','wechat','x','channels'];
+const platforms=['douyin','xiaohongshu','wechat','x','channels','instagram','threads','facebook','tiktok'];
 export function videoSourceUrl(value:string){
  const u=new URL(value);
  if(u.protocol!=='https:'||!['cdn.vyibc.com','resource.vyibc.com'].includes(u.hostname)||u.username||u.password||u.port||u.search||u.hash||!u.pathname.toLowerCase().endsWith('.mp4'))throw Error('video_work_source_invalid');
@@ -64,7 +66,7 @@ export function syncVideoWorkflowTask(task:TaskSnapshot){
  return recordVideoDelivery(input,{taskId:task.taskId,state,sourceCreatedAt:new Date(task.startedAt).toISOString(),...receipt?.awemeId?{receipt:{workId:String(receipt.awemeId),url:String(receipt.videoUrl||'https://www.douyin.com/video/'+receipt.awemeId),moderation:String(receipt.moderation||'pending_or_unknown')}}:{},...task.errorMessage?{error:/^[a-z0-9_]+$/.test(task.errorMessage)?task.errorMessage:'workflow_failed_check_original_task'}:{},provenance:'auto_parse_workflow'});
 }
 export function deliveryByTaskId(taskId:string){return allVideoDeliveries().find(d=>d.taskId===taskId)||null}
-export function listVideoWorks(options:{platform?:string;state?:DeliveryState|'registered';accountId?:string;q?:string;offset?:number;limit?:number}={}){
+export function listVideoWorks(options:{platform?:string;platforms?:string[];platformMatch?:'any'|'all';states?:string[];state?:DeliveryState|'registered'|'content_ready';accountId?:string;q?:string;offset?:number;limit?:number}={}){
  const all=allVideoDeliveries(),registered=registeredVideoWorks(),groups=new Map<string,VideoWork>();
  const sourceHashes=new Map<string,string>();for(const d of [...registered,...all.map(d=>({sourceUrl:d.input.sourceUrl,archive:d.archive}))])if(d.archive)sourceHashes.set(d.sourceUrl,d.archive.sha256);
  const visible=all.filter(d=>(!options.platform||d.input.platform===options.platform)&&(!options.accountId||d.input.accountId===options.accountId)),sources=new Set(visible.map(d=>d.input.sourceUrl));
@@ -79,8 +81,9 @@ export function listVideoWorks(options:{platform?:string;state?:DeliveryState|'r
   if(!g)groups.set(id,{id,title:d.input.title,description:d.input.description,topics:d.input.topics,aiGenerated:d.input.aiGenerated,sourceUrl:d.input.sourceUrl,sourceIds:[hash(d.input.sourceUrl)],sha256:sha,archive:d.archive||null,createdAt:d.sourceCreatedAt||d.createdAt,updatedAt:d.updatedAt,deliveries:[d]});
   else{g.deliveries.push(d);if(!g.sourceIds?.includes(hash(d.input.sourceUrl)))g.sourceIds?.push(hash(d.input.sourceUrl));if(d.updatedAt>g.updatedAt)g.updatedAt=d.updatedAt;if((d.sourceCreatedAt||d.createdAt)<g.createdAt)g.createdAt=d.sourceCreatedAt||d.createdAt;if(d.archive)g.archive=d.archive}
  }
- const q=options.q?.trim().toLocaleLowerCase()||'';
- const matching=[...groups.values()].filter(w=>!options.state||(options.state==='registered'?w.deliveries.length===0:w.deliveries.some(d=>d.state===options.state))).filter(w=>!q||JSON.stringify([w.id,w.sourceUrl,w.sourceIds,w.title,w.description,w.topics,w.deliveries.map(d=>[d.input.title,d.input.description,d.input.accountId,d.taskId,d.receipt?.workId])]).toLocaleLowerCase().includes(q)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+ const q=options.q?.trim().toLocaleLowerCase()||'',pool=contentRecords(),chosen=options.platforms||[],wanted=options.states?.length?options.states:options.state?[options.state]:[];
+ const stateMatch=(w:WorkView,p?:string)=>{const ds=w.deliveries.filter(d=>!p||d.input.platform===p),cs=(w.channelContents||[]).filter(c=>!p||c.platform===p);return !wanted.length?ds.length>0||cs.length>0:wanted.some(s=>s==='content_ready'?cs.length>0:s==='registered'?!ds.length&&(p?cs.length>0:true):ds.some(d=>d.state===s))};
+ const matching=[...groups.values()].map(w=>{const channelContents=channelContentsForWork(w,pool).filter(c=>(!options.platform||c.platform===options.platform)&&(!options.accountId||c.accountId===options.accountId));return {...w,channelContents,updatedAt:channelContents.reduce((a,c)=>c.updatedAt>a?c.updatedAt:a,w.updatedAt)}}).filter(w=>chosen.length?(options.platformMatch==='all'?chosen.every(p=>stateMatch(w,p)):chosen.some(p=>stateMatch(w,p))):!wanted.length||stateMatch(w)).filter(w=>!q||JSON.stringify([w.id,w.sourceUrl,w.sourceIds,w.title,w.description,w.topics,w.deliveries.map(d=>[d.input.title,d.input.description,d.input.accountId,d.taskId,d.receipt?.workId]),w.channelContents.map(c=>[c.title,c.description,c.accountId,c.topics])]).toLocaleLowerCase().includes(q)).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
  const offset=Math.max(0,Math.floor(options.offset||0)),limit=Math.min(100,Math.max(1,Math.floor(options.limit||20)));
  return {items:matching.slice(offset,offset+limit),total:matching.length,nextOffset:offset+limit<matching.length?offset+limit:null,retention:'permanent_until_explicit_owner_removal',workflowCacheIsArchive:false};
 }
