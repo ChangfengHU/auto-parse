@@ -4,15 +4,6 @@
 
 ## In Progress
 
-- [WORKFLOW-DOUYIN-20261119] 修复窄视口发布按钮不可点击与提交前诊断
-  Status: In Progress
-  Owner: codex
-  Updated: 2026-11-19
-  Log: dev-log/2026-11-19-douyin-layout-submit.md
-  Next: 固定任务页视口、提交前actionability试点与诊断持久化；保留历史未知发布意图，只通过真实作品核对消歧。
-
-
-
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
   Log: dev-log/2026-11-05-wechat-operations.md
@@ -161,6 +152,14 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+
+- [WORKFLOW-DOUYIN-20261119] 修复窄视口发布按钮不可点击与提交前诊断
+  Status: Done
+  Owner: codex
+  Updated: 2026-11-19
+  Log: dev-log/2026-11-19-douyin-layout-submit.md
+  Result: Douyin MCP0.3.1上线，原视频真实prepare及按钮trial通过；68项回归、类型、构建通过；Hub插件0.8.3/Skill0.8.2回读确认。历史未知意图保留，本轮未公开提交；原生客户端更新仍waiting_adoption/lease_active。
+
 
 - [STORAGE-001] 视频作品中心与抖音发布MCP长期留存
   Status: Done
