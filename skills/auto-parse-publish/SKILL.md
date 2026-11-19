@@ -105,3 +105,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 7. 原videoUrl+title+expectedAccount+requestId+confirmDraft直接调用仍兼容，不需要先入库；与workId一起传不同videoUrl会拒绝。topics/cover/aiGenerated/confirmPublish等不支持参数不允许传入；渠道标签封面可另存作品方案，不能说已应用到公众号草稿。
 
 公众号视频草稿与图文/news、贴图/newspic、网页文章发表是不同工具路径。此优化不把视频草稿变成公开发表，也不改动原正式工作流。页面与本MCP共用同一解析器、请求身份和作品台账；不是为页面另建发布器。
+
+## 抖音准备与失败诊断（MCP0.3.1）
+
+prepare_video不等于云草稿，也不等于公开发布；新版额外等待内容检测并验证发布按钮可点击，返回publishControlActionable与任务页viewport。get_video_task.failureDiagnostic区分publish_control/not_submitted与submission/unknown。前者先修页面，后者只对账原单；历史缺字段不能猜成未提交。详见references/douyin-video.md。

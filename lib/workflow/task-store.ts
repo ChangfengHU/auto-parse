@@ -267,7 +267,7 @@ export function setTaskStepError(
   stepIdx: number,
   error: string,
   duration: number,
-  meta?: { errorCode?: string; errorMsg?: string; screenshot?: string }
+  meta?: { errorCode?: string; errorMsg?: string; screenshot?: string; output?: Record<string, unknown> }
 ): void {
   const task = TASK_STORE.get(taskId);
   if (!task || !task.steps[stepIdx]) return;
@@ -276,6 +276,7 @@ export function setTaskStepError(
   task.steps[stepIdx].duration = duration;
   task.steps[stepIdx].error = error;
   task.steps[stepIdx].screenshot = meta?.screenshot;
+  task.steps[stepIdx].output = meta?.output;
   const parsed = parseWorkflowStepErrorMessage(error);
   task.steps[stepIdx].errorCode = meta?.errorCode ?? parsed.error_code;
   task.steps[stepIdx].errorMsg = meta?.errorMsg ?? parsed.error_msg;

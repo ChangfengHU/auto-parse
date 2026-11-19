@@ -80,10 +80,10 @@ test('AI disclosure is part of request fingerprint and unsafe asset origin is re
   assert.throws(() => ledger.publicationIdentity('request-test-01', uid, 'https://example.org/file.mp4', 'test'), /video_url_invalid/);
 });
 
-for (const mode of ['prepare-only', 'success', 'live-session', 'live-session-wrong-account', 'ai-success', 'ai-control-missing', 'ai-not-selected', 'upload-failed', 'content-failed', 'held', 'account-mismatch', 'missing-preflight', 'unknown-receipt', 'hold-before-submit']) {
+for (const mode of ['prepare-only', 'success', 'live-session', 'live-session-wrong-account', 'ai-success', 'ai-control-missing', 'ai-not-selected', 'upload-failed', 'content-failed', 'held', 'account-mismatch', 'missing-preflight', 'unknown-receipt', 'hold-before-submit', 'publish-control-blocked']) {
   test('actual workflow node: ' + mode, async () => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'douyin-publication-test-'));
-    let clicks = 0, fleetCalls = 0, declarations = 0;
+    let clicks = 0, fleetCalls = 0, declarations = 0, trials = 0; const viewports = [];
     const success = ['success', 'live-session', 'ai-success', 'held', 'hold-before-submit'].includes(mode);
     const params = { requestId: 'request-test-01', expectedAccountId: uid, videoUrl, title: 'test', aiGenerated: mode.startsWith('ai-'), confirmPublish: true };
     if (mode === 'prepare-only') { params.prepareOnly = true; params.confirmPublish = false; }
@@ -107,7 +107,7 @@ for (const mode of ['prepare-only', 'success', 'live-session', 'live-session-wro
         evaluate: async fn => fn.toString().includes('classList.contains') ? mode !== 'ai-not-selected' : [],
         locator: () => ({ click: async () => { declarations++; }, elementHandle: async () => ({}), isChecked: async () => mode !== 'ai-not-selected' }) }; },
     };
-    const button = { count: async () => 1, isEnabled: async () => true, click: async () => { clicks++; } };
+    const button = { count: async () => 1, isEnabled: async () => true, scrollIntoViewIfNeeded: async () => {}, click: async options => { if(options?.trial){trials++;if(mode==='publish-control-blocked'){const e=new Error('offscreen');e.name='TimeoutError';throw e;}return;}clicks++; } };
     let editorText = 'test';
     const editor = { ...locator, first() { return this; }, click: async () => {}, press: async key => {
       if (key === 'Backspace') editorText = '';
@@ -117,6 +117,7 @@ for (const mode of ['prepare-only', 'success', 'live-session', 'live-session-wro
       json: async () => mode === 'unknown-receipt' ? { status_code: 0 } : validBody };
     const page = {
       url: () => 'https://creator.douyin.com/creator-micro/content/post',
+      setViewportSize: async size => { viewports.push(size); }, viewportSize: () => viewports.at(-1) || {width:713,height:809},
       evaluate: async () => ['account-mismatch', 'live-session-wrong-account'].includes(mode) ? '99999999999' : uid,
       waitForFunction: async () => {}, locator: selector => selector === '[contenteditable="true"]' ? editor : locator,
       getByRole: (_role, options) => options.name === '发布' ? button : { isVisible: async () => false, click: async () => {} },
@@ -128,9 +129,12 @@ for (const mode of ['prepare-only', 'success', 'live-session', 'live-session-wro
     };
     try {
       const result = await sandbox.execute(page, params, context);
+      if(mode!=='missing-preflight'){assert.equal(viewports[0].width,1440);assert.equal(viewports[0].height,1000);}
+      if(mode==='publish-control-blocked'){assert.equal(result.success,false);assert.equal(result.error,'publication_control_not_actionable');assert.equal(result.output.publicationDiagnostic.submissionState,'not_submitted');assert.equal(result.output.publicationDiagnostic.stage,'publish_control');assert.equal(clicks,0);assert.equal(trials,1);await assert.rejects(fs.access(path.join(dir,'.data/douyin-publications')));return;}
       if (mode === 'prepare-only') {
         assert.equal(result.success, true);
         assert.equal(result.output.prepared, true);
+        assert.equal(result.output.publishControlActionable,true);assert.equal(trials,1);
         assert.equal(clicks, 0);
         assert.equal(fleetCalls, 0);
         await assert.rejects(fs.access(path.join(dir, '.data/douyin-publications')));
@@ -145,7 +149,7 @@ for (const mode of ['prepare-only', 'success', 'live-session', 'live-session-wro
         assert.equal(replay.success, success);
         assert.equal(clicks, 1, 'replay must never click again');
         if (success) assert.equal(replay.output.reused, true);
-        else assert.match(replay.error, /submission_unknown/);
+        else { assert.match(replay.error, /submission_unknown/); assert.equal(replay.output.publicationDiagnostic.submissionState,'unknown','original unknown cannot become not_submitted on replay'); }
       }
     } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });

@@ -404,6 +404,7 @@ async function startWorkflowAsync(taskId: string, task: WorkflowTask) {
             errorCode: result.errorCode,
             errorMsg: result.errorMsg,
             screenshot: result.screenshot,
+            output: result.output?.publicationDiagnostic ? { publicationDiagnostic: result.output.publicationDiagnostic } : undefined,
           });
         }
       },

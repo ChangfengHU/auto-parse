@@ -147,7 +147,7 @@ test('all four platform MCPs expose self version, backed by matching release met
  const dir=fs.mkdtempSync(path.join(require('node:os').tmpdir(),'platform-version-test-'));
  const file=path.join(dir,'release.json');
  try{
-  const versions={wechat:'0.6.0',douyin:'0.3.0',xiaohongshu:'0.1.1',x:'0.1.1'};
+  const versions={wechat:'0.6.0',douyin:'0.3.1',xiaohongshu:'0.1.1',x:'0.1.1'};
   fs.writeFileSync(file,JSON.stringify({versions,deploy_id:'release-test-1',working_tree_dirty:true,git_commit:'a'.repeat(40),deployed_at:'2026-11-02T03:22:27+08:00'}));
   const l=loader({}, {process:{...process,env:{AUTO_PARSE_RELEASE_METADATA:file}}});
   const c=l('lib/workflow/platform-mcp-contract.ts'),r=l('lib/workflow/platform-release.ts');
@@ -196,4 +196,10 @@ test('wechat collection tools are exposed read-only with account identity and no
   const t=entries.find(x=>x.name===name);assert.ok(t);assert.equal(t.annotations.readOnlyHint,true);
   assert.ok(t.inputSchema.required.includes('expectedAccount'));
  }
+});
+
+test('Douyin task exposes structured pre-submit failure and desktop prepare contract',async()=>{
+ const r=runtime();r.tasks.set('blocked',{workflowId:'approved-douyin',taskId:'blocked',status:'error',steps:[{status:'error',output:{publicationDiagnostic:{stage:'publish_control',submissionState:'not_submitted',viewport:{width:1440,height:1000}}}}]});
+ const value=await r.call('douyin','get_video_task',{taskId:'blocked'});assert.equal(value.failureDiagnostic.stage,'publish_control');assert.equal(value.failureDiagnostic.submissionState,'not_submitted');assert.equal(value.failureDiagnostic.viewport.width,1440);
+ const cap=await r.call('douyin','workflow_capabilities',{});assert.equal(cap.video.prepareChecksPublishControl,true);assert.equal(cap.video.publishViewport.width,1440);
 });

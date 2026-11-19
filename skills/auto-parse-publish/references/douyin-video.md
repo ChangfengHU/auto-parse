@@ -24,3 +24,9 @@
 - 历史回补只读取已有任务和回执，不代表重新发布；有创建回执仍不等于当前审核通过或公开可见。测试稿、失败和未知记录必须如实显示。
 
 0.3.0：prepare_video/publish_video可使用workId继承目标账号的渠道标题、正文、topics和cover；显式空正文/空数组/cover={}可清空继承值，仍需稳定accountId、requestId、真实aiGenerated和发布确认。直接videoUrl+title兼容保留；参数冲突或不支持项拒绝。返回publicationInput完整快照并写同一作品台账。页面非模态侧栏与MCP共用解析器，准备页仍非抖音云草稿。
+
+## 0.3.1：发布窗口与提交前核验
+
+任务页固定1440×1000桌面视口，不继承VNC小窗口。prepare_video也必须等内容检测通过，并执行发布按钮的scroll与trial可点击检查；trial不派发点击，不公开发布。prepared返回publishControlActionable=true及viewport，只代表当次页面通过，不保证稍后仍然可发布。
+
+get_video_task的failureDiagnostic返回stage、category、submissionState和viewport。publication_control_not_actionable且not_submitted表示按钮检查受阻，未点击、未预留发布意图；先解决布局/遮挡或页面校验。unknown表示已经进入可能提交阶段，只查原任务、原账本和真实作品，不得换requestId重发。历史没有诊断的错误不能反推not_submitted，旧submitting记录不会被本次修复自动清空。

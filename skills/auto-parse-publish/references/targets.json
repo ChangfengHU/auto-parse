@@ -1,19 +1,20 @@
 {
   "schema": "auto-parse-publish-routing/v1",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "verifiedOn": "2026-10-30",
   "runtimeAuthority": "live platform MCP schemas; Supabase rpa_workflows for browser publishers and native media drafts; official WeChat API for news/newspic; non-executable index",
   "providers": [
     {
       "key": "douyin-video",
       "server": "auto-parse-douyin-publish",
-      "capabilityVersion": "0.3.0",
+      "capabilityVersion": "0.3.1",
       "workflowId": "34f421be-f97c-498a-9c80-5214564abd1c",
       "browserInstance": 2,
       "reference": "douyin-video.md",
       "acceptance": "real_creation_receipt_verified; moderation distinct",
       "platform": "douyin",
-      "fieldContractCheckedOn": "2026-11-11"
+      "fieldContractCheckedOn": "2026-11-19",
+      "prepareChecksPublishControl": true
     },
     {
       "key": "xiaohongshu-video",

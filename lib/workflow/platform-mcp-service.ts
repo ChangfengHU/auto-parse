@@ -110,7 +110,7 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
    formats:platform==='wechat'?['news-preparation','news-web-publication','newspic-preparation','newspic-web-publication','video-draft','podcast-draft']:platform==='x'?['text','single-image']:['video','image-text'],
    wechatWebPublication:platform==='wechat'?WECHAT_WEB_CAPABILITIES:undefined,
    xPublication:platform==='x'?c.xPublication:undefined,imageTextPublication:platform==='x'||platform==='wechat'?undefined:{...(c.imageTextPublication as object),platforms:[platform==='xiaohongshu'?'xhs':'douyin']},
-   video:platform==='douyin'?{workflowId:DOUYIN_WORKFLOW_ID,...DOUYIN_VIDEO_OPTIONS,maxBytes:536870912,topics:'caption_text',fields:DOUYIN_VIDEO_OPTIONS,workIdReuse:true,normalizedInputReturned:true,unsupportedParameters:'rejected',cover:'experimental',receiptSources:['creation_response','creator_work_list'],archive:{owner:'auto-parse',retention:'permanent',originals:'content_hash_local_copy_on_upload',queryTools:['list_video_works','get_video_work'],prepareIsCloudDraft:false}}:undefined,
+   video:platform==='douyin'?{workflowId:DOUYIN_WORKFLOW_ID,...DOUYIN_VIDEO_OPTIONS,maxBytes:536870912,topics:'caption_text',fields:DOUYIN_VIDEO_OPTIONS,workIdReuse:true,normalizedInputReturned:true,unsupportedParameters:'rejected',cover:'experimental',receiptSources:['creation_response','creator_work_list'],publishViewport:{width:1440,height:1000,scope:'task_page'},prepareChecksPublishControl:true,failureDiagnostic:{field:'failureDiagnostic',submissionStates:['not_submitted','unknown']},archive:{owner:'auto-parse',retention:'permanent',originals:'content_hash_local_copy_on_upload',queryTools:['list_video_works','get_video_work'],prepareIsCloudDraft:false}}:undefined,
    limits:'Only platform-approved workflows; no arbitrary nodes/CRUD. User-authorized account control and explicit public publication. Unknown submissions must not be retried.'};
  }
  if(name==='workflow_list'){
@@ -144,7 +144,7 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
   if(typeof input.taskId==='string'&&!getWorkflowTask(input.taskId)){const archived=deliveryByTaskId(input.taskId);if(archived?.input.platform===platform)return {ok:true,taskId:input.taskId,status:archived.state,receipt:archived.receipt,archive:archived,workflowExecution:null,note:'Permanent archive; short-lived execution details are unavailable. Do not resubmit.'};}
   const task=assertVideoTask(input.taskId),output=task.steps.find(s=>s.output?.awemeId||s.output?.prepared)?.output;
   const receipt=task.publication||(output?.awemeId?output:null);
-  return {ok:true,taskId:task.taskId,status:receipt?'published':output?.prepared?'prepared':task.status,receipt,prepared:output?.prepared?output:null,workflowExecution:getWorkflowTaskSummary(task.taskId),publicationInput:deliveryByTaskId(task.taskId)?.input||null};
+  return {ok:true,taskId:task.taskId,status:receipt?'published':output?.prepared?'prepared':task.status,receipt,prepared:output?.prepared?output:null,failureDiagnostic:task.steps.find(s=>s.status==='error')?.output?.publicationDiagnostic||null,workflowExecution:getWorkflowTaskSummary(task.taskId),publicationInput:deliveryByTaskId(task.taskId)?.input||null};
  }
  if(name==='reconcile_video_task'){
   assertVideoTask(input.taskId);

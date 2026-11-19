@@ -40,6 +40,10 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
 
     const url = new URL(page.url());
     if (url.origin !== 'https://creator.douyin.com' || !url.pathname.includes('/content/post')) throw new Error('publication_page_invalid');
+    // The creator editor has a desktop minimum width. Never inherit a narrow VNC viewport.
+    phase = 'layout';
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    emit('任务发布页视口已固定为1440×1000');
     const verifyAccount = async () => {
       const accountId = await page.evaluate(async () => {
         const response = await fetch('/web/api/media/user/info/', { credentials: 'include', signal: AbortSignal.timeout(8000) });
@@ -82,7 +86,6 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
     let appliedCover;
     if (params.cover) {
       phase = 'cover';
-      await page.setViewportSize({ width: 1440, height: 1000 });
       appliedCover = await fillDouyinCovers(page, params.cover);
     }
     if (params.aiGenerated) {
@@ -116,20 +119,25 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
       // confirms it only after the selection and dialog confirmation above.
       await page.getByText('内容由AI生成', { exact: true }).and(page.locator(':visible')).first().waitFor({ state: 'visible' });
     }
-    if (params.prepareOnly) {
-      recordVideoDelivery(archiveInput,{state:'prepared'});
-      emit('发布预览已准备；未点击发布、未占用发布编号');
-      return { success: true, log, screenshot: await captureScreenshot(page), output: {
-        prepared: true, published: false, title: params.title, description: caption, topics,
-        topicMode: 'caption_text', cover: appliedCover ?? null,
-      } };
-    }
     emit('等待内容检测明确通过；超时不会继续发布');
     phase = 'content_check';
     await page.waitForFunction(() => /作品未见异常|检测通过|未发现异常|未见风险/.test(document.body.innerText), null, { timeout: 240000 });
     if (/无法发布|检测失败|审核不通过/.test(await page.locator('body').innerText())) throw new Error('content_check_failed');
+    phase = 'publish_control';
     const button = page.getByRole('button', { name: '发布', exact: true });
     if (await button.count() !== 1 || !await button.isEnabled()) throw new Error('publish_control_unconfirmed');
+    await button.scrollIntoViewIfNeeded({ timeout: 15000 });
+    // A trial performs actionability checks without dispatching a publish click.
+    // A blocked control must fail before reserving an uncertain submission.
+    await button.click({ trial: true, timeout: 15000 });
+    if (params.prepareOnly) {
+      recordVideoDelivery(archiveInput,{state:'prepared'});
+      emit('发布预览已准备；未点击发布、未占用发布编号');
+      return { success: true, log, screenshot: await captureScreenshot(page), output: {
+        prepared: true, published: false, publishControlActionable: true, viewport: page.viewportSize(), title: params.title, description: caption, topics,
+        topicMode: 'caption_text', cover: appliedCover ?? null,
+      } };
+    }
     await verifyAccount();
     await reservePublication(directory, key, fingerprint);
     phase = 'submission';
@@ -157,10 +165,16 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
     const detail = error instanceof Error ? (error.name === 'TimeoutError' ? 'timeout' :
       error.message.includes('strict mode violation') ? 'selector_ambiguous' : 'operation_failed') : 'operation_failed';
     emit('发布检查阶段：' + phase + '；类别：' + detail);
-    const message = error instanceof Error && /^[a-z_]+$/.test(error.message) ? error.message : 'publication_' + phase + '_failed';
-    if(archiveInput){try{recordVideoDelivery(archiveInput,{state:phase==='submission'||message.includes('unknown')?'unknown':'failed',error:message})}catch{emit('作品档案写入失败；保留原发布账本，禁止重发')}}
+    const message = phase === 'publish_control' && detail === 'timeout' ? 'publication_control_not_actionable' :
+      phase === 'submission' && detail === 'timeout' ? 'submission_unknown_do_not_retry' :
+      error instanceof Error && /^[a-z_]+$/.test(error.message) ? error.message : 'publication_' + phase + '_failed';
+    const submissionState = phase === 'submission' || /unknown|already_reserved|record_unreadable/.test(message) ? 'unknown' : 'not_submitted';
+    if(archiveInput){try{recordVideoDelivery(archiveInput,{state:submissionState==='unknown'?'unknown':'failed',error:message})}catch{emit('作品档案写入失败；保留原发布账本，禁止重发')}}
     emit('抖音发布节点停止：' + message);
     const screenshot = await captureScreenshot(page).catch(() => undefined);
-    return { success: false, log, error: message, screenshot };
+    return { success: false, log, error: message, screenshot, output: { publicationDiagnostic: {
+      stage: phase, category: detail, submissionState,
+      error: message, viewport: page.viewportSize(),
+    } } };
   }
 }

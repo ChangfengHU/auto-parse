@@ -4,6 +4,14 @@
 
 ## In Progress
 
+- [WORKFLOW-DOUYIN-20261119] 修复窄视口发布按钮不可点击与提交前诊断
+  Status: In Progress
+  Owner: codex
+  Updated: 2026-11-19
+  Log: dev-log/2026-11-19-douyin-layout-submit.md
+  Next: 固定任务页视口、提交前actionability试点与诊断持久化；保留历史未知发布意图，只通过真实作品核对消歧。
+
+
 
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
