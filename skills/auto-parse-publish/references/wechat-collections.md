@@ -1,0 +1,28 @@
+# 已发表文章归入指定合集
+指南0.8.3，公众号MCP0.6.1。运行时先get_version/tools/list，不能把工具存在当作真实写入已验收。当前验收状态以实际记录和capabilities为准。
+
+## 定时调用流程
+1. 使用wechat_list_collections获取现有合集ID。expectedAccount使用gh_原始ID。没有用户指定的规则，不自行推测大批作品应归到哪里。
+2. wechat_list_collection_candidates({expectedAccount,collectionId,query:明确关键词,recentDays:7,unassignedOnly:true})查询已发表的合适候选。默认最近7×24小时且未加入任何合集。原生关键词搜索在微信侧缩小范围；日期与是否已归类在当前页过滤，不会为一次搜索加载全部历史。按nextArguments原样继续，直到hasMore=false；它固定since避免分页时窗口漂移。只有用户明确需要旧内容才recentDays:0；要看已归类内容显式unassignedOnly:false。total按发表组统计，items按文章展开，两者不能直接比较；complete只表示一次结果覆盖了全部历史。selectionSupported=false的多篇发表组或不可选内容不强行加入。
+3. wechat_list_collection_items读取目标合集已有成员；只处理新增内容。不能因为某页没有作品，就断定作品不存在。
+4. 用独立稳定requestId调用wechat_add_collection_items，传collectionId、1–20个明确contentIds，dryRun:true。立刻返回后台任务，按wechat_collection_request_status查询；completed+result.status=planned后核对每项eligible/already_added/不可选或未遍历等状态。预览不改合集。
+5. 用户授权的分类规则和内容范围内，再以另一稳定requestId调用同工具，dryRun:false、confirmAdd:true。建议每3秒查原请求。queued/running/submitting不是已完成；仅completed且result.verified=wechat_success_and_reopened_editor才是保存回执与重新打开成员一致。
+6. 相同意图不换ID，不改内容偷偷重试。completed重放不会新增；已存在成员跳过。明确提交前失败可30秒后重试相同参数；unknown/submitting不自动重试，可status传reconcile:true查看当前成员。对账只说明当前集合是否包含目标，不冒充原请求回执。
+7. 一次批量复用同一浏览器会话，保留原成员相对顺序和元数据，并保留微信update_time/sync_version检查；最终保存最多一次。微信拒绝、成员回读不符或网络未知均按原单排查。不能删除台账绕过去重。
+
+## 边界
+这里只更新合集成员，不重新发表文章、不发送粉丝通知、不改变标题正文。每批最多20篇，maxPages默认20、最多100；到达扫描边界返回未遍历，不能说不存在。工具有进程内队列和跨进程浏览器租约，并发浏览器为1；重启不会自动重放中断提交。
+当前支持文章合集中的、后台确认为可加入的单篇发表组。公众号视频、视频号、贴图、播客和多篇发表组不能未经验收就声称支持；不合适的候选明确拒绝，不能悄悄漏掉一部分后报整批成功。
+工具不自建定时任务。调用方可按已授权规则定期做增量归类；规则模糊或无明确匹配时保留未分类，交用户处理。创建合集是另一独立操作，沿用wechat_create_collection及原请求对账。
+
+## 搜索口径
+
+时间来自微信已发表记录的update_time，返回publicationTime与timeSource，不从标题日期猜测。UTC滚动窗口可传recentDays=1/3/7；since可固定有时区的起点。total是微信关键词结果的发表组总数，尚未套用日期/未归类筛选。unknownAssignmentCount或unknownTimeCount不为0时说明部分记录缺乏可靠信息；不把缺字段当作未分类或旧文章。命中页保持后台时间倒序且末尾已跨过时间窗口时windowExhausted=true并停止后续页，complete仍不伪称全历史加载。
+
+明确目标ID的批量加入不受默认7天过滤；它按ID查询并找到即停止，传query可以进一步缩小候选。预览和正式请求的query须一致，否则原请求参数冲突。日常定时归类推荐只查询最近3–7天且未归类文章，避免反复遍历历史。
+
+## 2026-11-19实际验收
+
+通过MCP先跨两页预览，再批量添加两篇同主题已发表文章，微信ret=0且重新打开成员为2；随后单篇追加同主题旧文，重新打开成员为3，原有成员均保留。原请求重放返回reused；新请求重复相同成员返回already_added、changed=false、finalAttempted=false。原生关键词搜索把80组缩小到15组；最近3天+仅未归类筛选成功排除已经分类的文章，返回真实时间和空合集信息，没有把缺信息记录当作未分类。首次批量使用了原生跨页选择，后续关键词缩小搜索只读1页即找到目标。
+
+部署、Hub固定版本和客户端安装状态分别核实；后台保存成功不等于任意客户端已自动刷新新工具。

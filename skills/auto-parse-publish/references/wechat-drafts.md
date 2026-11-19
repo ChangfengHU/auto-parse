@@ -101,7 +101,7 @@ wechat_web_publish_status({expectedAccount,mediaId})读取重启持久账本。s
 - `aiGenerated` 须如实填写。微信创作来源是单选：`articleStatement` 支持 `ai_generated`、`official_media`、`fiction`、`personal_opinion`、`health`、`investment`、`none`。AI 内容必须选 `ai_generated`；非 AI 默认 `personal_opinion`。不支持转载或广告选项，也不能同时选 AI 和个人观点。页面选择经浏览器检查，完整发表尚未验收。
 - 图文可传 `notifyFollowers`，默认 false；贴图暂不支持开启。草稿作者与留言设置在建稿时指定，需回读验证。
 - `declareOriginal:true` 仅图文试验支持，需要 `originalAuthor` 和用户明确同意协议后的 `confirmOriginalAgreement:true`。不能替用户擅自同意；尚未通过实际发表验收。
-- `wechat_create_collection` 用于创建文章合集，须用户确认、账号原始 ID 和稳定 `requestId`；创建结果未知时查 `wechat_collection_request_status` 和合集列表，不换 ID 重试。该工具尚未真实创建验收。发表时绑定合集、添加文章尚未实现。
+- `wechat_create_collection` 用于创建文章合集，须用户确认、账号原始 ID 和稳定 `requestId`；创建结果未知时查 `wechat_collection_request_status` 和合集列表，不换 ID 重试。该工具尚未真实创建验收。发表时绑定合集尚未实现。发表后归入合集使用MCP0.6.1的wechat_add_collection_items（默认预览）及状态回读，完整分页、近几天和未归类搜索见wechat-collections.md。
 - 管理员扫码时保留原会话，优先提供工具返回的限时二维码链接；`wechat_web_assistance` 查询当前状态。微信受理不等于公开可见。
 
 

@@ -1,40 +1,9 @@
 import path from 'node:path';
 import {readCollectionIntent,reserveCollectionIntent,finishCollectionIntent} from './collection-ledger';
-import {chromium, type Browser, type Page} from 'playwright';
-import {acquireManagedBrowserActivity} from '../workflow/browser-activity';
 
 type Collection = {id:string; title:string; type:number; total:number; updatedAt:string};
-function account(input:unknown):string {
- if(typeof input!=='string'||!/^gh_[a-zA-Z0-9]{12}$/.test(input))throw Error('wechat_web_invalid_account');
- return input;
-}
-async function withCollections<T>(expected:string,run:(page:Page)=>Promise<T>):Promise<T>{
- const release=await acquireManagedBrowserActivity('http://127.0.0.1:9222',undefined,12);
- let browser:Browser|undefined; let page:Page|undefined;
- try{
-  browser=await chromium.connectOverCDP('http://127.0.0.1:9222',{timeout:15000});
-  const context=browser.contexts()[0];if(!context)throw Error('wechat_collection_browser_missing');
-  page=await context.newPage();
-  await page.goto('https://mp.weixin.qq.com/',{waitUntil:'domcontentloaded',timeout:30000});
-  await page.waitForFunction(()=>!!(window as unknown as {wx?:{data?:{user_name?:string}}}).wx?.data?.user_name,null,{timeout:30000});
-  const actual=await page.evaluate(()=>(window as unknown as {wx?:{data?:{user_name?:string}}}).wx?.data?.user_name);
-  if(actual!==expected)throw Error('wechat_web_account_mismatch');
-  await page.evaluate(()=>{
-   const a=Array.from(document.querySelectorAll('a')).find(x=>x.href.includes('/cgi-bin/appmsgalbummgr'));
-   if(!a)throw Error('collection_menu_missing');location.assign(a.href);
-  });
-  await page.waitForURL('**/cgi-bin/appmsgalbummgr**',{timeout:30000});
-  await page.waitForFunction(()=>Array.from(document.querySelectorAll('div')).some(e=>{
-   const data=(e as unknown as {__vue__?:{$data?:Record<string,unknown>}}).__vue__?.$data;
-   return data&&Array.isArray(data.totalList)&&typeof data.totalAll==='number';
-  }),null,{timeout:30000});
-  return await run(page);
- }finally{
-  if(page&&!page.isClosed())await page.close().catch(()=>{});
-  if(browser)await browser.close().catch(()=>{});
-  await release();
- }
-}
+import {withCollections,collectionAccount as account,readCollectionCandidates,listCollectionItems} from './collection-browser';
+import {startCollectionBatch,collectionBatchStatus,reconcileCollectionBatch} from './collection-membership';
 export async function listWechatCollections(input:Record<string,unknown>){
  const expected=account(input.expectedAccount);
  return withCollections(expected,async page=>{
@@ -52,61 +21,14 @@ export async function listWechatCollections(input:Record<string,unknown>){
  });
 }
 
-export async function listWechatCollectionCandidates(input:Record<string,unknown>){
- const expected=account(input.expectedAccount);
- const id=typeof input.collectionId==='string'?input.collectionId:'';
- if(!/^[0-9]{1,30}$/.test(id))throw Error('wechat_collection_invalid_id');
- return withCollections(expected,async page=>{
-  const info=await page.evaluate((wanted)=>{
-   for(const e of Array.from(document.querySelectorAll('div'))){
-    const d=(e as unknown as {__vue__?:{$data?:Record<string,unknown>}}).__vue__?.$data;
-    if(!d||!Array.isArray(d.totalList)||typeof d.totalAll!=='number')continue;
-    const rows=d.totalList as Array<Record<string,unknown>>;
-    const found=rows.filter(a=>String(a.id)===wanted);
-    if(found.length!==1)return {found:false,complete:rows.length>=Number(d.totalAll)};
-    return {found:true,complete:rows.length>=Number(d.totalAll),title:String(found[0].title||'')};
-   }
-   throw Error('wechat_collection_list_unavailable');
-  },id);
-  if(!info.found)throw Error(info.complete?'wechat_collection_not_found':'wechat_collection_list_incomplete');
-  const cells=page.locator('td.album-title:visible').filter({hasText:info.title});
-  await cells.first().waitFor({state:'visible',timeout:20000});
-  const rows=page.locator('tr:visible').filter({has:cells});
-  if(await rows.count()!==1)throw Error('wechat_collection_row_ambiguous');
-  const context=page.context();
-  const [editor]=await Promise.all([context.waitForEvent('page',{timeout:15000}),rows.first().getByText('编辑',{exact:true}).click({timeout:15000})]);
-  try{
-   await editor.getByPlaceholder('填写名称').waitFor({timeout:30000});
-   const verified=await editor.evaluate(()=>{
-    for(const el of Array.from(document.querySelectorAll('div'))){
-     const d=(el as unknown as {__vue__?:{$data?:Record<string,unknown>}}).__vue__?.$data;
-     if(d&&typeof d.albumId!=='undefined'&&Array.isArray(d.albumList))return {id:String(d.albumId),title:String((d.formInfo as Record<string,unknown>)?.title||'')};
-    }
-    return null;
-   });
-   if(!verified||verified.id!==id)throw Error('wechat_collection_editor_mismatch');
-   await editor.getByRole('button',{name:'添加已有内容'}).click();
-   await editor.getByText('只能选择已发表内容，如需添加草稿，请先前往草稿箱发表后添加。',{exact:true}).waitFor({state:'visible',timeout:15000});
-   await editor.waitForFunction(()=>{const e=document.querySelector('.publish_dialog');const d=(e as unknown as {__vue__?:{$data?:Record<string,unknown>}})?.__vue__?.$data;return d&&Array.isArray(d.currentList)&&d.loading===false;},null,{timeout:30000});
-   const result=await editor.evaluate(()=>{
-    const el=document.querySelector('.publish_dialog');
-    const d=(el as unknown as {__vue__?:{$data?:Record<string,unknown>}})?.__vue__?.$data;
-    if(!d||!Array.isArray(d.currentList))throw Error('wechat_collection_candidates_unavailable');
-    const items=(d.currentList as Array<Record<string,unknown>>).flatMap(row=>{
-     const infos=Array.isArray(row.appmsgex)?row.appmsgex:[];
-     return infos.map(raw=>{const a=raw as Record<string,unknown>;return {contentId:String(a.aid||''),articleId:String(a.appmsgid||''),itemIndex:Number(a.itemidx||0),title:String(a.title||'')};});
-    });
-    return {items,total:typeof d.totalCount==='number'?d.totalCount:null};
-   });
-   return {account:expected,collectionId:id,collectionTitle:info.title,...result,complete:result.total!==null&&result.items.length>=result.total,note:'Only already-published content is eligible. This read-only call does not add or publish content.'};
-  }finally{await editor.close().catch(()=>{});}
- });
-}
-
+export const listWechatCollectionCandidates=readCollectionCandidates;
+export const listWechatCollectionItems=listCollectionItems;
+export const addWechatCollectionItems=startCollectionBatch;
 
 const collectionLedgerRoot=()=>path.join(process.cwd(),'.data/wechat-collection-requests');
-export function wechatCollectionRequestStatus(input:Record<string,unknown>){
+export async function wechatCollectionRequestStatus(input:Record<string,unknown>){
  const expected=account(input.expectedAccount),id=String(input.requestId||'');
+ const batch=collectionBatchStatus(expected,id);if(batch.found)return input.reconcile===true?reconcileCollectionBatch(input):batch;
  const record=readCollectionIntent(collectionLedgerRoot(),expected,id);
  return record?{found:true,...record,note:'submitting or unknown requires manual reconciliation; never change requestId and resubmit.'}:{found:false,requestId:id};
 }
@@ -191,46 +113,10 @@ export function validateCollectionAddPayload(body:string,collectionId:string,exp
 
 
 export async function addWechatCollectionItem(input:Record<string,unknown>){
- const expected=account(input.expectedAccount),requestId=String(input.requestId||''),collectionId=String(input.collectionId||''),contentId=String(input.contentId||'');
  if(input.confirmAdd!==true)throw Error('wechat_collection_confirmation_required');
+ const expected=account(input.expectedAccount),requestId=String(input.requestId||''),collectionId=String(input.collectionId||''),contentId=String(input.contentId||'');
  if(!/^[0-9]{1,30}$/.test(collectionId)||!/^\d{1,30}_\d{1,4}$/.test(contentId))throw Error('wechat_collection_invalid_id');
- const root=collectionLedgerRoot(),intent={operation:'add',collectionId,contentId};
- const prior=readCollectionIntent(root,expected,requestId);
- if(prior)return {reused:true,...reserveCollectionIntent(root,expected,requestId,intent)};
- return withCollections(expected,async page=>{
-  const info=await page.evaluate(id=>{for(const el of Array.from(document.querySelectorAll('div'))){const d=(el as unknown as {__vue__?:{$data?:Record<string,unknown>}}).__vue__?.$data;if(d&&Array.isArray(d.totalList)&&typeof d.totalAll==='number'){const rows=d.totalList as Array<Record<string,unknown>>,matches=rows.filter(x=>String(x.id)===id);return {complete:rows.length>=d.totalAll,title:matches.length===1?String(matches[0].title||''):''}}}throw Error('wechat_collection_list_unavailable')},collectionId);
-  if(!info.complete||!info.title)throw Error('wechat_collection_not_found_or_incomplete');
-  const openEditor=async()=>{const cells=page.locator('td.album-title:visible').filter({hasText:info.title});const rows=page.locator('tr:visible').filter({has:cells});if(await rows.count()!==1)throw Error('wechat_collection_row_ambiguous');const [editor]=await Promise.all([page.context().waitForEvent('page',{timeout:15000}),rows.first().getByText('编辑',{exact:true}).click()]);await editor.getByPlaceholder('填写名称').waitFor({timeout:30000});return editor};
-  const state=async(editor:Page)=>editor.evaluate(()=>{for(const el of Array.from(document.querySelectorAll('div'))){const d=(el as unknown as {__vue__?:{$data?:Record<string,unknown>}}).__vue__?.$data;if(d&&typeof d.albumId!=='undefined'&&Array.isArray(d.albumList))return {id:String(d.albumId),ids:(d.albumList as Array<Record<string,unknown>>).map(x=>String(x.aid||''))}}throw Error('wechat_collection_editor_unavailable')});
-  let editor=await openEditor();
-  try{
-   const before=await state(editor);if(before.id!==collectionId)throw Error('wechat_collection_editor_mismatch');
-   if(before.ids.includes(contentId))return {status:'already_added',collectionId,contentId};
-   if(before.ids.some(x=>!/^\d+_\d+$/.test(x))||new Set(before.ids).size!==before.ids.length)throw Error('wechat_collection_existing_items_unverified');
-   await editor.getByRole('button',{name:'添加已有内容'}).click();
-   await editor.waitForFunction(()=>{const e=document.querySelector('.publish_dialog');const d=(e as unknown as {__vue__?:{$data?:Record<string,unknown>}})?.__vue__?.$data;return d&&Array.isArray(d.currentList)&&d.loading===false},null,{timeout:30000});
-   const candidates=await editor.evaluate(id=>{const e=document.querySelector('.publish_dialog');const d=(e as unknown as {__vue__?:{$data?:Record<string,unknown>}})?.__vue__?.$data;const rows=d?.currentList as Array<Record<string,unknown>>;return rows.map((r,i)=>({i,items:Array.isArray(r.appmsgex)?(r.appmsgex as Array<Record<string,unknown>>).map(x=>String(x.aid||'')):[]})).filter(r=>r.items.includes(id))},contentId);
-   if(candidates.length!==1||candidates[0].items.length!==1)throw Error('wechat_collection_candidate_unavailable_or_multiple');
-   const boxes=editor.locator('.publish_dialog .appmsg-list-publish input[type=checkbox]');if(await boxes.count()<=candidates[0].i)throw Error('wechat_collection_candidate_control_mismatch');
-   await boxes.nth(candidates[0].i).evaluate((e:HTMLInputElement)=>e.click());
-   const selected=await editor.evaluate(()=>{const e=document.querySelector('.publish_dialog');const d=(e as unknown as {__vue__?:{$data?:Record<string,unknown>}})?.__vue__?.$data;return (d?.selectedList as Array<Record<string,unknown>>||[]).flatMap(r=>(r.appmsgex as Array<Record<string,unknown>>||[]).map(x=>String(x.aid||'')))});
-   if(selected.length!==1||selected[0]!==contentId)throw Error('wechat_collection_candidate_selection_mismatch');
-   await editor.locator('.publish_dialog').getByRole('button',{name:'确定',exact:true}).evaluate((e:HTMLElement)=>e.click());
-   const after=await state(editor),wanted=[...before.ids,contentId];if(after.id!==collectionId||after.ids.join(',')!==wanted.join(','))throw Error('wechat_collection_candidate_selection_mismatch');
-   const concurrent=readCollectionIntent(root,expected,requestId);if(concurrent)return {reused:true,...reserveCollectionIntent(root,expected,requestId,intent)};
-   reserveCollectionIntent(root,expected,requestId,intent);
-   let receipt:Record<string,unknown>|undefined;
-   await editor.route('**/cgi-bin/appmsgalbummgr**',async route=>{const req=route.request(),u=new URL(req.url());if(req.method()!=='POST'||u.searchParams.get('action')!=='commit')return route.continue();try{validateCollectionAddPayload(req.postData()||'',collectionId,wanted);const response=await route.fetch({maxRetries:0,maxRedirects:0,timeout:30000});const data=await response.json();receipt={httpStatus:response.status(),wechatCode:data?.base_resp?.ret??data?.ret};await route.fulfill({response})}catch{await route.abort().catch(()=>{})}});
-   try{
-    await editor.getByRole('button',{name:'发布',exact:true}).click({timeout:15000});
-    for(let i=0;i<30&&!receipt;i++)await editor.waitForTimeout(1000);
-    if(!receipt||receipt.httpStatus!==200||!(receipt.wechatCode===0||receipt.wechatCode==='0'))throw Error('wechat_collection_result_unknown');
-    await editor.close().catch(()=>{});await page.reload({waitUntil:'domcontentloaded',timeout:30000});
-    await page.locator('td.album-title:visible').filter({hasText:info.title}).first().waitFor({timeout:30000});
-    editor=await openEditor();const verified=await state(editor);
-    if(verified.id!==collectionId||verified.ids.join(',')!==wanted.join(','))throw Error('wechat_collection_result_unknown');
-    const result={collectionId,contentId,operation:'add',verified:'response_and_editor_readback'};finishCollectionIntent(root,expected,requestId,'created',result);return {status:'added',requestId,...result};
-   }catch{try{finishCollectionIntent(root,expected,requestId,'unknown')}catch{};return {status:'unknown',requestId,collectionId,contentId,note:'Reconcile collection and original request; do not retry unknown mutations.'};}
-  }finally{await editor.close().catch(()=>{})}
- });
+ const old=readCollectionIntent(collectionLedgerRoot(),expected,requestId);
+ if(old)return {reused:true,...reserveCollectionIntent(collectionLedgerRoot(),expected,requestId,{operation:'add',collectionId,contentId})};
+ return startCollectionBatch({...input,contentIds:[contentId],dryRun:false});
 }

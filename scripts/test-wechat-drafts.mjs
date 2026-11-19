@@ -57,7 +57,7 @@ const create=(r,id='create-1',articles=[article])=>r.callWechatDraftTool('wechat
 test.after(()=>{for(const r of suites)fs.rmSync(r.cwd,{recursive:true,force:true});});
 test('wechat catalog has independent auth and only approved preparation workflow',()=>{
  const c=loader()('lib/workflow/platform-mcp-contract.ts'),names=c.platformMcpTools('wechat').map(x=>x.name);
- assert.equal(names.length,34);assert(names.includes('wechat_add_collection_item'));assert(names.includes('wechat_list_collections'));assert(names.includes('wechat_list_collection_candidates'));assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(names.includes('workflow_open_session'));assert(!names.includes('workflow_create'));assert(!names.includes('workflow_update'));
+ assert.equal(names.length,38);assert(names.includes('wechat_add_collection_item'));assert(names.includes('wechat_list_collections'));assert(names.includes('wechat_list_collection_candidates'));assert(names.includes('wechat_create_draft'));assert(names.includes('wechat_delete_draft'));assert(names.includes('wechat_publish_draft'));assert(names.includes('workflow_open_session'));assert(!names.includes('workflow_create'));assert(!names.includes('workflow_update'));
  const env={WORKFLOW_MCP_TOKEN:'fixture'};
  for(const other of ['douyin','xiaohongshu','x']){
   const req=new Request('https://auto-parse-v2.vyibc.com/api/publish/mcp/wechat',{headers:{authorization:'Bearer '+c.platformMcpToken(other,env)}});
@@ -279,13 +279,14 @@ test('advertised native schema passes actual MCP recursive argument validation',
  assert.equal(validate(def.inputSchema,{requestId:'schema-native',confirmDraft:true,articles:[{...newspic,images:[{imageUrl:'https://resource.vyibc.com/a.png',extra:1}]}]}),false);
 });
 
-test('permanent GIF uploads preserve media type; inline GIF is rejected',async()=>{
+test('permanent and inline GIF uploads preserve media type',async()=>{
  const gif=Buffer.concat([Buffer.from('GIF89a'),Buffer.alloc(32)]);
  const r=setup([token,()=>new Response(gif),{media_id:'gif-id'}]);
  assert.equal((await r.callWechatDraftTool('wechat_upload_image',{requestId:'gif-one',imageUrl:'https://resource.vyibc.com/a.gif',purpose:'newspic'})).media_id,'gif-id');
  assert.equal(r.calls[2].init.body.get('media').type,'image/gif');
- const q=setup([token,()=>new Response(gif)]);
- await assert.rejects(q.callWechatDraftTool('wechat_upload_image',{requestId:'gif-inline',imageUrl:'https://resource.vyibc.com/a.gif',purpose:'inline'}),/unsupported_image_format/);
+ const q=setup([token,()=>new Response(gif),{url:'https://mmbiz.qpic.cn/fixture-inline.gif'}]);
+ assert.equal((await q.callWechatDraftTool('wechat_upload_image',{requestId:'gif-inline',imageUrl:'https://resource.vyibc.com/a.gif',purpose:'inline'})).url,'https://mmbiz.qpic.cn/fixture-inline.gif');
+ assert.equal(q.calls[2].init.body.get('media').type,'image/gif');
 });
 test('failed image URL reports exact index and HTTP status without poisoning replay state',async()=>{
  const r=setup([token,()=>new Response('missing',{status:404})]);

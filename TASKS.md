@@ -4,6 +4,12 @@
 
 ## In Progress
 
+- [WECHAT-COLLECTIONS-20261119] 已发表内容分页与批量归类
+  Status: In Progress
+  Owner: codex
+  Log: dev-log/2026-11-19-wechat-collections.md
+  Next: 现有MCP补分页、集合回读、批量预检/添加与原请求对账；先优化，再按用户授权用同主题内容实测。
+
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
   Log: dev-log/2026-11-05-wechat-operations.md
