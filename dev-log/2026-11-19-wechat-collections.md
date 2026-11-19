@@ -7,3 +7,11 @@
 真实验收：两篇跨页批量添加ret=0并重开确认2篇；原请求重放reused；重复成员新意图already_added且未最终提交；单篇通过关键词仅查一页追加第三篇，保存后重开3篇且旧成员保留。关键词从80组缩到15，最近3天未归类过滤正确，已分类文章排除。创建定时任务、非图文合集/视频/贴图/音频均未执行，不扩大验收结论。当前85项测试、类型检查、Lint已通过；新加时间边界用例和最终生产构建、部署、广场回读等待收尾。
 
 最终代码验证：86项相关回归全部通过，TypeScript与定向ESLint通过。最近3天未归类结果在第一页到达边界，upstreamHasMore仍为true而查询hasMore=false，未读取旧页；归类后筛选结果为空且缺失元数据计数为0。后续构建部署和Hub固定版本需分别回读。
+
+部署完成：2026-11-19T08:21:17.398793Z，auto-parse-wechat-collections-749178d9-0144-43da-9b53-ee64d14c1dec，编译代码77b54401fedeac0ba54f9454363f554ebf7588f1。生产工作目录保持/opt/auto-parse，使用隔离源码的.next-wechat-collections-20261119，既有解析和R2工作保留为未提交变更，未纳入本任务提交。此前根工作树的视频0.7草稿发表开发没有混入此次0.6.1上线；后续从根目录构建前应先整合本分支合集能力，防止覆盖已上线功能。
+
+公网MCP回读0.6.1/38工具，其他4个MCP版本未改；作品页200。编译后新进程读取原批量完成回执，重新打开合集成员3篇；公网最近3天未归类为0，时间边界停止而上游仍有旧页。已安装单篇MCP再次调用返回already_added，pagesRead=0、changed=false、finalAttempted=false。
+
+Hub固定版本MCP0.6.1、完整Skill0.8.3、插件0.8.5均成功登记回读，插件其他组件未变。原生ChatGPT自动采用仍waiting_adoption/lease_active，未绕过其他发布租约，不宣称已刷新本客户端全部新工具。配置与实测摘要归档到已确认Notion私密开发运维页：https://app.notion.com/p/41dfcac1bb0281928000c9669d0f753f 。
+
+回退：只移除本次/etc/systemd/system/auto-parse.service.d/zzzzzzzzz-wechat-collections-061.conf，daemon-reload并restart原服务；不删除持久归类回执。回退未实际执行。临时开发/编译验收服务收尾停止，保留正式生产构建、源码和业务证据。

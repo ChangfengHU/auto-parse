@@ -4,11 +4,6 @@
 
 ## In Progress
 
-- [WECHAT-COLLECTIONS-20261119] 已发表内容分页与批量归类
-  Status: In Progress
-  Owner: codex
-  Log: dev-log/2026-11-19-wechat-collections.md
-  Next: 现有MCP补分页、集合回读、批量预检/添加与原请求对账；先优化，再按用户授权用同主题内容实测。
 
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
@@ -158,6 +153,17 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+
+- [WECHAT-COLLECTIONS-20261119] 已发表文章合集归类与近期未归类搜索
+  Status: Done
+  Owner: codex
+  Updated: 2026-11-19
+  Log: dev-log/2026-11-19-wechat-collections.md
+  Source: .worktrees/wechat-collections-20261119 · fix/wechat-collections-20261119
+  Release: MCP0.6.1 · Skill0.8.3 · Hub插件0.8.5；编译代码77b54401
+  Result: 86项测试、类型/Lint/构建及公网通过；真实跨页批量加入2篇，再单篇追加第3篇，保留原成员；重复跳过且不保存；原生关键词、最近几天和未归类筛选已实测，时间边界即停止。
+  Limits: 仅文章合集中的单篇发表组；未创建定时任务。ChatGPT原生App自动采用仍待lease_active释放。
+
 
 - [WORKFLOW-DOUYIN-20261119] 修复窄视口发布按钮不可点击与提交前诊断
   Status: Done

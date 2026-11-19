@@ -164,6 +164,26 @@
       "browserRequired": true,
       "acceptance": "real_news_admin_scan_and_submission_ret_0; publication_record_then_deleted; public_visibility_not_confirmed",
       "fieldContractCheckedOn": "2026-11-11"
+    },
+    {
+      "key": "wechat-collection-classification",
+      "platform": "wechat",
+      "server": "auto-parse-wechat-publish",
+      "capabilityVersion": "0.6.1",
+      "reference": "wechat-collections.md",
+      "transport": "guarded_native_browser_collection_editor",
+      "browserRequired": true,
+      "browserInstance": 1,
+      "tools": [
+        "wechat_list_collections",
+        "wechat_list_collection_candidates",
+        "wechat_list_collection_items",
+        "wechat_add_collection_items",
+        "wechat_add_collection_item",
+        "wechat_collection_request_status"
+      ],
+      "fieldContractCheckedOn": "2026-11-19",
+      "acceptance": "real_batch_two_and_single_append_preserve_existing_members; same_request_replay_and_duplicate_skip; native_keyword_recent_days_unassigned_filters; no_republication_or_schedule; video_newspic_audio_not_verified"
     }
   ],
   "verificationNotes": {
