@@ -158,7 +158,7 @@
   Owner: codex
   Updated: 2026-11-19
   Log: dev-log/2026-11-19-douyin-layout-submit.md
-  Result: Douyin MCP0.3.1上线，原视频真实prepare及按钮trial通过；68项回归、类型、构建通过；Hub插件0.8.3/Skill0.8.2回读确认。历史未知意图保留，本轮未公开提交；原生客户端更新仍waiting_adoption/lease_active。
+  Result: Douyin MCP0.3.1上线，原视频真实prepare通过，随后经用户明确授权正式publish_video取得真实作品ID并跳转作品管理，永久台账回读published；68项回归、类型、构建通过；Hub插件0.8.3/Skill0.8.2回读确认。历史未知意图保留；原生客户端更新仍waiting_adoption/lease_active。
 
 
 - [STORAGE-001] 视频作品中心与抖音发布MCP长期留存
