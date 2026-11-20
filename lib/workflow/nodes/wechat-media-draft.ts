@@ -120,7 +120,7 @@ export async function executeWechatMediaDraft(root:Page,params:Params,ctx:Workfl
    if(!selected)throw Error('media_audio_transcoding_pending');
   }
   stage('editing_draft');
-  await page.getByText(input.kind==='video'?'视频贴片':'可根据音频内容，自动生成时间轴',{exact:false}).first().waitFor();
+  if(input.kind==='video')await page.locator('#title:visible').waitFor({timeout:30000});else await page.getByText('可根据音频内容，自动生成时间轴',{exact:false}).first().waitFor();
   await page.locator('#title').fill(input.title);
   if(input.description){
    const description=page.locator('.ProseMirror[contenteditable=true]:visible');
