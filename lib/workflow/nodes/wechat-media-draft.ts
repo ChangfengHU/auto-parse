@@ -49,7 +49,7 @@ export async function executeWechatMediaDraft(root:Page,params:Params,ctx:Workfl
    const popup=page.waitForEvent('popup');await page.getByRole('button',{name:'本地上传',exact:true}).click();
    const material=await popup;track(material);await protect(material);await material.waitForLoadState('domcontentloaded');
    const notice=material.getByRole('button',{name:'知道了',exact:true});if(await notice.isVisible().catch(()=>false))await notice.click();
-   stage('uploading_video_file');await material.locator('input[type=file][accept="video/*"]').setInputFiles(asset.filename);
+   stage('uploading_video_file');await material.locator('input[type=file][accept="video/*"]').setInputFiles(asset.filename,{timeout:240000});
    stage('waiting_video_upload');await material.getByText('视频上传成功，你可以继续编辑其它信息保存提交',{exact:true}).waitFor({timeout:180000});
    stage('loading_video_cover');
    await material.waitForFunction(()=>Array.from(document.querySelectorAll<HTMLImageElement>('.cover__options__item__image')).some(img=>img.offsetParent&&img.complete&&img.naturalWidth>0),{},{timeout:90000});
@@ -96,7 +96,7 @@ export async function executeWechatMediaDraft(root:Page,params:Params,ctx:Workfl
    await page.getByRole('button',{name:'确定',exact:true}).click();
   }else{
    await page.getByText('上传音频',{exact:true}).click({timeout:45000});
-   stage('uploading_audio_file');await page.locator('input[type=file][id^=ftnUpload_]').setInputFiles(asset.filename);
+   stage('uploading_audio_file');await page.locator('input[type=file][id^=ftnUpload_]').setInputFiles(asset.filename,{timeout:180000});
    stage('selecting_audio_cover');await page.getByText('使用账号头像',{exact:true}).click();
    stage('waiting_audio_upload');
    await page.locator('.select_audio_cover .weui-desktop-loading').waitFor({state:'hidden',timeout:90000});
