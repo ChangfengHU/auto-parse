@@ -86,7 +86,7 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
     let appliedCover;
     if (params.cover) {
       phase = 'cover';
-      appliedCover = await fillDouyinCovers(page, params.cover);
+      appliedCover = await fillDouyinCovers(page, params.cover, emit);
     }
     if (params.aiGenerated) {
       phase = 'ai_declaration';
@@ -135,7 +135,7 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
       emit('发布预览已准备；未点击发布、未占用发布编号');
       return { success: true, log, screenshot: await captureScreenshot(page), output: {
         prepared: true, published: false, publishControlActionable: true, viewport: page.viewportSize(), title: params.title, description: caption, topics,
-        topicMode: 'caption_text', cover: appliedCover ?? null,
+        topicMode: 'caption_text', cover: appliedCover?.urls ?? null, coverVerification: appliedCover?.evidence ?? null,
       } };
     }
     await verifyAccount();
@@ -160,7 +160,7 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
     await finishPublication(directory, key, fingerprint, receipt);
     recordVideoDelivery(archiveInput,{state:'published',receipt:{workId:receipt.awemeId,url:receipt.videoUrl,moderation:receipt.moderation}});
     emit('已取得真实作品创建回执；平台审核状态仍需另行查询');
-    return { success: true, log, output: receipt };
+    return { success: true, log, output: { ...receipt, cover: appliedCover?.urls ?? null, coverVerification: appliedCover?.evidence ?? null } };
   } catch (error) {
     const detail = error instanceof Error ? (error.name === 'TimeoutError' ? 'timeout' :
       error.message.includes('strict mode violation') ? 'selector_ambiguous' : 'operation_failed') : 'operation_failed';
@@ -174,6 +174,7 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
     const screenshot = await captureScreenshot(page).catch(() => undefined);
     return { success: false, log, error: message, screenshot, output: { publicationDiagnostic: {
       stage: phase, category: detail, submissionState,
+      ...(error instanceof Error && error.name === 'DouyinCoverError' ? { cover: { orientation: (error as Error & {orientation: string}).orientation, stage: (error as Error & {stage: string}).stage, code: error.message } } : {}),
       error: message, viewport: page.viewportSize(),
     } } };
   }

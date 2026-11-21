@@ -1,6 +1,6 @@
 export const DOUYIN_VIDEO_OPTIONS={
  title:{maxCharacters:30},description:{maxCharacters:900},topics:{maxItems:5,maxCharacters:30,format:'letters_numbers_underscore'},
- cover:{experimental:true,formats:['jpeg','png'],maxBytes:8388608,orientations:['vertical_3_4','horizontal_4_3']},
+ cover:{experimental:false,verifiedThrough:'editor_preview',publicCoverReadbackVerified:false,verificationOutput:'coverVerification',formats:['jpeg','png'],maxBytes:8388608,orientations:['vertical_3_4','horizontal_4_3']},
  aiGenerated:true,maxBytes:536870912,prepareIsCloudDraft:false,
  unsupported:['scheduledPublish','location','collection','productLink','visibility','commentSettings','cloudDraftSave']
 } as const;
@@ -14,5 +14,5 @@ export const DOUYIN_VIDEO_FIELDS={
  topics:{type:'array',maxItems:5,items:{type:'string',minLength:1,maxLength:30,pattern:'^[\\p{L}\\p{N}_]{1,30}$'},description:'Up to five tags without #. Omission inherits a channel plan, otherwise []; explicit [] clears tags.'},
  aiGenerated:{type:'boolean',description:'Truthful platform AI declaration, not text added to the title/body. Cannot clear an existing AI work classification.'},
  requestId:{...str,minLength:8,maxLength:100,pattern:'^[A-Za-z0-9_-]{8,100}$',description:'Stable identifier for this intent. Never change it after an unknown submission.'},
- cover:{type:'object',properties:{verticalUrl:{...str,description:'Optional JPEG/PNG cover for 3:4, <=8MiB.'},horizontalUrl:{...str,description:'Optional JPEG/PNG cover for 4:3, <=8MiB.'}},additionalProperties:false,description:'Experimental custom covers. Owned HTTPS resource/cdn URLs only, no query or fragment. Omission inherits a channel plan; {} explicitly uses platform defaults.'}
+ cover:{type:'object',properties:{verticalUrl:{...str,description:'Optional JPEG/PNG cover for 3:4, <=8MiB.'},horizontalUrl:{...str,description:'Optional JPEG/PNG cover for 4:3, <=8MiB.'}},additionalProperties:false,description:'Custom covers with per-orientation upload, dialog and preview verification; editor preparation verified, public-post cover readback not newly verified. Owned HTTPS resource/cdn URLs only, no query or fragment. Omission inherits a channel plan; {} explicitly uses platform defaults.'}
 };

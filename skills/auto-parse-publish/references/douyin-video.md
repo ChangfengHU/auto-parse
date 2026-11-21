@@ -8,7 +8,7 @@
 4. get_video_task({taskId})查原任务。submitted/published的含义以实际回执为准，不当作审核通过。
 5. submission_unknown先核对原taskId和平台精确awemeId；reconcile_video_task({taskId,awemeId})只对账不再上传，但仍访问账号，应在原任务授权内。该端点不提供Fleet作品补登记工具，所需后续登记由原维护入口处理。
 
-当前能力：标题30字、正文900字、最多5个话题。topics是caption_text，不保证平台原生话题实体。封面vertical/horizontal接口为experimental，未经实际验收不保证成功。上传保持原视频字节，当前本地上限512MiB、256KiB磁盘分块；此数值是实现限制，不代表平台官方最大限额。
+当前能力：标题30字、正文900字、最多5个话题。topics是caption_text，不保证平台原生话题实体。封面支持竖版与横版JPG/PNG，已真实验证到编辑器保存与预览；公开作品封面需另行回读。上传保持原视频字节，当前本地上限512MiB、256KiB磁盘分块；此数值是实现限制，不代表平台官方最大限额。
 真实创建回执与任务查询路线已验证，仍须每次核对账号、声明和新任务结果。
 
 ## 视频作品中心与永久留存（抖音 MCP 0.3.0）
@@ -30,3 +30,20 @@
 任务页固定1440×1000桌面视口，不继承VNC小窗口。prepare_video也必须等内容检测通过，并执行发布按钮的scroll与trial可点击检查；trial不派发点击，不公开发布。prepared返回publishControlActionable=true及viewport，只代表当次页面通过，不保证稍后仍然可发布。
 
 get_video_task的failureDiagnostic返回stage、category、submissionState和viewport。publication_control_not_actionable且not_submitted表示按钮检查受阻，未点击、未预留发布意图；先解决布局/遮挡或页面校验。unknown表示已经进入可能提交阶段，只查原任务、原账本和真实作品，不得换requestId重发。历史没有诊断的错误不能反推not_submitted，旧submitting记录不会被本次修复自动清空。
+
+## 0.3.2：自定义横竖封面
+
+传入 cover.verticalUrl（3:4）和/或 cover.horizontalUrl（4:3）；两张可同时传。仅接受 resource.vyibc.com / cdn.vyibc.com 的 HTTPS JPG/PNG，每张最多8MiB，不带查询参数。本机路径不能直接传入；先通过已授权上传服务取得地址。仅传一张不会擅自用另一张图片补齐；不传沿用渠道方案，cover={}清空继承后使用平台默认。
+
+示例（其他必填字段按 live schema 提供）：
+```json
+{"cover":{"verticalUrl":"https://resource.vyibc.com/example-3x4.jpg","horizontalUrl":"https://resource.vyibc.com/example-4x3.png"}}
+```
+
+准备和正式发布共用同一个封面适配器：按横竖标签定位，使用原生封面上传框，与AI参考图上传隔离；处理保存后的可选双封面推荐，逐张核对弹窗已确认且对应预览改变，第二张不能覆盖第一张。自动化不替图片设计文字，也不保证任意比例素材裁切美观，建议预先按目标比例设计。
+
+get_video_task.prepared.cover 回显实际应用的图片地址，coverVerification 按 vertical/horizontal 返回 sha256、bytes、previewChanged、dialogConfirmed。正式提交前封面失败会停止，failureDiagnostic.cover 返回 orientation、stage、code，submissionState=not_submitted。不可把图片参数被接受、页面上原本有图或准备完成当作公开作品封面已验收。
+
+2026-11-21 已通过真实正式工作流的 JPG竖封面 + PNG横封面同时应用、弹窗处理、两个独立预览、AI声明和发布按钮trial验证；没有公开发布测试片。prepare_video 仍不是云草稿保存，公开作品封面及审核结果须真实发表后另行回查。
+
+本次在编辑器观察到合集、谁可以看、保存权限、定时发布、视频章节、关联热点和同时发布选项；它们尚未接入本MCP，不得按已支持调用或通过任意点击替代受保护发布流程。

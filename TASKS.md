@@ -4,6 +4,13 @@
 
 ## In Progress
 
+- [WORKFLOW-DOUYIN-COVER-20261121] 抖音自定义封面真实上传、横竖裁切与回读
+  Status: In Progress
+  Updated: 2026-11-21
+  Log: dev-log/2026-11-21-douyin-cover.md
+  Next: 沿用正式Supabase授权副本，核对新版封面弹窗并通过非公开prepare验收，部署并保存源码。
+
+
 
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress

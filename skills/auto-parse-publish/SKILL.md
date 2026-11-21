@@ -89,7 +89,7 @@ description: 使用现有 AutoParse 正式工作流与抖音发布 MCP，为用�
 
 抖音 prepare_video / publish_video 0.3.0 支持 workId，自动读取该账号/渠道方案，或沿用 videoUrl+title 的直接路径；稳定accountId、aiGenerated、requestId必填，公开提交另需confirmPublish=true。显式title/description/topics/cover覆盖渠道方案；空正文、空标签和cover={}分别表示清空或平台默认。支持的字段、限制和未接入项查 workflow_capabilities.video.fields；额外参数会被拒绝，不静默忽略。
 
-每次检查返回 publicationInput，包括平台、账号、源视频、标题、正文、标签、横竖封面（无自定义则null）、AI声明、模式与请求号。该内容由同一适配层交给正式工作流并入作品台账；页面不拿后改的渠道方案替代历史快照。标题最多30字，正文900字符，最多5个无#标签；封面JPEG/PNG每张<=8MiB，实验能力，不承诺裁切自动正确。定时、位置、合集、商品关联、可见范围与评论设置未接入，不能传空字段或用普通点击绕过去补。
+每次检查返回 publicationInput，包括平台、账号、源视频、标题、正文、标签、横竖封面（无自定义则null）、AI声明、模式与请求号。该内容由同一适配层交给正式工作流并入作品台账；页面不拿后改的渠道方案替代历史快照。标题最多30字，正文900字符，最多5个无#标签；封面JPEG/PNG每张<=8MiB，支持横竖独立或同时设置，并回传coverVerification核验；已验证到真实发布页，不承诺任意素材裁切美观或将prepared视为云草稿。定时、位置、合集、商品关联、可见范围与评论设置未接入，不能传空字段或用普通点击绕过去补。
 
 作品页为右侧栏，明确区分准备发布页、公众号视频草稿与公开抖音提交。网页抖音授权通过作品中心MCP显式includeDouyinPublishing取得，旧草稿/内容编辑授权不扩权。未授权公开提交的界面测试不得点最终发布。公众号视频草稿不支持标签、自定义封面或AI声明设置；原片内容属性与实际平台设置分别解释。
 
