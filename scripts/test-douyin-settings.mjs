@@ -48,3 +48,7 @@ test('real DOM: exact collection names with regex characters and scheduled timez
 test('missing controls fail with the exact field and never claim editor verification',async()=>{
  const p=await fixture();try{await p.getByText('保存权限',{exact:true}).locator('..').evaluate(e=>e.remove());await assert.rejects(api.applyDouyinSettings(p,{allowDownload:false}),e=>e.field==='allowDownload'&&e.message==='publication_settings_control_unconfirmed')}finally{await p.close()}
 });
+
+test('already-empty collection must not open a native popup that can block the next declaration',async()=>{
+ const p=await fixture();try{await p.evaluate(()=>{window.openOptions=()=>{throw Error('empty collection must not reopen')}});const r=await api.applyDouyinSettings(p,{visibility:'public',allowDownload:false});assert.equal(r.collectionName,null);assert.equal(r.editorVerified,true);assert.equal(await p.getByRole('listbox').count(),0)}finally{await p.close()}
+});

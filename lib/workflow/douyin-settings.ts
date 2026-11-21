@@ -59,6 +59,8 @@ export function douyinCollectionPicker(page: Page) {
 export async function chooseDouyinCollection(page: Page, name: string | null) {
   const picker = douyinCollectionPicker(page);
   if (await picker.count() !== 1) throw Error('publication_collection_control_unconfirmed');
+  const current=(await picker.innerText()).trim();
+  if(name===null&&['不选择合集','请选择合集'].includes(current))return{name:null,observedNames:[],complete:false};
   await picker.click({timeout:15000});
   let observedNames:string[]=[];
   const option = page.getByRole('option').filter({hasText:new RegExp('^'+(name ?? '不选择合集').replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$')}).and(page.locator(':visible'));
@@ -67,6 +69,8 @@ export async function chooseDouyinCollection(page: Page, name: string | null) {
     if (await option.count() !== 1) throw Error('publication_collection_ambiguous');
     observedNames=await page.getByRole('option').and(page.locator(':visible')).allTextContents();
     await option.click({timeout:10000});
+    await page.keyboard.press('Escape');
+    await page.getByRole('listbox').and(page.locator(':visible')).waitFor({state:'hidden',timeout:3000});
   } catch (error) {
     await page.keyboard.press('Escape').catch(()=>{});
     if (error instanceof Error && error.message === 'publication_collection_ambiguous') throw error;
