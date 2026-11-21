@@ -1,3 +1,4 @@
+import {retryDouyinVideoTask} from './douyin-request-retry';
 import {getDouyinVideoPublication} from './douyin-publication-readback';
 import {resolveDouyinPublicationInput} from './douyin-publication-input';
 import {DOUYIN_VIDEO_OPTIONS} from './douyin-video-fields';
@@ -143,6 +144,7 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
   const result=await startDouyinWorkflow(p);
   return {...result,publicationInput:{platform:'douyin',accountId:value.accountId,sourceUrl:value.videoUrl,title:value.title,description:value.description,topics:value.topics,cover:value.cover||null,...value.settings?{settings:value.settings}:{},aiGenerated:value.aiGenerated,mode:name==='prepare_video'?'prepare':'publish',requestId:value.requestId},inputSchemaVersion:value.settings?2:1};
  }
+ if(name==='retry_video_task'){assertVideoTask(input.taskId);return retryDouyinVideoTask(String(input.taskId),input.confirmRetry===true);}
  if(name==='get_video_publication'){return getDouyinVideoPublication(String(input.accountId),String(input.awemeId));}
  if(name==='get_video_task'){
   if(typeof input.taskId==='string'&&!getWorkflowTask(input.taskId)){const archived=deliveryByTaskId(input.taskId);if(archived?.input.platform===platform)return {ok:true,taskId:input.taskId,status:archived.state,receipt:archived.receipt,archive:archived,workflowExecution:null,note:'Permanent archive; short-lived execution details are unavailable. Do not resubmit.'};}

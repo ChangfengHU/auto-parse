@@ -65,3 +65,5 @@ visibility 为 public / friends / private；allowDownload 控制允许保存；c
 新增get_video_publication({accountId,awemeId})，核对账号后读取最近作品页中的精确ID，返回原生封面、可见/审核状态、保存权限和上游暴露的合集信息；不存在于这一页不等于从未发布，不允许据此换ID重发。它不编辑、删除或重发，也不冒充未登录公众可见性验证。
 
 发布测试作品需用户授权；本次已获得“发布一个供检查，由用户手动删除”的授权。测试稿明确标为功能验证，不将测试结果当日常内容发表。
+
+浏览器忙或明确not_submitted失败可调用retry_video_task({taskId,confirmRetry:true})，服务保留原内容、账号、requestId并返回替换taskId。原taskId重复调用复用同一替换任务；已有提交意图、unknown和无法证明未提交的失败均拒绝，不开放覆写内容。等待浏览器空闲后重试，不强占其他正式任务。
