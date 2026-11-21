@@ -46,6 +46,7 @@ export function recordVideoDelivery(input:DeliveryInput,patch:Partial<Omit<Video
  const state=(old?.state==='published'||old?.state==='scheduled'||old?.state==='draft_saved')?old.state:patch.state||old?.state||'reserved';
  const next:VideoDelivery={...old,...patch,id,input:clean,fingerprint,createdAt:old?.createdAt||now,updatedAt:old&&Object.keys(patch).every(k=>k==='archive')?old.updatedAt:now,state};
  if(old?.receipt)next.receipt={...old.receipt,...patch.receipt};
+ if(input.platform==='douyin'&&['published','scheduled'].includes(state)&&next.receipt?.workId){delete next.error;if(old?.receipt?.workId&&patch.receipt===undefined&&patch.state&&!['published','scheduled'].includes(patch.state))next.taskId=old.taskId;}
  atomic(file,next);const registered=registerVideoWork({...clean,origin:'publisher'},true);if(next.archive&&!registered.record.archive)updateVideoRegistration(clean.sourceUrl,{archive:next.archive,retentionState:'retained'});return next;
 }
 export function patchVideoDelivery(id:string,patch:Partial<Omit<VideoDelivery,'id'|'input'|'fingerprint'|'createdAt'>>){

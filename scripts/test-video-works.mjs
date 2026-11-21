@@ -200,3 +200,13 @@ test('web draft API and MCP share business operations; anonymous, CSRF and publi
  assert.equal((await api.GET(new Request('https://auto-parse-v2.vyibc.com',{headers:{'x-test-scope':'works'}}),ctx)).status,200);
  assert.equal((await api.GET(new Request('https://auto-parse-v2.vyibc.com'),ctx)).status,401);assert.equal(calls,1,'status read never creates a second draft');
 });
+
+test('successful Douyin retry keeps winning receipt and task when old failure ticks arrive',()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'douyin-winning-retry-')),previous=process.env.VIDEO_WORKS_DATA_DIR;process.env.VIDEO_WORKS_DATA_DIR=dir;
+ try{const store=loader()('lib/video-works/store.ts');const input={platform:'douyin',accountId:'12345678',requestId:'same-request-success',sourceUrl:'https://resource.vyibc.com/test.mp4',title:'test',description:'body',topics:[],aiGenerated:true,mode:'publish'};
+ store.recordVideoDelivery(input,{state:'failed',taskId:'old',error:'old failure'});
+ store.recordVideoDelivery(input,{state:'published',taskId:'winner',receipt:{workId:'7710000000000000001'}});
+ store.recordVideoDelivery(input,{state:'failed',taskId:'old',error:'old failure'});
+ const row=store.allVideoDeliveries()[0];assert.equal(row.state,'published');assert.equal(row.taskId,'winner');assert.equal(row.error,undefined);assert.equal(row.receipt.workId,'7710000000000000001');
+ }finally{if(previous===undefined)delete process.env.VIDEO_WORKS_DATA_DIR;else process.env.VIDEO_WORKS_DATA_DIR=previous;fs.rmSync(dir,{recursive:true,force:true})}
+});

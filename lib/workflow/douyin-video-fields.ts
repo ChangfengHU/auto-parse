@@ -1,8 +1,8 @@
 export const DOUYIN_VIDEO_OPTIONS={
  title:{maxCharacters:30},description:{maxCharacters:900},topics:{maxItems:5,maxCharacters:30,format:'letters_numbers_underscore'},
- cover:{experimental:false,verifiedThrough:'editor_preview',publicCoverReadbackVerified:false,verificationOutput:'coverVerification',formats:['jpeg','png'],maxBytes:8388608,orientations:['vertical_3_4','horizontal_4_3']},
+ cover:{experimental:false,verifiedThrough:'editor_and_creator_primary_cover',creatorPrimaryCoverReadbackVerified:true,publicCoverReadbackVerified:false,verificationOutput:'coverVerification',formats:['jpeg','png'],maxBytes:8388608,orientations:['vertical_3_4','horizontal_4_3']},
  aiGenerated:true,maxBytes:536870912,prepareIsCloudDraft:false,
- settings:{fields:['visibility','allowDownload','collectionName','scheduledAt'],visibility:['public','friends','private'],schedule:{minimumHours:2,maximumDays:14,timezone:'Explicit offset input; browser timezone reported',verifiedThrough:'editor_only'},collectionSelection:'unique_exact_name',verification:{visibility:'editor',allowDownload:'editor',scheduledAt:'editor_only',collectionName:'positive_live_case_unverified'},crossPosting:'disabled'},
+ settings:{fields:['visibility','allowDownload','collectionName','scheduledAt'],visibility:['public','friends','private'],schedule:{minimumHours:2,maximumDays:14,timezone:'Explicit offset input; browser timezone reported',verifiedThrough:'editor_only'},collectionSelection:'unique_exact_name',verification:{visibility:'creator_readback_public_and_editor_private',allowDownload:'creator_readback_disabled',scheduledAt:'editor_only',collectionName:'positive_live_case_unverified'},crossPosting:'disabled'},
  unsupported:['location','productLink','commentSettings','cloudDraftSave','crossPosting','videoChapters','hotspot']
 } as const;
 const str={type:'string',minLength:1};
