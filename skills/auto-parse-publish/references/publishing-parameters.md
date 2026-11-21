@@ -124,3 +124,5 @@ Instagram/Threads/Facebook/TikTok/视频号：目前可按对应platform保存�
 “已发抖音、公众号还没同步”：使用独立作品中心MCP完整分页读取各渠道投递，按抖音真实published且目标公众号无已确认draft_saved/published交叉筛选；指定账号时必须同账号口径。不要用抖音专用查询或旧platform单值过滤后推断公众号没有记录，它们可能只返回单平台投影。
 
 当前没有单独的负向渠道排除参数，由Agent对完整记录交叉筛选。unknown/running/reserved单列等待核实，失败记录单列；prepared和只有content_ready都不算公众号草稿。尚无公众号成功记录仅说明作品中心没有相应证据，不证明用户从未手动发表。缺口查询不触发保存或补发；批量补稿需本次用户已授权的目标范围。
+
+抖音0.4.0新增settings.visibility/allowDownload/collectionName/scheduledAt；定时、已有合集的验收边界与完整例子以douyin-video.md的0.4.0节为准。get_video_publication可回读精确作品。

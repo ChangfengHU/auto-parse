@@ -77,3 +77,6 @@ auto-parse-douyin-publish 0.3.0 的 prepare_video / publish_video 可以传 work
 公众号原生插件现提供wechat_prepare_video_draft({workId,...})只读预检、wechat_create_video_draft({workId,...,confirmDraft:true})以及wechat_list_video_work_drafts({workId,...})。它们与作品中心页面/专用MCP共用账号渠道方案解析；标题正文显式覆盖，空正文保留，稳定requestId去重，旧URL调用兼容。返回完整publicationInput与platformSettings，不再只返回标题而隐藏正文。查询旧记录时缺上下文返回null，不编造AI声明/自定义封面。
 
 原生工具不支持tags/customCover/AI声明，不能把保存的渠道方案当作已应用。图文和贴图发表是另外的公众号工具；视频这条路径仍只存草稿。不要重复创建另一套工作流。以每个MCP实际get_version及客户端工具表为准。
+
+## 0.3.2：抖音发布设置留存
+抖音MCP0.4.0投递可带settings设置可见范围、保存权限、已有合集和定时，作品记录保存实际输入与核验结果。scheduled代表有预约创建回执，不是已公开；published也只代表取得创建回执。调阅原请求，未知结果不换ID重发。完整调用和真实验收范围见自动发布指南，作品中心自身不新增公开发表权限。

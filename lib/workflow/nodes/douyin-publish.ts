@@ -1,3 +1,4 @@
+import {applyDouyinSettings,type DouyinPublicationSettings} from '../douyin-settings';
 import type { Page } from 'playwright';
 import path from 'node:path';
 import {recordVideoDelivery,deliveryInputFromDouyin} from '../../video-works/store';
@@ -12,6 +13,7 @@ type Params = {
   verifyCurrentSession?: boolean;
   prepareOnly?: boolean; description?: string; topics?: string[];
   cover?: { verticalUrl?: string; horizontalUrl?: string };
+  settings?: DouyinPublicationSettings;
 };
 
 // This is a workflow node: it consumes the current page after credential_login/file_upload.
@@ -88,6 +90,8 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
       phase = 'cover';
       appliedCover = await fillDouyinCovers(page, params.cover, emit);
     }
+    let appliedSettings;
+    if(params.settings!==undefined){phase='settings';appliedSettings=await applyDouyinSettings(page,params.settings,emit);}
     if (params.aiGenerated) {
       phase = 'ai_declaration';
       const hint = page.getByRole('button', { name: '我知道了', exact: true });
@@ -131,11 +135,11 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
     // A blocked control must fail before reserving an uncertain submission.
     await button.click({ trial: true, timeout: 15000 });
     if (params.prepareOnly) {
-      recordVideoDelivery(archiveInput,{state:'prepared'});
+      recordVideoDelivery(archiveInput,{state:'prepared',...appliedSettings?{settingsVerification:appliedSettings}:{}});
       emit('发布预览已准备；未点击发布、未占用发布编号');
       return { success: true, log, screenshot: await captureScreenshot(page), output: {
         prepared: true, published: false, publishControlActionable: true, viewport: page.viewportSize(), title: params.title, description: caption, topics,
-        topicMode: 'caption_text', cover: appliedCover?.urls ?? null, coverVerification: appliedCover?.evidence ?? null,
+        topicMode: 'caption_text', cover: appliedCover?.urls ?? null, coverVerification: appliedCover?.evidence ?? null, settingsVerification: appliedSettings ?? null,
       } };
     }
     await verifyAccount();
@@ -157,10 +161,11 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
     await button.click({ timeout: 15000 });
     const receipt = await receiptPromise;
     if (!receipt) throw new Error('submission_unknown_do_not_retry');
-    await finishPublication(directory, key, fingerprint, receipt);
-    recordVideoDelivery(archiveInput,{state:'published',receipt:{workId:receipt.awemeId,url:receipt.videoUrl,moderation:receipt.moderation}});
+    const verifiedReceipt={...receipt,...appliedSettings?{settingsVerification:appliedSettings,publicationMode:params.settings?.scheduledAt?'scheduled' as const:'immediate' as const,...params.settings?.scheduledAt?{scheduledAt:params.settings.scheduledAt}:{}}:{},...appliedCover?{coverVerification:appliedCover.evidence}:{}};
+    await finishPublication(directory, key, fingerprint, verifiedReceipt);
+    recordVideoDelivery(archiveInput,{state:params.settings?.scheduledAt?'scheduled':'published',receipt:{workId:receipt.awemeId,url:receipt.videoUrl,moderation:params.settings?.scheduledAt?'scheduled_not_public':receipt.moderation},...appliedSettings?{settingsVerification:appliedSettings}:{}});
     emit('已取得真实作品创建回执；平台审核状态仍需另行查询');
-    return { success: true, log, output: { ...receipt, cover: appliedCover?.urls ?? null, coverVerification: appliedCover?.evidence ?? null } };
+    return { success: true, log, output: { ...verifiedReceipt, cover: appliedCover?.urls ?? null, coverVerification: appliedCover?.evidence ?? null } };
   } catch (error) {
     const detail = error instanceof Error ? (error.name === 'TimeoutError' ? 'timeout' :
       error.message.includes('strict mode violation') ? 'selector_ambiguous' : 'operation_failed') : 'operation_failed';
@@ -174,6 +179,7 @@ export async function executeDouyinPublish(page: Page, params: Params, ctx: Work
     const screenshot = await captureScreenshot(page).catch(() => undefined);
     return { success: false, log, error: message, screenshot, output: { publicationDiagnostic: {
       stage: phase, category: detail, submissionState,
+      ...(error instanceof Error && error.name==='DouyinSettingsError'?{settings:{field:(error as Error & {field:string}).field,stage:(error as Error & {stage:string}).stage,code:error.message}}:{}),
       ...(error instanceof Error && error.name === 'DouyinCoverError' ? { cover: { orientation: (error as Error & {orientation: string}).orientation, stage: (error as Error & {stage: string}).stage, code: error.message } } : {}),
       error: message, viewport: page.viewportSize(),
     } } };

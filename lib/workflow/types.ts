@@ -185,6 +185,7 @@ export interface ClickParams {
     aiGenerated: boolean; confirmPublish: boolean;
     prepareOnly?: boolean; description?: string; topics?: string[];
     cover?: { verticalUrl?: string; horizontalUrl?: string };
+    settings?: import('./douyin-settings').DouyinPublicationSettings;
   }
   useSelector?: boolean
   selector?: string

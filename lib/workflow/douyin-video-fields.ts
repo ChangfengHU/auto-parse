@@ -2,10 +2,12 @@ export const DOUYIN_VIDEO_OPTIONS={
  title:{maxCharacters:30},description:{maxCharacters:900},topics:{maxItems:5,maxCharacters:30,format:'letters_numbers_underscore'},
  cover:{experimental:false,verifiedThrough:'editor_preview',publicCoverReadbackVerified:false,verificationOutput:'coverVerification',formats:['jpeg','png'],maxBytes:8388608,orientations:['vertical_3_4','horizontal_4_3']},
  aiGenerated:true,maxBytes:536870912,prepareIsCloudDraft:false,
- unsupported:['scheduledPublish','location','collection','productLink','visibility','commentSettings','cloudDraftSave']
+ settings:{fields:['visibility','allowDownload','collectionName','scheduledAt'],visibility:['public','friends','private'],schedule:{minimumHours:2,maximumDays:14,timezone:'Explicit offset input; browser timezone reported',verifiedThrough:'editor_only'},collectionSelection:'unique_exact_name',verification:{visibility:'editor',allowDownload:'editor',scheduledAt:'editor_only',collectionName:'positive_live_case_unverified'},crossPosting:'disabled'},
+ unsupported:['location','productLink','commentSettings','cloudDraftSave','crossPosting','videoChapters','hotspot']
 } as const;
 const str={type:'string',minLength:1};
 export const DOUYIN_VIDEO_FIELDS={
+ settings:{type:'object',additionalProperties:false,description:'Optional publication settings. Omitting preserves legacy platform defaults; {} explicitly uses public, allow downloads, no collection and immediate. Applied settings are verified and returned; unknown properties rejected.',properties:{visibility:{type:'string',enum:['public','friends','private']},allowDownload:{type:'boolean'},collectionName:{type:['string','null'],minLength:1,maxLength:100,description:'Exact unique existing eligible collection name; null clears. No automatic creation.'},scheduledAt:{type:['string','null'],description:'RFC3339 with explicit offset and zero seconds; 2 hours to 14 days ahead, null means immediate. Scheduled acceptance differs from public availability.'}}},
  accountId:{...str,pattern:'^[0-9]{5,30}$',description:'Verified stable Douyin account ID.'},
  workId:{type:'string',pattern:'^[a-f0-9]{64}$',description:'Optional existing work ID. Resolves retained work source and the selected account/channel content; explicit fields override that plan.'},
  videoUrl:{...str,description:'Owned resource.vyibc.com or cdn.vyibc.com HTTPS MP4. Required unless workId resolves it; conflicting workId/videoUrl is rejected.'},

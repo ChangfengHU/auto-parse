@@ -1,3 +1,4 @@
+import type {DouyinPublicationSettings} from '../workflow/douyin-settings';
 import fs from 'node:fs';
 import {channelContentsForWork,contentRecords} from './channel-content';
 import type {WorkView} from './presentation';
@@ -7,10 +8,10 @@ import {promisify} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
 
 export type VideoPlatform='douyin'|'xiaohongshu'|'wechat'|'x'|'channels'|'instagram'|'threads'|'facebook'|'tiktok';
-export type DeliveryState='reserved'|'running'|'prepared'|'draft_saved'|'published'|'failed'|'unknown';
-export type DeliveryInput={platform:VideoPlatform;accountId:string;requestId:string;sourceUrl:string;title:string;description:string;topics:string[];aiGenerated:boolean;mode:'prepare'|'draft'|'publish';cover?:{verticalUrl?:string;horizontalUrl?:string}};
+export type DeliveryState='reserved'|'running'|'prepared'|'draft_saved'|'published'|'scheduled'|'failed'|'unknown';
+export type DeliveryInput={platform:VideoPlatform;accountId:string;requestId:string;sourceUrl:string;title:string;description:string;topics:string[];aiGenerated:boolean;mode:'prepare'|'draft'|'publish';settings?:DouyinPublicationSettings;cover?:{verticalUrl?:string;horizontalUrl?:string}};
 export type ArchivedVideo={sha256:string;bytes:number;savedAt:string;storage:'local_original'};
-export type VideoDelivery={id:string;input:DeliveryInput;fingerprint:string;state:DeliveryState;createdAt:string;updatedAt:string;taskId?:string;receipt?:{workId?:string;url?:string;draftId?:string;moderation?:string;verifiedAt?:string};error?:string;archive?:ArchivedVideo;provenance?:string;sourceCreatedAt?:string};
+export type VideoDelivery={id:string;input:DeliveryInput;fingerprint:string;state:DeliveryState;createdAt:string;updatedAt:string;taskId?:string;receipt?:{workId?:string;url?:string;draftId?:string;moderation?:string;verifiedAt?:string};error?:string;archive?:ArchivedVideo;provenance?:string;sourceCreatedAt?:string;settingsVerification?:Record<string,unknown>};
 export type VideoWork={id:string;title:string;sourceUrl:string;sha256:string|null;archive:ArchivedVideo|null;createdAt:string;updatedAt:string;deliveries:VideoDelivery[];description?:string;topics?:string[];aiGenerated?:boolean;sourceIds?:string[];retentionState?:string;retentionError?:string;reportedPlatformUrl?:string;referenceEvidence?:string};
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
 const root=()=>process.env.VIDEO_WORKS_DATA_DIR||path.join(process.cwd(),'.data','video-work-center');
@@ -42,7 +43,7 @@ export function recordVideoDelivery(input:DeliveryInput,patch:Partial<Omit<Video
  try{old=JSON.parse(fs.readFileSync(file,'utf8'))}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw Error('video_work_record_unreadable')}
  if(old&&old.fingerprint!==fingerprint)throw Error('video_work_request_conflict');
  const now=new Date().toISOString();
- const state=(old?.state==='published'||old?.state==='draft_saved')?old.state:patch.state||old?.state||'reserved';
+ const state=(old?.state==='published'||old?.state==='scheduled'||old?.state==='draft_saved')?old.state:patch.state||old?.state||'reserved';
  const next:VideoDelivery={...old,...patch,id,input:clean,fingerprint,createdAt:old?.createdAt||now,updatedAt:old&&Object.keys(patch).every(k=>k==='archive')?old.updatedAt:now,state};
  if(old?.receipt)next.receipt={...old.receipt,...patch.receipt};
  atomic(file,next);const registered=registerVideoWork({...clean,origin:'publisher'},true);if(next.archive&&!registered.record.archive)updateVideoRegistration(clean.sourceUrl,{archive:next.archive,retentionState:'retained'});return next;
@@ -52,8 +53,8 @@ export function patchVideoDelivery(id:string,patch:Partial<Omit<VideoDelivery,'i
  const old=JSON.parse(fs.readFileSync(path.join(records(),id+'.json'),'utf8')) as VideoDelivery;
  return recordVideoDelivery(old.input,patch);
 }
-export function deliveryInputFromDouyin(input:{requestId:string;expectedAccountId:string;videoUrl:string;title:string;description?:string;topics?:string[];aiGenerated:boolean;prepareOnly?:boolean;cover?:{verticalUrl?:string;horizontalUrl?:string}}):DeliveryInput{
- return {platform:'douyin',accountId:input.expectedAccountId,requestId:input.requestId,sourceUrl:input.videoUrl,title:input.title,description:input.description||'',topics:input.topics||[],aiGenerated:input.aiGenerated,mode:input.prepareOnly?'prepare':'publish',...(input.cover?{cover:input.cover}:{})};
+export function deliveryInputFromDouyin(input:{requestId:string;expectedAccountId:string;videoUrl:string;title:string;description?:string;topics?:string[];aiGenerated:boolean;prepareOnly?:boolean;settings?:DouyinPublicationSettings;cover?:{verticalUrl?:string;horizontalUrl?:string}}):DeliveryInput{
+ return {platform:'douyin',accountId:input.expectedAccountId,requestId:input.requestId,sourceUrl:input.videoUrl,title:input.title,description:input.description||'',topics:input.topics||[],aiGenerated:input.aiGenerated,mode:input.prepareOnly?'prepare':'publish',...(input.cover?{cover:input.cover}:{}),...(input.settings?{settings:input.settings}:{})};
 }
 type TaskSnapshot={taskId:string;startedAt:number;status:string;publication?:{awemeId?:string;videoUrl?:string;moderation?:string};workflow:{nodes:Array<{params:Record<string,unknown>}>};steps:Array<{output?:Record<string,unknown>}>;errorMessage?:string};
 export function syncVideoWorkflowTask(task:TaskSnapshot){
@@ -62,7 +63,7 @@ export function syncVideoWorkflowTask(task:TaskSnapshot){
  const input=deliveryInputFromDouyin(raw),output=task.steps.map(s=>s.output).find(o=>o?.awemeId||o?.prepared);
  const receipt=task.publication||output;
  const uncertain=!!task.errorMessage?.includes('unknown')||fs.existsSync(path.join(process.cwd(),'.data','douyin-publications',hash(raw.expectedAccountId+':'+raw.requestId)+'.json'));
- const state:DeliveryState=receipt?.awemeId?'published':output?.prepared?'prepared':task.status==='running'?'running':task.status==='error'?(uncertain?'unknown':'failed'):task.status==='stopped'?'unknown':'unknown';
+ const state:DeliveryState=receipt?.awemeId?(raw.settings?.scheduledAt?'scheduled':'published'):output?.prepared?'prepared':task.status==='running'?'running':task.status==='error'?(uncertain?'unknown':'failed'):task.status==='stopped'?'unknown':'unknown';
  return recordVideoDelivery(input,{taskId:task.taskId,state,sourceCreatedAt:new Date(task.startedAt).toISOString(),...receipt?.awemeId?{receipt:{workId:String(receipt.awemeId),url:String(receipt.videoUrl||'https://www.douyin.com/video/'+receipt.awemeId),moderation:String(receipt.moderation||'pending_or_unknown')}}:{},...task.errorMessage?{error:/^[a-z0-9_]+$/.test(task.errorMessage)?task.errorMessage:'workflow_failed_check_original_task'}:{},provenance:'auto_parse_workflow'});
 }
 export function deliveryByTaskId(taskId:string){return allVideoDeliveries().find(d=>d.taskId===taskId)||null}

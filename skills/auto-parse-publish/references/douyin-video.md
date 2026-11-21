@@ -47,3 +47,21 @@ get_video_task.prepared.cover 回显实际应用的图片地址，coverVerificat
 2026-11-21 已通过真实正式工作流的 JPG竖封面 + PNG横封面同时应用、弹窗处理、两个独立预览、AI声明和发布按钮trial验证；没有公开发布测试片。prepare_video 仍不是云草稿保存，公开作品封面及审核结果须真实发表后另行回查。
 
 本次在编辑器观察到合集、谁可以看、保存权限、定时发布、视频章节、关联热点和同时发布选项；它们尚未接入本MCP，不得按已支持调用或通过任意点击替代受保护发布流程。
+
+## 0.4.0：发布设置与作品回读
+
+prepare_video / publish_video 新增可选 settings 对象：
+```json
+{"settings":{"visibility":"public","allowDownload":false,"collectionName":null,"scheduledAt":null}}
+```
+visibility 为 public / friends / private；allowDownload 控制允许保存；collectionName 为已有且名称唯一的合集名称，null 清空；scheduledAt 为包含明确时区、秒数为00的RFC3339时间，null 立即发布。省略settings保持旧调用语义；显式settings对象未填字段使用公开、允许保存、无合集、立即发布。其他平台同时发布被关闭，不擅自跨平台投递。
+
+定时窗口为执行时2小时以后至14天以内。服务把绝对时间转换为任务浏览器实际时区，回传timeZone、displayedTime和scheduledAt，禁止把机器本地时间当用户时区。定时仅完成编辑器设置验收，尚未做真实预约提交与到时公开验收；若创建接口受理且取得作品ID，返回scheduled，与published区分，均不代表审核通过或匿名可见。
+
+每项设置通过原生label操作并核对data-checked，不相信页面旧input的checked属性。设置失败在提交前停止；failureDiagnostic.settings提供field、stage、code。settingsVerification留存最终设置和核验结果，publicationInput也保留本次完整输入，纳入防重指纹。历史未传settings的指纹不改变。
+
+合集按已有精确名称选择，重名或不存在会停止，不自动创建、不模糊选第一项。当前账号真实测试只观察到“不选择合集”；正向加入已有合集尚未验收。collectionOptions仅为当次可见选项，complete=false，不代表全量。此限制不妨碍其他设置和无合集发表。
+
+新增get_video_publication({accountId,awemeId})，核对账号后读取最近作品页中的精确ID，返回原生封面、可见/审核状态、保存权限和上游暴露的合集信息；不存在于这一页不等于从未发布，不允许据此换ID重发。它不编辑、删除或重发，也不冒充未登录公众可见性验证。
+
+发布测试作品需用户授权；本次已获得“发布一个供检查，由用户手动删除”的授权。测试稿明确标为功能验证，不将测试结果当日常内容发表。

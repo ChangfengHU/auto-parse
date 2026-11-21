@@ -6,6 +6,8 @@ export type PublicationReceipt = {
   awemeId: string; videoUrl: string; moderation: string;
   verificationSource?: 'creation_response' | 'creator_work_list';
   verifiedAt?: string;
+  publicationMode?: 'immediate' | 'scheduled'; scheduledAt?: string;
+  settingsVerification?: Record<string,unknown>; coverVerification?: Record<string,unknown>;
 };
 export type PublicationRecord = {
   fingerprint: string; state: 'submitting' | 'published'; receipt?: PublicationReceipt;
@@ -47,7 +49,7 @@ export function creatorListReceipt(body: Record<string, unknown>, expected: {
 }
 
 export function publicationIdentity(requestId: string, accountId: string, videoUrl: string, title: string, aiGenerated = false,
-  metadata?: { description?: string; topics?: string[]; cover?: { verticalUrl?: string; horizontalUrl?: string } }) {
+  metadata?: { description?: string; topics?: string[]; cover?: { verticalUrl?: string; horizontalUrl?: string }; settings?: import('./douyin-settings').DouyinPublicationSettings }) {
   if (!/^[A-Za-z0-9_-]{8,100}$/.test(requestId) || !/^\d{5,30}$/.test(accountId) ||
       !title.trim() || [...title].length > 30) throw new Error('publication_input_invalid');
   const u = new URL(videoUrl);
@@ -59,6 +61,7 @@ export function publicationIdentity(requestId: string, accountId: string, videoU
   if (metadata?.description !== undefined || metadata?.topics !== undefined || metadata?.cover !== undefined) {
     payload.push({ description: metadata.description ?? '', topics: metadata.topics ?? [], cover: metadata.cover ?? null });
   }
+  if(metadata?.settings!==undefined)payload.push({settings:metadata.settings});
   return {
     key: createHash('sha256').update(accountId + ':' + requestId).digest('hex'),
     fingerprint: createHash('sha256').update(JSON.stringify(payload)).digest('hex'),

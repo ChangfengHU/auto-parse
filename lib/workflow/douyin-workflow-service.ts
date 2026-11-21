@@ -1,3 +1,4 @@
+import {normalizeDouyinSettings} from './douyin-settings';
 import {recordVideoDelivery,deliveryInputFromDouyin} from '../video-works/store';
 import path from 'node:path';
 import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
@@ -18,6 +19,7 @@ export async function startDouyinWorkflow(input: DouyinWorkflowInput) {
       !Array.isArray(input.topics) || input.topics.length > 5 ||
       input.topics.some(topic => typeof topic !== 'string' || !/^[\p{L}\p{N}_]{1,30}$/u.test(topic)) ||
       input.description.length > 900) throw new Error('publication_metadata_invalid');
+  if(input.settings!==undefined)normalizeDouyinSettings(input.settings);
   const identity = publicationIdentity(input.requestId, input.expectedAccountId, input.videoUrl, input.title, input.aiGenerated, input);
   if (input.cover) {
     if (!input.cover.verticalUrl && !input.cover.horizontalUrl) throw new Error('publication_cover_input_invalid');
@@ -27,7 +29,7 @@ export async function startDouyinWorkflow(input: DouyinWorkflowInput) {
   const directory = path.join(process.cwd(), '.data');
   if (!input.prepareOnly) {
     const publication = await readPublication(path.join(directory, 'douyin-publications'), identity.key, identity.fingerprint);
-    if (publication?.receipt) { recordVideoDelivery(archived.input,{state:'published',receipt:{workId:publication.receipt.awemeId,url:publication.receipt.videoUrl,moderation:publication.receipt.moderation}}); return { ok: true, status: 'published', receipt: publication.receipt, reused: true }; }
+    if (publication?.receipt) { recordVideoDelivery(archived.input,{state:publication.receipt.publicationMode==='scheduled'?'scheduled':'published',receipt:{workId:publication.receipt.awemeId,url:publication.receipt.videoUrl,moderation:publication.receipt.moderation}}); return { ok: true, status: publication.receipt.publicationMode==='scheduled'?'scheduled':'published', receipt: publication.receipt, reused: true }; }
   }
   const workflow = await getWorkflow(DOUYIN_WORKFLOW_ID);
   const types = ['material', 'navigate', 'qrcode', 'navigate', 'file_upload', 'wait_condition', 'text_input',
