@@ -4,13 +4,6 @@
 
 ## In Progress
 
-- [WORKFLOW-DOUYIN-SETTINGS-20261121] 扩展抖音MCP发布选项与真实发表验收
-  Status: In Progress
-  Updated: 2026-11-21
-  Log: dev-log/2026-11-21-douyin-settings.md
-  Next: 优先合集、可见范围、保存权限与定时，核对真实控件并通过正式MCP发布一条测试作品；用户手动删除。
-
-
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
   Log: dev-log/2026-11-05-wechat-operations.md
@@ -159,6 +152,12 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+- [WORKFLOW-DOUYIN-SETTINGS-20261121] 扩展抖音MCP发布选项与真实发表验收
+  Status: Done
+  Updated: 2026-11-21
+  Log: dev-log/2026-11-21-douyin-settings.md
+  Next: 已部署Douyin0.4.0与作品中心0.3.2，Hub插件0.9.0和完整Skill已登记，140项回归通过；仅一条真实测试创建及封面/保存权限回查。当前测试链接已不可见，删除或平台处理原因未确认；定时仅编辑器验收，合集正向实发未验收。
+
 
 - [WORKFLOW-DOUYIN-COVER-20261121] 抖音自定义封面真实上传、横竖裁切与回读
   Status: Done
