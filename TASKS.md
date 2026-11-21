@@ -4,14 +4,6 @@
 
 ## In Progress
 
-- [WORKFLOW-DOUYIN-COVER-20261121] 抖音自定义封面真实上传、横竖裁切与回读
-  Status: In Progress
-  Updated: 2026-11-21
-  Log: dev-log/2026-11-21-douyin-cover.md
-  Next: 沿用正式Supabase授权副本，核对新版封面弹窗并通过非公开prepare验收，部署并保存源码。
-
-
-
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
   Log: dev-log/2026-11-05-wechat-operations.md
@@ -160,6 +152,16 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+
+- [WORKFLOW-DOUYIN-COVER-20261121] 抖音自定义封面真实上传、横竖裁切与回读
+  Status: Done
+  Updated: 2026-11-21
+  Log: dev-log/2026-11-21-douyin-cover.md
+  Next: 已上线MCP0.3.2、Hub插件0.8.7/Skill0.8.4，线上双封面核验及111项回归通过；ChatGPT原生包同步仍由平台核验，不影响已有接口使用。
+
+
+
+
 
 - [WECHAT-COLLECTIONS-20261119] 已发表文章合集归类与近期未归类搜索
   Status: Done
