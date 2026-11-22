@@ -4,11 +4,6 @@
 
 ## In Progress
 
-- [WORKFLOW-DOUYIN-COLLECTION-LIST-20261122] 抖音 MCP 只读合集查询
-  Status: In Progress
-  Log: dev-log/2026-11-22-douyin-collection-list.md
-  Next: 核对真实账号合集入口、验证空列表并部署。
-
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
   Log: dev-log/2026-11-05-wechat-operations.md
@@ -157,6 +152,11 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+- [WORKFLOW-DOUYIN-COLLECTION-LIST-20261122] 抖音 MCP 只读合集查询
+  Status: Done
+  Log: dev-log/2026-11-22-douyin-collection-list.md
+  Next: 抖音 MCP 0.4.1 公网实测通过；Hub 插件 0.9.2。
+
 - [WORKFLOW-DOUYIN-SETTINGS-20261121] 扩展抖音MCP发布选项与真实发表验收
   Status: Done
   Updated: 2026-11-21
