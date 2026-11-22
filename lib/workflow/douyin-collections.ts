@@ -2,6 +2,7 @@ import { chromium, type Page } from 'playwright';
 import { createHash } from 'node:crypto';
 import { mkdir, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { downloadDouyinCover, validateCoverUrl } from './douyin-cover';
 import { acquireManagedBrowserActivity } from './browser-activity';
 
 const CREATOR = 'https://creator.douyin.com';
@@ -124,7 +125,7 @@ async function defaultCollectionCover(page: Page, name: string) {
   return Buffer.from(base64, 'base64');
 }
 
-export function createDouyinCollection(accountId: string, name: unknown, description: unknown, confirmed: unknown) {
+export function createDouyinCollection(accountId: string, name: unknown, description: unknown, confirmed: unknown, coverUrl?: unknown) {
   if (confirmed !== true) throw Error('douyin_collection_confirmation_required');
   if (typeof name !== 'string' || !name.trim() || name.trim().length > 20 || /[\r\n]/.test(name)) {
     throw Error('douyin_collection_title_invalid');
@@ -132,6 +133,8 @@ export function createDouyinCollection(accountId: string, name: unknown, descrip
   if (description !== undefined && (typeof description !== 'string' || description.length > 200)) {
     throw Error('douyin_collection_description_invalid');
   }
+  if (coverUrl !== undefined && typeof coverUrl !== 'string') throw Error('publication_cover_url_invalid');
+  if (typeof coverUrl === 'string') validateCoverUrl(coverUrl);
   return withCreatorPage(accountId, async page => {
     const titleText = name.trim();
     const find = (list: Awaited<ReturnType<typeof readCollections>>) => {
@@ -162,13 +165,11 @@ export function createDouyinCollection(accountId: string, name: unknown, descrip
     if (typeof description === 'string') {
       await page.getByPlaceholder('请输入合集的简介', { exact: true }).fill(description, { timeout: 8000 });
     }
-    const cover = await defaultCollectionCover(page, titleText);
-    await page.locator('input[type=file][name=upload-btn]').setInputFiles({
-      name: 'collection-cover.png', mimeType: 'image/png', buffer: cover,
-    }, { timeout: 8000 });
-    const save = page.getByRole('button', { name: '保存', exact: true });
-    await save.click({ timeout: 10000 });
-    await save.waitFor({ state: 'hidden', timeout: 10000 });
+    const customCover = typeof coverUrl === 'string' ? await downloadDouyinCover(coverUrl, COLLECTION_COVER_MAX_BYTES) : null;
+    const cover = customCover ?? {
+      name: 'collection-cover.png', mimeType: 'image/png', buffer: await defaultCollectionCover(page, titleText),
+    };
+    const coverKey = await applyCollectionCover(page, cover);
     if (await title.inputValue() !== titleText) throw Error('douyin_collection_title_not_applied');
 
     const submit = page.getByRole('button', { name: '创建', exact: true });
@@ -191,10 +192,99 @@ export function createDouyinCollection(accountId: string, name: unknown, descrip
       }).catch(() => {});
       const created = find(await readCollections(page, accountId));
       if (!created) throw Error('douyin_collection_create_unknown_check_list');
+      if (customCover) {
+        await openCollectionDetail(page, accountId, created.collectionId, titleText);
+        await waitForCollectionCoverPreview(page, key => key === coverKey);
+      }
       await unlink(intent).catch(() => {});
-      return { accountId, status: 'created', collection: created, empty: true, verified: true };
+      return { accountId, status: 'created', collection: created, empty: true, verified: true,
+        cover: customCover ? { source: 'custom', url: customCover.url, sha256: customCover.sha256, verified: true } : { source: 'generated' } };
     } catch {
       throw Error('douyin_collection_create_unknown_check_list');
+    }
+  });
+}
+
+const COLLECTION_COVER_MAX_BYTES = 5 * 1024 * 1024;
+const COLLECTION_COVER_FIELD = 'input[type=file][name=upload-btn]';
+
+function collectionDetailUrl(id: string) {
+  return CREATOR + '/creator-micro/content/collection/detail/' + id;
+}
+
+async function openCollectionDetail(page: Page, accountId: string, collectionId: string, expectedName: string) {
+  const url = collectionDetailUrl(collectionId);
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+  await verifyAccount(page, accountId);
+  if (page.url() !== url) throw Error('douyin_collection_detail_mismatch');
+  const title = page.getByPlaceholder('请输入合集的标题', { exact: true });
+  await title.waitFor({ timeout: 12000 });
+  if (await title.inputValue() !== expectedName) throw Error('douyin_collection_title_mismatch');
+}
+
+async function collectionCoverKey(page: Page) {
+  const input = page.locator(COLLECTION_COVER_FIELD);
+  if (await input.count() !== 1) throw Error('douyin_collection_cover_control_unavailable');
+  return input.evaluate(el => {
+    const images = el.parentElement?.querySelectorAll('img');
+    if (!images || images.length !== 1) return null;
+    try {
+      const url = new URL(images[0].getAttribute('src') || '', location.href);
+      if (url.protocol !== 'https:' || !/(^|\.)douyin\.com$|(^|\.)douyinpic\.com$/.test(url.hostname)) return null;
+      const asset = url.pathname.match(/^\/tos-[^/]+\/([a-zA-Z0-9_-]+)(?:~[^/]*)?$/);
+      return asset ? asset[1] : null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+async function waitForCollectionCoverPreview(page: Page, accept: (key: string) => boolean) {
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const key = await collectionCoverKey(page);
+    if (key && accept(key)) return key;
+    await page.waitForTimeout(500);
+  }
+  throw Error('douyin_collection_cover_preview_unverified');
+}
+
+export async function applyCollectionCover(page: Page, file: { name: string; mimeType: string; buffer: Buffer }) {
+  const before = await collectionCoverKey(page);
+  const field = page.locator(COLLECTION_COVER_FIELD);
+  await field.setInputFiles(file, { timeout: 8000 });
+  // The editor's main save action is already present when editing an existing collection.
+  const dialog = page.locator('.image-uploader').filter({ has: page.getByText('重新上传', { exact: true }) }).and(page.locator(':visible'));
+  const modalSave = dialog.getByRole('button', { name: '保存', exact: true });
+  await modalSave.click({ timeout: 10000 });
+  await modalSave.waitFor({ state: 'hidden', timeout: 10000 });
+  return waitForCollectionCoverPreview(page, key => key !== before);
+}
+
+export function updateDouyinCollectionCover(accountId: string, collectionId: string, coverUrl: unknown, confirmed: unknown) {
+  if (confirmed !== true) throw Error('douyin_collection_confirmation_required');
+  if (!/^\d{10,30}$/.test(collectionId)) throw Error('douyin_collection_id_invalid');
+  if (typeof coverUrl !== 'string') throw Error('publication_cover_url_invalid');
+  validateCoverUrl(coverUrl);
+  return withCreatorPage(accountId, async page => {
+    const observed = await readCollections(page, accountId);
+    const collection = observed.items.find(item => item.collectionId === collectionId);
+    if (!collection) throw Error(observed.complete ? 'douyin_collection_not_found' : 'douyin_collection_list_incomplete');
+    const image = await downloadDouyinCover(coverUrl, COLLECTION_COVER_MAX_BYTES);
+    await openCollectionDetail(page, accountId, collectionId, collection.name);
+    await waitForCollectionCoverPreview(page, () => true);
+    const key = await applyCollectionCover(page, image);
+    const submit = page.getByRole('button', { name: '保存', exact: true });
+    await submit.click({ trial: true, timeout: 8000 });
+    try {
+      await submit.click({ timeout: 8000 });
+      await page.waitForURL(u => u.pathname === '/creator-micro/content/collection/manage', {
+        timeout: 12000,
+      }).catch(() => {});
+      await openCollectionDetail(page, accountId, collectionId, collection.name);
+      await waitForCollectionCoverPreview(page, observedKey => observedKey === key);
+      return { accountId, collectionId, status: 'updated', coverUrl: image.url, coverSha256: image.sha256, verified: true };
+    } catch {
+      throw Error('douyin_collection_cover_update_unverified');
     }
   });
 }

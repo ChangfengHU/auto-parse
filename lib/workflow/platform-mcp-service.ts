@@ -1,4 +1,4 @@
-import { createDouyinCollection, listDouyinCollections } from './douyin-collections';
+import { createDouyinCollection, listDouyinCollections, updateDouyinCollectionCover } from './douyin-collections';
 import {retryDouyinVideoTask} from './douyin-request-retry';
 import {getDouyinVideoPublication} from './douyin-publication-readback';
 import {resolveDouyinPublicationInput} from './douyin-publication-input';
@@ -115,7 +115,7 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
    formats:platform==='wechat'?['news-preparation','news-web-publication','newspic-preparation','newspic-web-publication','video-draft','podcast-draft']:platform==='x'?['text','single-image']:['video','image-text'],
    wechatWebPublication:platform==='wechat'?WECHAT_WEB_CAPABILITIES:undefined,
    xPublication:platform==='x'?c.xPublication:undefined,imageTextPublication:platform==='x'||platform==='wechat'?undefined:{...(c.imageTextPublication as object),platforms:[platform==='xiaohongshu'?'xhs':'douyin']},
-   collections:platform==='douyin'?{listTool:'list_collections',createTool:'create_collection',creation:'empty_with_generated_cover',scope:'first_native_page',completeFlag:true}:undefined,
+   collections:platform==='douyin'?{listTool:'list_collections',createTool:'create_collection',creation:'empty_with_custom_or_generated_cover',updateCoverTool:'update_collection_cover',cover:{formats:['jpeg','png'],maxBytes:5242880,sourceHosts:['resource.vyibc.com','cdn.vyibc.com']},scope:'first_native_page',completeFlag:true}:undefined,
    video:platform==='douyin'?{workflowId:DOUYIN_WORKFLOW_ID,...DOUYIN_VIDEO_OPTIONS,maxBytes:536870912,topics:'caption_text',fields:DOUYIN_VIDEO_OPTIONS,workIdReuse:true,normalizedInputReturned:true,unsupportedParameters:'rejected',cover:'editor_preview_verified',receiptSources:['creation_response','creator_work_list'],publishViewport:{width:1440,height:1000,scope:'task_page'},prepareChecksPublishControl:true,failureDiagnostic:{field:'failureDiagnostic',submissionStates:['not_submitted','unknown']},archive:{owner:'auto-parse',retention:'permanent',originals:'content_hash_local_copy_on_upload',queryTools:['list_video_works','get_video_work'],prepareIsCloudDraft:false}}:undefined,
    limits:'Only platform-approved workflows; no arbitrary nodes/CRUD. User-authorized account control and explicit public publication. Unknown submissions must not be retried.'};
  }
@@ -147,7 +147,8 @@ export async function callPlatformTool(platform:PublicationPlatform,name:string,
   return {...result,publicationInput:{platform:'douyin',accountId:value.accountId,sourceUrl:value.videoUrl,title:value.title,description:value.description,topics:value.topics,cover:value.cover||null,...value.settings?{settings:value.settings}:{},aiGenerated:value.aiGenerated,mode:name==='prepare_video'?'prepare':'publish',requestId:value.requestId},inputSchemaVersion:value.settings?2:1};
  }
  if(name==='retry_video_task'){assertVideoTask(input.taskId);return retryDouyinVideoTask(String(input.taskId),input.confirmRetry===true);}
- if(name==='create_collection') return createDouyinCollection(String(input.accountId),input.name,input.description,input.confirmCreate);
+ if(name==='create_collection') return createDouyinCollection(String(input.accountId),input.name,input.description,input.confirmCreate,input.coverUrl);
+ if(name==='update_collection_cover') return updateDouyinCollectionCover(String(input.accountId),String(input.collectionId),input.coverUrl,input.confirmUpdate);
  if(name==='list_collections') return listDouyinCollections(String(input.accountId));
  if(name==='get_video_publication'){return getDouyinVideoPublication(String(input.accountId),String(input.awemeId));}
  if(name==='get_video_task'){

@@ -14,11 +14,11 @@ export function validateCoverUrl(value: string) {
       !/\.(png|jpe?g)$/i.test(url.pathname)) throw new Error('publication_cover_url_invalid');
   return url.href;
 }
-export async function downloadDouyinCover(value: string) {
+export async function downloadDouyinCover(value: string, maxBytes = 8 * 1024 * 1024) {
   const url = validateCoverUrl(value);
   const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(30000) });
   if (!response.ok) throw new Error('publication_cover_download_failed');
-  if (Number(response.headers.get('content-length')) > 8 * 1024 * 1024) throw new Error('publication_cover_too_large');
+  if (Number(response.headers.get('content-length')) > maxBytes) throw new Error('publication_cover_too_large');
   const parts: Uint8Array[] = [];
   let size = 0;
   if (!response.body) throw new Error('publication_cover_download_failed');
@@ -28,7 +28,7 @@ export async function downloadDouyinCover(value: string) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 8 * 1024 * 1024) throw new Error('publication_cover_too_large');
+      if (size > maxBytes) throw new Error('publication_cover_too_large');
       parts.push(value);
     }
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }

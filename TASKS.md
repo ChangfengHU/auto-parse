@@ -4,6 +4,12 @@
 
 ## In Progress
 
+- [WORKFLOW-DOUYIN-COLLECTION-COVER-20261122] 抖音创建和编辑合集封面 MCP
+  Status: In Progress
+  Log: dev-log/2026-11-22-douyin-collection-cover.md
+  Next: 验证真实封面编辑器并部署。
+
+
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
   Log: dev-log/2026-11-05-wechat-operations.md
