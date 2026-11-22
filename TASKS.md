@@ -4,12 +4,6 @@
 
 ## In Progress
 
-- [WORKFLOW-DOUYIN-COLLECTION-COVER-20261122] 抖音创建和编辑合集封面 MCP
-  Status: In Progress
-  Log: dev-log/2026-11-22-douyin-collection-cover.md
-  Next: 验证真实封面编辑器并部署。
-
-
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
   Log: dev-log/2026-11-05-wechat-operations.md
@@ -158,6 +152,11 @@
   Next: 审计 README、LOCAL_DEV、WORKFLOW_MANAGEMENT 和 API 文档。
 
 ## Done
+- [WORKFLOW-DOUYIN-COLLECTION-COVER-20261122] 抖音创建和编辑合集封面 MCP
+  Status: Done
+  Log: dev-log/2026-11-22-douyin-collection-cover.md
+  Next: 真实编辑器预览验证通过，MCP 0.4.3 已部署及登记。
+
 - [WORKFLOW-DOUYIN-COLLECTION-CREATE-20261122] 抖音创建空合集 MCP
   Status: Done
   Log: dev-log/2026-11-22-douyin-collection-create.md
