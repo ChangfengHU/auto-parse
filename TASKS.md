@@ -4,6 +4,11 @@
 
 ## In Progress
 
+- [WORKFLOW-DOUYIN-COLLECTION-CREATE-20261122] 抖音创建空合集 MCP
+  Status: In Progress
+  Log: dev-log/2026-11-22-douyin-collection-create.md
+  Next: 真实建合集、修复非空查询并验证线上工具。
+
 - [WECHAT-OPS-20261105] 公众号合集、播客与批量发表可靠性
   Status: In Progress
   Log: dev-log/2026-11-05-wechat-operations.md

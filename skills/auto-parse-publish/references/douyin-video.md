@@ -73,3 +73,5 @@ visibility 为 public / friends / private；allowDownload 控制允许保存；c
 ### 查询合集（MCP 0.4.1）
 
 调用 `list_collections({accountId})`，返回已核验创作者账号的后台合集首屏。用返回的精确 `name` 填入 `publish_video.settings.collectionName`。若 `complete:false`，首屏缺失不能证明合集不存在。合集加入实发仍需正向验收。
+
+创建空合集（MCP 0.4.2）：使用 create_collection，传 accountId、name、confirmCreate:true，可选 description。工具自动生成方形文字封面，同名且可核对时复用，平台将新建空合集标为待发布。若提交结果未知，先用 list_collections 对账。
