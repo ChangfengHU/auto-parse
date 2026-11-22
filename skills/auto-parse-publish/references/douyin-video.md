@@ -69,3 +69,7 @@ visibility 为 public / friends / private；allowDownload 控制允许保存；c
 浏览器忙或明确not_submitted失败可调用retry_video_task({taskId,confirmRetry:true})，服务保留原内容、账号、requestId并返回替换taskId。原taskId重复调用复用同一替换任务；已有提交意图、unknown和无法证明未提交的失败均拒绝，不开放覆写内容。等待浏览器空闲后重试，不强占其他正式任务。
 
 2026-11-21已通过MCP实际创建一条明确标记的测试作品，原生创建回执及创作者列表回读均确认：公开设置、禁止保存、自定义主封面正确。横竖封面均在提交前核验通过；未进行未登录访客播放验收。忙碌和AI声明前置失败分别安全沿用原requestId恢复，旧taskId重复重试回读同一成功任务，不重复发表。测试作品由用户手动删除，不作为长期可访问示例。
+
+### 查询合集（MCP 0.4.1）
+
+调用 `list_collections({accountId})`，返回已核验创作者账号的后台合集首屏。用返回的精确 `name` 填入 `publish_video.settings.collectionName`。若 `complete:false`，首屏缺失不能证明合集不存在。合集加入实发仍需正向验收。
